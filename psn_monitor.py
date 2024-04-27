@@ -65,7 +65,7 @@ RECEIVER_EMAIL = "your_receiver_email"
 # The name of the .log file; the tool by default will output its messages to psn_monitor_psnid.log file
 st_logfile="psn_monitor"
 
-# Value used by signal handlers increasing/decreasing the check for player activity when user is online/away/snooze; in seconds
+# Value used by signal handlers increasing/decreasing the check for player activity when user is online/busy; in seconds
 PSN_ACTIVE_CHECK_SIGNAL_VALUE=30 # 30 seconds
 
 # -------------------------
@@ -79,7 +79,6 @@ csvfieldnames = ['Date', 'Status', 'Game name']
 
 active_inactive_notification=False
 game_change_notification=False
-status_notification=False
 
 import sys
 import time
@@ -341,15 +340,6 @@ def toggle_game_change_notifications_signal_handler(sig, frame):
     print(f"* Email notifications: [game changes = {game_change_notification}]")
     print_cur_ts("Timestamp:\t\t\t")
 
-# Signal handler for SIGCONT allowing to switch all status changes notifications
-def toggle_all_status_changes_notifications_signal_handler(sig, frame):
-    global status_notification
-    status_notification=not status_notification
-    sig_name=signal.Signals(sig).name
-    print(f"* Signal {sig_name} received")
-    print(f"* Email notifications: [all status changes = " + str(status_notification) + "]")
-    print_cur_ts("Timestamp:\t\t\t")
-
 # Signal handler for SIGTRAP allowing to increase check timer for player activity when user is online by PSN_ACTIVE_CHECK_SIGNAL_VALUE seconds
 def increase_active_check_signal_handler(sig, frame):
     global PSN_ACTIVE_CHECK_INTERVAL
@@ -379,7 +369,7 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
     game_ts = 0
     game_old_ts = 0
     lastonline_ts = 0
-    status = "offline"
+    status = ""
 
     try:
         if csv_file_name:
@@ -409,6 +399,13 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
         sys.exit(1)
 
     status=psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
+
+    if not status:
+        print("Error - cannot get status for user " + psnid)
+        sys.exit(1)     
+
+    status=str(status).lower()
+
     platform=psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("platform")
     platform=str(platform).upper()
     lastonline=psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("lastOnlineDate")
@@ -426,7 +423,7 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
     status_old_ts = int(time.time())
     status_old_ts_bck = status_old_ts
 
-    if status and str(status).lower() != "offline":
+    if status and status != "offline":
         status_online_start_ts=status_old_ts
 
     psn_last_status_file = "psn_" + str(psnid) + "_last_status.json"
@@ -453,14 +450,14 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
                     last_status_ts_weekday=str(calendar.day_abbr[(datetime.fromtimestamp(last_status_ts)).weekday()])
                     print(f"* Last status read from file: {last_status_str} ({last_status_ts_weekday} {last_status_dt_str})")   
 
-                    if lastonline_ts and str(status).lower()=="offline":
+                    if lastonline_ts and status=="offline":
                         if lastonline_ts>=last_status_ts:
                             status_old_ts=lastonline_ts
                         else:
                             status_old_ts=last_status_ts
-                    if not lastonline_ts and str(status).lower() == "offline":
+                    if not lastonline_ts and status == "offline":
                         status_old_ts=last_status_ts
-                    if status and str(status).lower() != "offline" and status==last_status:
+                    if status and status != "offline" and status==last_status:
                         status_online_start_ts=last_status_ts
                         status_old_ts=last_status_ts
                 
@@ -531,6 +528,7 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
                 psnawp = PSNAWP(PSN_NPSSO)
                 psn_user = psnawp.user(online_id=psnid)
             psn_user_presence=psn_user.get_presence()
+            status=""
             status=psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
             gametitleinfolist=psn_user_presence["basicPresence"].get("gameTitleInfoList")
             gamename=""
@@ -542,7 +540,9 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
             email_sent = False
             signal.alarm(0)
             if not status:
-                raise ValueError('PSN user status is empty')                   
+                raise ValueError('PSN user status is empty') 
+            else:
+                status=str(status).lower()                  
         except TimeoutException:
             signal.alarm(0)
             print("psn_user.get_presence() timeout, retrying in", display_time(FUNCTION_TIMEOUT))
@@ -551,7 +551,7 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
             continue   
         except Exception as e:
             signal.alarm(0)
-            if status and str(status).lower() != "offline":
+            if status and status != "offline":
                 sleep_interval=PSN_ACTIVE_CHECK_INTERVAL
             else:
                 sleep_interval=PSN_CHECK_INTERVAL          
@@ -587,11 +587,11 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
             m_subject_was_since=", was " + status_old + ": " + get_range_of_dates_from_tss(int(status_old_ts),int(status_ts),short=True)
             m_subject_after=calculate_timespan(int(status_ts),int(status_old_ts),show_seconds=False)
             m_body_was_since=" (" + get_range_of_dates_from_tss(int(status_old_ts),int(status_ts),short=True) + ")"
-            if status_old=="offline" and status and str(status).lower() != "offline":
+            if status_old=="offline" and status and status != "offline":
                 print("*** User got ACTIVE ! (was offline since " + get_date_from_ts(status_old_ts) + ")")
                 status_online_start_ts=status_ts
                 act_inact_flag=True
-            if status_old and str(status_old).lower() != "offline" and status=="offline":
+            if status_old and status_old != "offline" and status=="offline":
                 if status_online_start_ts>0:
                     m_subject_after=calculate_timespan(int(status_ts),int(status_online_start_ts),show_seconds=False)
                     online_since_msg="(after " + calculate_timespan(int(status_ts),int(status_online_start_ts),show_seconds=False) + ": " + get_range_of_dates_from_tss(int(status_online_start_ts),int(status_ts),short=True) + ")"
@@ -612,7 +612,7 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
 
             m_subject="PSN user " + psnid + " is now " + str(status) + " (after " + m_subject_after + m_subject_was_since + ")"
             m_body="PSN user " + psnid + " changed status from " + str(status_old) + " to " + str(status) + "\n\nUser was " + status_old + " for " + calculate_timespan(int(status_ts),int(status_old_ts)) + m_body_was_since + user_in_game + get_cur_ts("\n\nTimestamp: ")
-            if status_notification or (active_inactive_notification and act_inact_flag):
+            if active_inactive_notification and act_inact_flag:
                 print("Sending email notification to",RECEIVER_EMAIL)
                 send_email(m_subject,m_body,"",SMTP_SSL)
             status_old_ts = status_ts
@@ -663,7 +663,7 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
             print_cur_ts("Alive check, timestamp:\t\t")
             alive_counter = 0
 
-        if status and str(status).lower() != "offline":
+        if status and status != "offline":
             time.sleep(PSN_ACTIVE_CHECK_INTERVAL)
         else:
             time.sleep(PSN_CHECK_INTERVAL)
@@ -685,7 +685,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("psn_monitor")
     parser.add_argument("psnid", nargs="?", default="misiektoja", help="User's PSN ID", type=str)
     parser.add_argument("-b", "--csv_file", help="Write all status & game changes to CSV file", type=str, metavar="CSV_FILENAME")
-    parser.add_argument("-s","--status_notification", help="Send email notification once user changes status", action='store_true')
     parser.add_argument("-g","--game_change_notification", help="Send email notification once user changes played game", action='store_true')
     parser.add_argument("-a","--active_inactive_notification", help="Send email notification once user changes status from active to inactive and vice versa", action='store_true')
     parser.add_argument("-e","--error_notification", help="Disable sending email notifications in case of errors like invalid API key", action='store_false')
@@ -730,10 +729,9 @@ if __name__ == "__main__":
 
     active_inactive_notification=args.active_inactive_notification
     game_change_notification=args.game_change_notification
-    status_notification=args.status_notification
 
     print("* PSN timers: [check interval: " + display_time(PSN_CHECK_INTERVAL) + "] [active check interval: " + display_time(PSN_ACTIVE_CHECK_INTERVAL) + "]")
-    print("* Email notifications: [all status changes = " + str(status_notification) + "] [game changes = " + str(game_change_notification) + "] [active/inactive status changes = " + str(active_inactive_notification) + "] [errors = " + str(args.error_notification) + "]")
+    print("* Email notifications: [active/inactive status changes = " + str(active_inactive_notification) + "] [game changes = " + str(game_change_notification) + "] [errors = " + str(args.error_notification) + "]")
     print("* Output logging disabled:",str(args.disable_logging))
     print("* CSV logging enabled:",str(csv_enabled))
 
@@ -743,7 +741,6 @@ if __name__ == "__main__":
 
     signal.signal(signal.SIGUSR1, toggle_active_inactive_notifications_signal_handler)
     signal.signal(signal.SIGUSR2, toggle_game_change_notifications_signal_handler)
-    signal.signal(signal.SIGCONT, toggle_all_status_changes_notifications_signal_handler)
     signal.signal(signal.SIGTRAP, increase_active_check_signal_handler)
     signal.signal(signal.SIGABRT, decrease_active_check_signal_handler)
 

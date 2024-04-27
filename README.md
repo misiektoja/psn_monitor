@@ -64,7 +64,7 @@ Log in to your [My Playstation](https://my.playstation.com/) account.
 
 In another tab, go to: [https://ca.account.sony.com/api/v1/ssocookie](https://ca.account.sony.com/api/v1/ssocookie)
 
-Copy the value of npsso code.
+Copy the value of **npsso** code.
 
 Change the **PSN_NPSSO** variable to respective value (or use **-n** parameter).
 
@@ -108,7 +108,7 @@ You can monitor multiple PSN players by spawning multiple copies of the script.
 
 It is suggested to use sth like **tmux** or **screen** to have the script running after you log out from the server.
 
-The tool automatically saves its output to *psn_monitor_psnid.log* file (can be changed in the settings or disabled with -d).
+The tool automatically saves its output to *psn_monitor_psnid.log* file (can be changed in the settings or disabled with **-d**).
 
 The tool also saves the timestamp and last status (after every change) to *psn_psnid_last_status.json* file, so the last status is available after the restart of the tool.
 
@@ -129,12 +129,6 @@ Example email:
 <p align="center">
    <img src="./assets/psn_monitor_email_notifications.png" alt="psn_monitor_email_notifications" width="70%"/>
 </p>
-
-If you want to be informed about any user status changes (online/away/offline) use  **-s** parameter:
-
-```sh
-./psn_monitor.py misiektoja -s
-```
 
 If you also want to be informed about any game changes (user started/stopped playing or changed game) then use  **-g** parameter:
 
@@ -169,7 +163,6 @@ List of supported signals:
 | ----------- | ----------- |
 | USR1 | Toggle email notifications when user gets online or offline |
 | USR2 | Toggle email notifications when user starts/stops playing or changes game |
-| CONT | Toggle email notifications when user's status changes (online/away/offline) |
 | TRAP | Increase the check timer for player activity when user is online (by 30 seconds) |
 | ABRT | Decrease check timer for player activity when user is online (by 30 seconds) |
 
