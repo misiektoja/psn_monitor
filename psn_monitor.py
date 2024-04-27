@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.0
+v1.1
 
 Script implementing real-time monitoring of Sony Playstation (PSN) players activity:
 https://github.com/misiektoja/psn_monitor/
@@ -14,7 +14,7 @@ pytz
 requests
 """
 
-VERSION=1.0
+VERSION=1.1
 
 # ---------------------------
 # CONFIGURATION SECTION START
