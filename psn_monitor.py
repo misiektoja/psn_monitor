@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.1
+v1.2
 
 Script implementing real-time monitoring of Sony Playstation (PSN) players activity:
 https://github.com/misiektoja/psn_monitor/
@@ -14,7 +14,7 @@ pytz
 requests
 """
 
-VERSION=1.1
+VERSION=1.2
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -22,14 +22,14 @@ VERSION=1.1
 
 # Login into your PSN account: https://my.playstation.com/
 # In another tab, go to: https://ca.account.sony.com/api/v1/ssocookie
-# Copy the value of npsso code below
+# Copy the value of npsso code below (or use -n parameter)
 # The refresh token that is generated from npsso should be valid for 2 months
-PSN_NPSSO = "your_psn_npsso_code"
+PSN_NPSSO="your_psn_npsso_code"
 
-# How often do we perform checks for player activity when user is offline; in seconds
+# How often do we perform checks for player activity when user is offline, you can also use -c parameter; in seconds
 PSN_CHECK_INTERVAL=150 # 2.5 min
 
-# How often do we perform checks for player activity when user is online; in seconds
+# How often do we perform checks for player activity when user is online, you can also use -k parameter; in seconds
 PSN_ACTIVE_CHECK_INTERVAL=60 # 1 min
 
 # Specify your local time zone so we convert PSN API timestamps to your time
@@ -38,9 +38,6 @@ LOCAL_TIMEZONE='Europe/Warsaw'
 # How often do we perform alive check by printing "alive check" message in the output; in seconds
 TOOL_ALIVE_INTERVAL=21600 # 6 hours
 
-# Default value for timeouts in alarm signal handler; in seconds
-FUNCTION_TIMEOUT=15
-
 # URL we check in the beginning to make sure we have internet connectivity
 CHECK_INTERNET_URL='http://www.google.com/'
 
@@ -48,22 +45,22 @@ CHECK_INTERNET_URL='http://www.google.com/'
 CHECK_INTERNET_TIMEOUT=5
 
 # SMTP settings for sending email notifications
-SMTP_HOST = "your_smtp_server_ssl"
-SMTP_PORT = 587
-SMTP_USER = "your_smtp_user"
-SMTP_PASSWORD = "your_smtp_password"
-SMTP_SSL = True
-SENDER_EMAIL = "your_sender_email"
-#SMTP_HOST = "your_smtp_server_plaintext"
-#SMTP_PORT = 25
-#SMTP_USER = "your_smtp_user"
-#SMTP_PASSWORD = "your_smtp_password"
-#SMTP_SSL = False
-#SENDER_EMAIL = "your_sender_email"
-RECEIVER_EMAIL = "your_receiver_email"
+SMTP_HOST="your_smtp_server_ssl"
+SMTP_PORT=587
+SMTP_USER="your_smtp_user"
+SMTP_PASSWORD="your_smtp_password"
+SMTP_SSL=True
+SENDER_EMAIL="your_sender_email"
+#SMTP_HOST="your_smtp_server_plaintext"
+#SMTP_PORT=25
+#SMTP_USER="your_smtp_user"
+#SMTP_PASSWORD="your_smtp_password"
+#SMTP_SSL=False
+#SENDER_EMAIL="your_sender_email"
+RECEIVER_EMAIL="your_receiver_email"
 
 # The name of the .log file; the tool by default will output its messages to psn_monitor_psnid.log file
-st_logfile="psn_monitor"
+ST_LOGFILE="psn_monitor"
 
 # Value used by signal handlers increasing/decreasing the check for player activity when user is online/busy; in seconds
 PSN_ACTIVE_CHECK_SIGNAL_VALUE=30 # 30 seconds
@@ -72,10 +69,13 @@ PSN_ACTIVE_CHECK_SIGNAL_VALUE=30 # 30 seconds
 # CONFIGURATION SECTION END
 # -------------------------
 
+# Default value for timeouts in alarm signal handler; in seconds
+FUNCTION_TIMEOUT=15
+
 TOOL_ALIVE_COUNTER=TOOL_ALIVE_INTERVAL/PSN_CHECK_INTERVAL
 
-stdout_bck = None
-csvfieldnames = ['Date', 'Status', 'Game name']
+stdout_bck=None
+csvfieldnames=['Date', 'Status', 'Game name']
 
 active_inactive_notification=False
 game_change_notification=False
@@ -97,13 +97,15 @@ from email.mime.text import MIMEText
 import argparse
 import csv
 import pytz
+import re
+import ipaddress
 from psnawp_api import PSNAWP
 
 # Logger class to output messages to stdout and log file
 class Logger(object):
     def __init__(self, filename):
-        self.terminal = sys.stdout
-        self.logfile = open(filename, "a", buffering=1)
+        self.terminal=sys.stdout
+        self.logfile=open(filename, "a", buffering=1)
 
     def write(self, message):
         self.terminal.write(message)
@@ -124,7 +126,7 @@ def timeout_handler(sig, frame):
 
 # Signal handler when user presses Ctrl+C
 def signal_handler(sig, frame):
-    sys.stdout = stdout_bck
+    sys.stdout=stdout_bck
     print('\n* You pressed Ctrl+C, tool is terminated.')
     sys.exit(0)
 
@@ -132,17 +134,17 @@ def signal_handler(sig, frame):
 def check_internet():
     url=CHECK_INTERNET_URL
     try:
-        _ = req.get(url, timeout=CHECK_INTERNET_TIMEOUT)
+        _=req.get(url, timeout=CHECK_INTERNET_TIMEOUT)
         print("OK")
         return True
     except Exception as e:
-        print("No connectivity, please check your network -", e)
+        print(f"No connectivity, please check your network - {e}")
         sys.exit(1)
     return False
 
 # Function to convert absolute value of seconds to human readable format
 def display_time(seconds, granularity=2):
-    intervals = (
+    intervals=(
         ('years', 31556952), # approximation
         ('months', 2629746), # approximation
         ('weeks', 604800),  # 60 * 60 * 24 * 7
@@ -151,23 +153,23 @@ def display_time(seconds, granularity=2):
         ('minutes', 60),
         ('seconds', 1),
     )
-    result = []
+    result=[]
 
     if seconds > 0:
         for name, count in intervals:
-            value = seconds // count
+            value=seconds // count
             if value:
                 seconds -= value * count
                 if value == 1:
-                    name = name.rstrip('s')
-                result.append("{} {}".format(value, name))
+                    name=name.rstrip('s')
+                result.append(f"{value} {name}")
         return ', '.join(result[:granularity])
     else:
         return '0 seconds'
 
 # Function to calculate time span between two timestamps in seconds
 def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True, show_minutes=True, show_seconds=True, granularity=3):
-    result = []
+    result=[]
     intervals=['years', 'months', 'weeks', 'days', 'hours', 'minutes', 'seconds']
     ts1=timestamp1
     ts2=timestamp2
@@ -192,7 +194,7 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
         ts_diff=ts1-ts2
     else:
         ts_diff=ts2-ts1
-        dt1, dt2 = dt2, dt1
+        dt1, dt2=dt2, dt1
 
     if ts_diff>0:
         date_diff=relativedelta.relativedelta(dt1, dt2)
@@ -219,43 +221,75 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
             if interval>0:
                 name=intervals[index]
                 if interval==1:
-                    name = name.rstrip('s')
-                result.append("{} {}".format(interval, name))
-#        return ', '.join(result)
+                    name=name.rstrip('s')
+                result.append(f"{interval} {name}")
         return ', '.join(result[:granularity])
     else:
         return '0 seconds'
 
 # Function to send email notification
 def send_email(subject,body,body_html,use_ssl):
+    fqdn_re=re.compile(r'(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}\.?$)')
+    email_re=re.compile(r'[^@]+@[^@]+\.[^@]+')
+
+    try:
+        is_ip=ipaddress.ip_address(str(SMTP_HOST))
+    except ValueError:
+        if not fqdn_re.search(str(SMTP_HOST)):
+            print("Error sending email - SMTP settings are incorrect (invalid IP address/FQDN in SMTP_HOST)")
+            return 1
+
+    try:
+        port=int(SMTP_PORT)
+        if not (1 <= port <= 65535):
+            raise ValueError
+    except ValueError:
+            print("Error sending email - SMTP settings are incorrect (invalid port number in SMTP_PORT)")
+            return 1
+
+    if not email_re.search(str(SENDER_EMAIL)) or not email_re.search(str(RECEIVER_EMAIL)):
+        print("Error sending email - SMTP settings are incorrect (invalid email in SENDER_EMAIL or RECEIVER_EMAIL)")
+        return 1
+
+    if not SMTP_USER or not isinstance(SMTP_USER, str) or SMTP_USER=="your_smtp_user" or not SMTP_PASSWORD or not isinstance(SMTP_PASSWORD, str) or SMTP_PASSWORD=="your_smtp_password":
+        print("Error sending email - SMTP settings are incorrect (check SMTP_USER & SMTP_PASSWORD variables)")
+        return 1
+
+    if not subject or not isinstance(subject, str):
+        print("Error sending email - SMTP settings are incorrect (subject is not a string or is empty)")
+        return 1
+
+    if not body and not body_html:
+        print("Error sending email - SMTP settings are incorrect (body and body_html cannot be empty at the same time)")
+        return 1
 
     try:     
         if use_ssl:
-            ssl_context = ssl.create_default_context()
-            smtpObj = smtplib.SMTP(SMTP_HOST,SMTP_PORT)
+            ssl_context=ssl.create_default_context()
+            smtpObj=smtplib.SMTP(SMTP_HOST,SMTP_PORT)
             smtpObj.starttls(context=ssl_context)
         else:
-            smtpObj = smtplib.SMTP(SMTP_HOST,SMTP_PORT)
+            smtpObj=smtplib.SMTP(SMTP_HOST,SMTP_PORT)
         smtpObj.login(SMTP_USER,SMTP_PASSWORD)
-        email_msg = MIMEMultipart('alternative')
-        email_msg["From"] = SENDER_EMAIL
-        email_msg["To"] = RECEIVER_EMAIL
-        email_msg["Subject"] =  Header(subject, 'utf-8')
+        email_msg=MIMEMultipart('alternative')
+        email_msg["From"]=SENDER_EMAIL
+        email_msg["To"]=RECEIVER_EMAIL
+        email_msg["Subject"]=Header(subject, 'utf-8')
 
         if body:
-            part1 = MIMEText(body, 'plain')
-            part1 = MIMEText(body.encode('utf-8'), 'plain', _charset='utf-8')
+            part1=MIMEText(body, 'plain')
+            part1=MIMEText(body.encode('utf-8'), 'plain', _charset='utf-8')
             email_msg.attach(part1)
 
         if body_html:       
-            part2 = MIMEText(body_html, 'html')
-            part2 = MIMEText(body_html.encode('utf-8'), 'html', _charset='utf-8')
+            part2=MIMEText(body_html, 'html')
+            part2=MIMEText(body_html.encode('utf-8'), 'html', _charset='utf-8')
             email_msg.attach(part2)
 
         smtpObj.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, email_msg.as_string())
         smtpObj.quit()
     except Exception as e:
-        print("Error sending email -", e)
+        print(f"Error sending email - {e}")
         return 1
     return 0
 
@@ -263,7 +297,7 @@ def send_email(subject,body,body_html,use_ssl):
 def write_csv_entry(csv_file_name, timestamp, status, gamename):
     try:
         csv_file=open(csv_file_name, 'a', newline='', buffering=1)
-        csvwriter = csv.DictWriter(csv_file, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
+        csvwriter=csv.DictWriter(csv_file, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
         csvwriter.writerow({'Date': timestamp, 'Status': status, 'Game name': gamename})
         csv_file.close()
     except Exception as e:
@@ -273,11 +307,11 @@ def write_csv_entry(csv_file_name, timestamp, status, gamename):
 def convert_utc_str_to_tz_datetime(utc_string, timezone):
     utc_string_sanitize=utc_string.split('+', 1)[0]
     utc_string_sanitize=utc_string_sanitize.split('.', 1)[0]
-    dt_utc = datetime.strptime(utc_string_sanitize, '%Y-%m-%dT%H:%M:%S')
+    dt_utc=datetime.strptime(utc_string_sanitize, '%Y-%m-%dT%H:%M:%S')
 
-    old_tz = pytz.timezone("UTC")
-    new_tz = pytz.timezone(timezone)
-    dt_new_tz = old_tz.localize(dt_utc).astimezone(new_tz)
+    old_tz=pytz.timezone("UTC")
+    new_tz=pytz.timezone(timezone)
+    dt_new_tz=old_tz.localize(dt_utc).astimezone(new_tz)
     return dt_new_tz
 
 # Function to return the timestamp in human readable format; eg. Sun, 21 Apr 2024, 15:08:45
@@ -362,19 +396,19 @@ def decrease_active_check_signal_handler(sig, frame):
 # Main function monitoring gaming activity of the specified PSN user
 def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
 
-    alive_counter = 0
-    status_ts = 0
-    status_old_ts = 0
-    status_online_start_ts = 0
-    game_ts = 0
-    game_old_ts = 0
-    lastonline_ts = 0
-    status = ""
+    alive_counter=0
+    status_ts=0
+    status_old_ts=0
+    status_online_start_ts=0
+    game_ts=0
+    game_old_ts=0
+    lastonline_ts=0
+    status=""
 
     try:
         if csv_file_name:
             csv_file=open(csv_file_name, 'a', newline='', buffering=1)
-            csvwriter = csv.DictWriter(csv_file, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
+            csvwriter=csv.DictWriter(csv_file, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
             if not csv_exists:
                 csvwriter.writeheader()
             csv_file.close()
@@ -382,12 +416,12 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
         print("* Error -", e)
  
     try:
-        psnawp = PSNAWP(PSN_NPSSO)
-        psn_user = psnawp.user(online_id=psnid)
-        accountid = psn_user.account_id
-        profile = psn_user.profile()
-        aboutme = profile.get("aboutMe")
-        isplus = profile.get("isPlus")
+        psnawp=PSNAWP(PSN_NPSSO)
+        psn_user=psnawp.user(online_id=psnid)
+        accountid=psn_user.account_id
+        profile=psn_user.profile()
+        aboutme=profile.get("aboutMe")
+        isplus=profile.get("isPlus")
     except Exception as e:
         print("Error -", e)
         sys.exit(1)
@@ -420,21 +454,21 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
         launchplatform=gametitleinfolist[0].get("launchPlatform")
         launchplatform=str(launchplatform).upper()
 
-    status_old_ts = int(time.time())
-    status_old_ts_bck = status_old_ts
+    status_old_ts=int(time.time())
+    status_old_ts_bck=status_old_ts
 
     if status and status != "offline":
         status_online_start_ts=status_old_ts
 
-    psn_last_status_file = "psn_" + str(psnid) + "_last_status.json"
-    last_status_read = []
-    last_status_ts = 0
-    last_status = ""
+    psn_last_status_file="psn_" + str(psnid) + "_last_status.json"
+    last_status_read=[]
+    last_status_ts=0
+    last_status=""
 
     try:
         if os.path.isfile(psn_last_status_file):
             with open(psn_last_status_file, 'r') as f:
-                last_status_read = json.load(f)
+                last_status_read=json.load(f)
             if last_status_read:
                 last_status_ts=last_status_read[0]
                 last_status=last_status_read[1]
@@ -490,11 +524,11 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
 
     if gamename:
         print("\nUser is currently in-game:\t" + str(gamename) + " (" + str(launchplatform) + ")")
-        game_old_ts = int(time.time())
+        game_old_ts=int(time.time())
 
     if last_status_ts==0:
         if lastonline_ts and status=="offline":
-            status_old_ts = lastonline_ts
+            status_old_ts=lastonline_ts
         last_status_to_save=[]
         last_status_to_save.append(status_old_ts)
         last_status_to_save.append(status)
@@ -525,8 +559,8 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
         signal.alarm(FUNCTION_TIMEOUT)        
         try:
             if alive_counter >= (TOOL_ALIVE_COUNTER-1) and (status=="offline" or not status):
-                psnawp = PSNAWP(PSN_NPSSO)
-                psn_user = psnawp.user(online_id=psnid)
+                psnawp=PSNAWP(PSN_NPSSO)
+                psn_user=psnawp.user(online_id=psnid)
             psn_user_presence=psn_user.get_presence()
             status=""
             status=psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
@@ -537,7 +571,7 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
                 gamename=gametitleinfolist[0].get("titleName")
                 launchplatform=gametitleinfolist[0].get("launchPlatform")
                 launchplatform=str(launchplatform).upper()
-            email_sent = False
+            email_sent=False
             signal.alarm(0)
             if not status:
                 raise ValueError('PSN user status is empty') 
@@ -568,12 +602,12 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
             time.sleep(sleep_interval)
             continue
 
-        change = False
+        change=False
         act_inact_flag=False
 
         # Player status changed
         if status != status_old:
-            status_ts = int(time.time())
+            status_ts=int(time.time())
 
             last_status_to_save=[]
             last_status_to_save.append(status_ts)
@@ -615,11 +649,11 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
             if active_inactive_notification and act_inact_flag:
                 print("Sending email notification to",RECEIVER_EMAIL)
                 send_email(m_subject,m_body,"",SMTP_SSL)
-            status_old_ts = status_ts
+            status_old_ts=status_ts
                    
         # Player started/stopped/changed the game        
         if gamename != gamename_old: 
-            game_ts = int(time.time())
+            game_ts=int(time.time())
 
             if gamename_old and gamename:
                 print(f"PSN user " + psnid + " changed game from '" + gamename_old + "' to '" + gamename + "' (" + str(launchplatform) + ") after " + calculate_timespan(int(game_ts),int(game_old_ts)))
@@ -642,10 +676,10 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
                 print("Sending email notification to",RECEIVER_EMAIL)
                 send_email(m_subject,m_body,"",SMTP_SSL)
 
-            game_old_ts = game_ts
+            game_old_ts=game_ts
 
         if change:
-            alive_counter = 0
+            alive_counter=0
 
             try: 
                 if csv_file_name:
@@ -661,7 +695,7 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
 
         if alive_counter >= TOOL_ALIVE_COUNTER and (status=="offline" or not status):
             print_cur_ts("Alive check, timestamp:\t\t")
-            alive_counter = 0
+            alive_counter=0
 
         if status and status != "offline":
             time.sleep(PSN_ACTIVE_CHECK_INTERVAL)
@@ -670,7 +704,7 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
 
 if __name__ == "__main__":
 
-    stdout_bck = sys.stdout
+    stdout_bck=sys.stdout
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -682,7 +716,7 @@ if __name__ == "__main__":
 
     print("PSN Monitoring Tool",VERSION,"\n")
 
-    parser = argparse.ArgumentParser("psn_monitor")
+    parser=argparse.ArgumentParser("psn_monitor")
     parser.add_argument("psnid", nargs="?", default="misiektoja", help="User's PSN ID", type=str)
     parser.add_argument("-b", "--csv_file", help="Write all status & game changes to CSV file", type=str, metavar="CSV_FILENAME")
     parser.add_argument("-g","--game_change_notification", help="Send email notification once user changes played game", action='store_true')
@@ -692,7 +726,7 @@ if __name__ == "__main__":
     parser.add_argument("-k", "--active_check_interval", help="Time between monitoring checks if user is not offline, in seconds", type=int)
     parser.add_argument("-d", "--disable_logging", help="Disable logging to file 'psn_monitor_user.log' file", action='store_true')
     parser.add_argument("-n", "--npsso_key", help="Specify Playstation NPSSO key if not defined within the script", type=str)
-    args = parser.parse_args()
+    args=parser.parse_args()
 
     sys.stdout.write("* Checking internet connectivity ... ")
     sys.stdout.flush()
@@ -724,8 +758,8 @@ if __name__ == "__main__":
         csv_exists=False
 
     if not args.disable_logging:
-        st_logfile = st_logfile + "_" + str(args.psnid) + ".log"
-        sys.stdout = Logger(st_logfile)
+        ST_LOGFILE=ST_LOGFILE + "_" + str(args.psnid) + ".log"
+        sys.stdout=Logger(ST_LOGFILE)
 
     active_inactive_notification=args.active_inactive_notification
     game_change_notification=args.game_change_notification
@@ -735,7 +769,7 @@ if __name__ == "__main__":
     print("* Output logging disabled:",str(args.disable_logging))
     print("* CSV logging enabled:",str(csv_enabled))
 
-    out = "\nMonitoring user with PSN ID %s" % args.psnid
+    out="\nMonitoring user with PSN ID %s" % args.psnid
     print(out)
     print("-" * len(out))
 
@@ -746,6 +780,6 @@ if __name__ == "__main__":
 
     psn_monitor_user(args.psnid,args.error_notification,args.csv_file,csv_exists)
 
-    sys.stdout = stdout_bck
+    sys.stdout=stdout_bck
     sys.exit(0)
 
