@@ -11,7 +11,7 @@ psn_monitor is a Python script which allows for real-time monitoring of Sony Pla
 - Possibility to control the running copy of the script via signals
 
 <p align="center">
-   <img src="./assets/psn_monitor.png" alt="psn_monitor_screenshot" width="80%"/>
+   <img src="./assets/psn_monitor.png" alt="psn_monitor_screenshot" width="90%"/>
 </p>
 
 ## Change Log
@@ -130,7 +130,7 @@ Make sure you defined your SMTP settings earlier (see [SMTP settings](#smtp-sett
 Example email:
 
 <p align="center">
-   <img src="./assets/psn_monitor_email_notifications.png" alt="psn_monitor_email_notifications" width="70%"/>
+   <img src="./assets/psn_monitor_email_notifications.png" alt="psn_monitor_email_notifications" width="80%"/>
 </p>
 
 If you want to be informed when user starts, stops or changes the played game then use **-g** parameter:
