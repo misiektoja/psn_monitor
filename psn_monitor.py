@@ -468,45 +468,47 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
     last_status_ts=0
     last_status=""
 
-    try:
-        if os.path.isfile(psn_last_status_file):
+    if os.path.isfile(psn_last_status_file):
+        try:
             with open(psn_last_status_file, 'r') as f:
                 last_status_read=json.load(f)
-            if last_status_read:
-                last_status_ts=last_status_read[0]
-                last_status=last_status_read[1]
-                psn_last_status_file_mdate_dt=datetime.fromtimestamp(int(os.path.getmtime(psn_last_status_file)))
-                psn_last_status_file_mdate=psn_last_status_file_mdate_dt.strftime("%d %b %Y, %H:%M:%S")
-                psn_last_status_file_mdate_weekday=str(calendar.day_abbr[(psn_last_status_file_mdate_dt).weekday()])
+        except Exception as e:
+            print(f"* Cannot load last status from '{psn_last_status_file}' file - {e}")
+        if last_status_read:
+            last_status_ts=last_status_read[0]
+            last_status=last_status_read[1]
+            psn_last_status_file_mdate_dt=datetime.fromtimestamp(int(os.path.getmtime(psn_last_status_file)))
+            psn_last_status_file_mdate=psn_last_status_file_mdate_dt.strftime("%d %b %Y, %H:%M:%S")
+            psn_last_status_file_mdate_weekday=str(calendar.day_abbr[(psn_last_status_file_mdate_dt).weekday()])
 
-                print(f"* Last status loaded from file '{psn_last_status_file}' ({psn_last_status_file_mdate_weekday} {psn_last_status_file_mdate})")
+            print(f"* Last status loaded from file '{psn_last_status_file}' ({psn_last_status_file_mdate_weekday} {psn_last_status_file_mdate})")
 
-                if last_status_ts>0:
-                    last_status_dt_str=datetime.fromtimestamp(last_status_ts).strftime("%d %b %Y, %H:%M:%S")
-                    last_status_str=str(last_status.upper())
-                    last_status_ts_weekday=str(calendar.day_abbr[(datetime.fromtimestamp(last_status_ts)).weekday()])
-                    print(f"* Last status read from file: {last_status_str} ({last_status_ts_weekday} {last_status_dt_str})")   
+            if last_status_ts>0:
+                last_status_dt_str=datetime.fromtimestamp(last_status_ts).strftime("%d %b %Y, %H:%M:%S")
+                last_status_str=str(last_status.upper())
+                last_status_ts_weekday=str(calendar.day_abbr[(datetime.fromtimestamp(last_status_ts)).weekday()])
+                print(f"* Last status read from file: {last_status_str} ({last_status_ts_weekday} {last_status_dt_str})")   
 
-                    if lastonline_ts and status=="offline":
-                        if lastonline_ts>=last_status_ts:
-                            status_old_ts=lastonline_ts
-                        else:
-                            status_old_ts=last_status_ts
-                    if not lastonline_ts and status == "offline":
+                if lastonline_ts and status=="offline":
+                    if lastonline_ts>=last_status_ts:
+                        status_old_ts=lastonline_ts
+                    else:
                         status_old_ts=last_status_ts
-                    if status and status != "offline" and status==last_status:
-                        status_online_start_ts=last_status_ts
-                        status_old_ts=last_status_ts
-                
-                if last_status_ts>0 and status!=last_status:
-                    last_status_to_save=[]
-                    last_status_to_save.append(status_old_ts)
-                    last_status_to_save.append(status)
-                    with open(psn_last_status_file, 'w') as f:
-                        json.dump(last_status_to_save, f, indent=2)                    
-
-    except Exception as e:
-        print("Error -", e)
+                if not lastonline_ts and status == "offline":
+                    status_old_ts=last_status_ts
+                if status and status != "offline" and status==last_status:
+                    status_online_start_ts=last_status_ts
+                    status_old_ts=last_status_ts
+            
+    if last_status_ts>0 and status!=last_status:
+        last_status_to_save=[]
+        last_status_to_save.append(status_old_ts)
+        last_status_to_save.append(status)
+        try:
+            with open(psn_last_status_file, 'w') as f:
+                json.dump(last_status_to_save, f, indent=2)
+        except Exception as e:
+            print(f"* Cannot save last status to '{psn_last_status_file}' file - {e}")
 
     try: 
         if csv_file_name and (status!=last_status):
@@ -535,8 +537,11 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
         last_status_to_save=[]
         last_status_to_save.append(status_old_ts)
         last_status_to_save.append(status)
-        with open(psn_last_status_file, 'w') as f:
-            json.dump(last_status_to_save, f, indent=2)   
+        try:
+            with open(psn_last_status_file, 'w') as f:
+                json.dump(last_status_to_save, f, indent=2)
+        except Exception as e:
+            print(f"* Cannot save last status to '{psn_last_status_file}' file - {e}")
 
     if status_old_ts!=status_old_ts_bck:
         if status=="offline":
@@ -616,8 +621,11 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
             last_status_to_save=[]
             last_status_to_save.append(status_ts)
             last_status_to_save.append(status)
-            with open(psn_last_status_file, 'w') as f:
-                json.dump(last_status_to_save, f, indent=2)                   
+            try:
+                with open(psn_last_status_file, 'w') as f:
+                    json.dump(last_status_to_save, f, indent=2)
+            except Exception as e:
+                print(f"* Cannot save last status to '{psn_last_status_file}' file - {e}")
 
             print(f"PSN user {psnid} changed status from {status_old} to {status}")
             print(f"User was {status_old} for {calculate_timespan(int(status_ts),int(status_old_ts))} ({get_range_of_dates_from_tss(int(status_old_ts),int(status_ts),short=True)})")
