@@ -73,6 +73,18 @@ Change the **PSN_NPSSO** variable to respective value (or use **-n** parameter).
 
 The refresh token that is generated from npsso should be valid for 2 months. You will be informed by the tool once the token expires (proper message on the console and in email if errors notifications have not been disabled via **-e** parameter).
 
+### Timezone
+
+The tool will try to automatically detect your local time zone so it can convert PSN API timestamps to your time. 
+
+In case you want to specify your timezone manually then change **LOCAL_TIMEZONE** variable from *'Auto'* to specific location, e.g.
+
+```
+LOCAL_TIMEZONE='Europe/Warsaw'
+```
+
+In such case it is not needed to install *tzlocal* pip module.
+
 ### SMTP settings
 
 If you want to use email notifications functionality you need to change the SMTP settings (host, port, user, password, sender, recipient). If you leave the default settings then no notifications will be sent.
@@ -164,8 +176,8 @@ List of supported signals:
 
 | Signal | Description |
 | ----------- | ----------- |
-| USR1 | Toggle email notifications when user gets online or offline |
-| USR2 | Toggle email notifications when user starts/stops playing or changes game |
+| USR1 | Toggle email notifications when user gets online or offline (-a) |
+| USR2 | Toggle email notifications when user starts/stops/changes the game (-g) |
 | TRAP | Increase the check timer for player activity when user is online (by 30 seconds) |
 | ABRT | Decrease check timer for player activity when user is online (by 30 seconds) |
 
