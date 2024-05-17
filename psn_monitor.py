@@ -97,6 +97,7 @@ from email.mime.text import MIMEText
 import argparse
 import csv
 import pytz
+import platform
 import re
 import ipaddress
 from psnawp_api import PSNAWP
@@ -105,7 +106,7 @@ from psnawp_api import PSNAWP
 class Logger(object):
     def __init__(self, filename):
         self.terminal=sys.stdout
-        self.logfile=open(filename, "a", buffering=1)
+        self.logfile=open(filename, "a", buffering=1, encoding="utf-8")
 
     def write(self, message):
         self.terminal.write(message)
@@ -296,7 +297,7 @@ def send_email(subject,body,body_html,use_ssl):
 # Function to write CSV entry
 def write_csv_entry(csv_file_name, timestamp, status, gamename):
     try:
-        csv_file=open(csv_file_name, 'a', newline='', buffering=1)
+        csv_file=open(csv_file_name, 'a', newline='', buffering=1, encoding="utf-8")
         csvwriter=csv.DictWriter(csv_file, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
         csvwriter.writerow({'Date': timestamp, 'Status': status, 'Game name': gamename})
         csv_file.close()
@@ -410,7 +411,7 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
 
     try:
         if csv_file_name:
-            csv_file=open(csv_file_name, 'a', newline='', buffering=1)
+            csv_file=open(csv_file_name, 'a', newline='', buffering=1, encoding="utf-8")
             csvwriter=csv.DictWriter(csv_file, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
             if not csv_exists:
                 csvwriter.writeheader()
@@ -470,7 +471,7 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
 
     if os.path.isfile(psn_last_status_file):
         try:
-            with open(psn_last_status_file, 'r') as f:
+            with open(psn_last_status_file, 'r', encoding="utf-8") as f:
                 last_status_read=json.load(f)
         except Exception as e:
             print(f"* Cannot load last status from '{psn_last_status_file}' file - {e}")
@@ -505,7 +506,7 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
         last_status_to_save.append(status_old_ts)
         last_status_to_save.append(status)
         try:
-            with open(psn_last_status_file, 'w') as f:
+            with open(psn_last_status_file, 'w', encoding="utf-8") as f:
                 json.dump(last_status_to_save, f, indent=2)
         except Exception as e:
             print(f"* Cannot save last status to '{psn_last_status_file}' file - {e}")
@@ -538,7 +539,7 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
         last_status_to_save.append(status_old_ts)
         last_status_to_save.append(status)
         try:
-            with open(psn_last_status_file, 'w') as f:
+            with open(psn_last_status_file, 'w', encoding="utf-8") as f:
                 json.dump(last_status_to_save, f, indent=2)
         except Exception as e:
             print(f"* Cannot save last status to '{psn_last_status_file}' file - {e}")
@@ -622,7 +623,7 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
             last_status_to_save.append(status_ts)
             last_status_to_save.append(status)
             try:
-                with open(psn_last_status_file, 'w') as f:
+                with open(psn_last_status_file, 'w', encoding="utf-8") as f:
                     json.dump(last_status_to_save, f, indent=2)
             except Exception as e:
                 print(f"* Cannot save last status to '{psn_last_status_file}' file - {e}")
@@ -722,7 +723,10 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, signal_handler)
 
     try:
-        os.system('clear')
+        if platform.system() == 'Windows':
+            os.system('cls')
+        else:
+            os.system('clear')
     except:
         print("* Cannot clear the screen contents")
 
@@ -771,7 +775,7 @@ if __name__ == "__main__":
         csv_enabled=True
         csv_exists=os.path.isfile(args.csv_file)
         try:
-            csv_file=open(args.csv_file, 'a', newline='', buffering=1)
+            csv_file=open(args.csv_file, 'a', newline='', buffering=1, encoding="utf-8")
         except Exception as e:
             print(f"* Error: CSV file cannot be opened for writing - {e}")
             sys.exit(1)
@@ -800,10 +804,12 @@ if __name__ == "__main__":
     print(out)
     print("-" * len(out))
 
-    signal.signal(signal.SIGUSR1, toggle_active_inactive_notifications_signal_handler)
-    signal.signal(signal.SIGUSR2, toggle_game_change_notifications_signal_handler)
-    signal.signal(signal.SIGTRAP, increase_active_check_signal_handler)
-    signal.signal(signal.SIGABRT, decrease_active_check_signal_handler)
+    # We define signal handlers only for Linux, Unix & MacOS since Windows has limited number of signals supported
+    if platform.system() != 'Windows':
+        signal.signal(signal.SIGUSR1, toggle_active_inactive_notifications_signal_handler)
+        signal.signal(signal.SIGUSR2, toggle_game_change_notifications_signal_handler)
+        signal.signal(signal.SIGTRAP, increase_active_check_signal_handler)
+        signal.signal(signal.SIGABRT, decrease_active_check_signal_handler)
 
     psn_monitor_user(args.PSN_ID,args.error_notification,args.csv_file,csv_exists)
 
