@@ -4,10 +4,10 @@ psn_monitor is a Python script which allows for real-time monitoring of Sony Pla
 
 ## Features
 
-- Real-time monitoring of Playstation users gaming activity (including detection when user gets online/offline or played games)
+- Real-time tracking of Playstation users gaming activity (including detection when user gets online/offline or played games)
 - Basics statistics for user activity (how long in different states, how long played game etc.)
 - Email notifications for different events (player gets online/offline, starts/finishes/changes game, errors)
-- Saving all gaming activity with timestamps to the CSV file
+- Saving all user activity with timestamps to the CSV file
 - Possibility to control the running copy of the script via signals
 
 <p align="center">
@@ -26,18 +26,21 @@ I'm not a dev, project done as a hobby. Code is ugly and as-is, but it works (at
 
 The script requires Python 3.x.
 
-It uses [PSNAWP](https://github.com/isFakeAccount/psnawp) library, also requests, pytz and python-dateutil.
+It uses [PSNAWP](https://github.com/isFakeAccount/psnawp) library, also requests, pytz, tzlocal and python-dateutil.
 
-It has been tested succesfully on Linux (Raspberry Pi Bullseye & Bookworm based on Debian) and Mac OS (Ventura & Sonoma). 
+It has been tested succesfully on:
+- macOS (Ventura & Sonoma)
+- Linux (Raspberry Pi Bullseye & Bookworm based on Debian, Ubuntu 24)
+- Windows (10 & 11)
 
-Should work on any other Linux OS and Windows with Python.
+It should work on other versions of macOS, Linux, Unix and Windows as well.
 
 ## Installation
 
 Install the required Python packages:
 
 ```sh
-python3 -m pip install requests python-dateutil pytz PSNAWP
+python3 -m pip install requests python-dateutil pytz tzlocal PSNAWP
 ```
 
 Or from requirements.txt:
@@ -48,7 +51,7 @@ pip3 install -r requirements.txt
 
 Copy the *[psn_monitor.py](psn_monitor.py)* file to the desired location. 
 
-You might want to add executable rights if on Linux or MacOS:
+You might want to add executable rights if on Linux/Unix/macOS:
 
 ```sh
 chmod a+x psn_monitor.py
@@ -68,11 +71,11 @@ Copy the value of **npsso** code.
 
 Change the **PSN_NPSSO** variable to respective value (or use **-n** parameter).
 
-The refresh token that is generated from npsso should be valid for 2 months. You will be informed by the tool once the token expires (proper message on the console and in email if errors notifications have not been disabled).
+The refresh token that is generated from npsso should be valid for 2 months. You will be informed by the tool once the token expires (proper message on the console and in email if errors notifications have not been disabled via **-e** parameter).
 
 ### SMTP settings
 
-If you want to use email notifications functionality you need to change the SMTP settings (host, port, user, password, sender, recipient).
+If you want to use email notifications functionality you need to change the SMTP settings (host, port, user, password, sender, recipient). If you leave the default settings then no notifications will be sent.
 
 ### Other settings
 
@@ -106,11 +109,11 @@ The tool will run infinitely and monitor the player until the script is interrup
 
 You can monitor multiple PSN players by spawning multiple copies of the script. 
 
-It is suggested to use sth like **tmux** or **screen** to have the script running after you log out from the server.
+It is suggested to use sth like **tmux** or **screen** to have the script running after you log out from the server (unless you are running it on your desktop).
 
-The tool automatically saves its output to *psn_monitor_psnid.log* file (can be changed in the settings or disabled with **-d**).
+The tool automatically saves its output to *psn_monitor_{psnid}.log* file (can be changed in the settings or disabled with **-d** parameter).
 
-The tool also saves the timestamp and last status (after every change) to *psn_psnid_last_status.json* file, so the last status is available after the restart of the tool.
+The tool also saves the timestamp and last status (after every change) to *psn_{psnid}_last_status.json* file, so the last status is available after the restart of the tool.
 
 ## How to use other features
 
@@ -130,7 +133,7 @@ Example email:
    <img src="./assets/psn_monitor_email_notifications.png" alt="psn_monitor_email_notifications" width="70%"/>
 </p>
 
-If you also want to be informed about any game changes (user started/stopped playing or changed game) then use  **-g** parameter:
+If you want to be informed when user starts, stops or changes the played game then use **-g** parameter:
 
 ```sh
 ./psn_monitor.py misiektoja -g
@@ -138,7 +141,7 @@ If you also want to be informed about any game changes (user started/stopped pla
 
 ### Saving gaming activity to the CSV file
 
-If you want to save the gaming activity of the PSN user, use **-b** parameter with the name of the file (it will be automatically created if it does not exist):
+If you want to save all reported activities of the PSN user, use **-b** parameter with the name of the file (it will be automatically created if it does not exist):
 
 ```sh
 ./psn_monitor.py misiektoja -b psn_misiektoja.csv
@@ -146,13 +149,13 @@ If you want to save the gaming activity of the PSN user, use **-b** parameter wi
 
 ### Check intervals
 
-If you want to change the check interval when the user is online to 30 seconds (**-k**) and when is offline to 2 mins - 120 seconds (**-c**):
+If you want to change the check interval when the user is online to 30 seconds use **-k** parameter and when the user is offline to 2 mins (120 seconds) use **-c** parameter:
 
 ```sh
 ./psn_monitor.py misiektoja -k 30 -c 120
 ```
 
-### Controlling the script via signals
+### Controlling the script via signals (only macOS/Linux/Unix)
 
 
 The tool has several signal handlers implemented which allow to change behaviour of the tool without a need to restart it with new parameters.
@@ -174,11 +177,13 @@ I personally use **pkill** tool, so for example to toggle email notifications wh
 pkill -f -USR1 "python3 ./psn_monitor.py misiektoja"
 ```
 
+As Windows supports limited number of signals, this functionality is available only on Linux/Unix/macOS.
+
 ### Other
 
 Check other supported parameters using **-h**.
 
-You can of course combine all the parameters mentioned earlier together.
+You can combine all the parameters mentioned earlier.
 
 ## Colouring log output with GRC
 
