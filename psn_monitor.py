@@ -533,7 +533,10 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
         print(f"\nAbout me:\t\t\t{aboutme}")
 
     if status!="offline" and game_name:
-        print(f"\nUser is currently in-game:\t{game_name} ({launchplatform})")
+        platform_str=""
+        if launchplatform:
+            platform_str=f" ({launchplatform})"        
+        print(f"\nUser is currently in-game:\t{game_name}{platform_str}")
         game_ts_old=int(time.time())
 
     if last_status_ts==0:
@@ -657,8 +660,11 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
 
             user_in_game=""
             if status!="offline" and game_name:
-                print(f"User is currently in-game: {game_name} ({launchplatform})")
-                user_in_game=f"\n\nUser is currently in-game: {game_name} ({launchplatform})"
+                platform_str=""
+                if launchplatform:
+                    platform_str=f" ({launchplatform})"                
+                print(f"User is currently in-game: {game_name}{platform_str}")
+                user_in_game=f"\n\nUser is currently in-game: {game_name}{platform_str}"
 
             change=True
 
