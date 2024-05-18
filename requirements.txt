@@ -1,4 +1,5 @@
 PSNAWP
 python_dateutil
 pytz
+tzlocal
 Requests
