@@ -2,6 +2,27 @@
 
 This is a high-level summary of the most important changes. 
 
+# Changes in 1.2 (18 May 2024)
+
+**Features and Improvements**:
+
+- Improvements for running the code in Python under Windows
+- Automatic detection of local timezone if you set LOCAL_TIMEZONE variable to 'Auto' (it is default now); requires tzlocal pip module
+- Information about time zone is displayed in the start screen now
+- Better checking for wrong command line arguments
+- Email sending function send_email() has been rewritten to detect invalid SMTP settings
+- Strings have been converted to f-strings for better code visibility
+- Info about CSV file name in the start screen
+- In case of getting an exception in main loop we will send the error email notification only once (until the issue is resolved)
+- Exception handling for function converting the timezone
+- Last seen info has been removed as it is redundant and already covered by other part of the code (last time user was available)
+- Platform info is put into subject of game change emails now
+
+**Bugfixes**:
+
+- Handling situations when JSON file storing info about the last status gets corrupted or when there are issuing saving the state
+- Handling situations when platform is returned empty
+
 # Changes in 1.1 (27 Apr 2024)
 
 **Features and Improvements**:
