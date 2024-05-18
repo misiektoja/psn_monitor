@@ -2,7 +2,7 @@
 
 This is a high-level summary of the most important changes. 
 
-# Changes in 1.2 (18 May 2024)
+# Changes in 1.2 (19 May 2024)
 
 **Features and Improvements**:
 
@@ -17,6 +17,7 @@ This is a high-level summary of the most important changes.
 - Exception handling for function converting the timezone
 - Last seen info has been removed as it is redundant and already covered by other part of the code (last time user was available)
 - Platform info is put into subject of game change emails now
+- pep8 style convention corrections
 
 **Bugfixes**:
 
