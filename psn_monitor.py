@@ -524,7 +524,8 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
 
     print(f"\nPlaystation ID:\t\t\t{psnid}")
     print(f"PSN account ID:\t\t\t{accountid}")
-    print(f"Status:\t\t\t\t{str(status).upper()}")
+
+    print(f"\nStatus:\t\t\t\t{str(status).upper()}")
     if platform:
         print(f"Platform:\t\t\t{platform}")
     print(f"PS+ user:\t\t\t{isplus}")
