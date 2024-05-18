@@ -569,9 +569,10 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
 
     # Main loop
     while True:
-        # Sometimes PSN network functions halt, so we use alarm signal functionality to kill it inevitably
-        signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(FUNCTION_TIMEOUT)        
+        # Sometimes PSN network functions halt, so we use alarm signal functionality to kill it inevitably, not available on Windows
+        if platform.system() != 'Windows':
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(FUNCTION_TIMEOUT)
         try:
             if alive_counter >= (TOOL_ALIVE_COUNTER-1) and (status=="offline" or not status):
                 psnawp=PSNAWP(PSN_NPSSO)
@@ -587,19 +588,22 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
                 launchplatform=gametitleinfolist[0].get("launchPlatform")
                 launchplatform=str(launchplatform).upper()
             email_sent=False
-            signal.alarm(0)
+            if platform.system() != 'Windows':
+                signal.alarm(0)
             if not status:
                 raise ValueError('PSN user status is empty') 
             else:
                 status=str(status).lower()                  
         except TimeoutException:
-            signal.alarm(0)
+            if platform.system() != 'Windows':
+                signal.alarm(0)
             print(f"psn_user.get_presence() timeout, retrying in {display_time(FUNCTION_TIMEOUT)}")
             print_cur_ts("Timestamp:\t\t\t")
             time.sleep(FUNCTION_TIMEOUT)           
             continue   
         except Exception as e:
-            signal.alarm(0)
+            if platform.system() != 'Windows':
+                signal.alarm(0)
             if status and status != "offline":
                 sleep_interval=PSN_ACTIVE_CHECK_INTERVAL
             else:
