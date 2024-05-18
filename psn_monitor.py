@@ -450,8 +450,8 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
 
     status=str(status).lower()
 
-    platform=psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("platform")
-    platform=str(platform).upper()
+    psn_platform=psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("platform")
+    psn_platform=str(psn_platform).upper()
     lastonline=psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("lastOnlineDate")
     lastonline_dt=convert_utc_str_to_tz_datetime(str(lastonline),LOCAL_TIMEZONE)
     lastonline_ts=int(lastonline_dt.timestamp())
@@ -526,18 +526,18 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
     print(f"PSN account ID:\t\t\t{accountid}")
 
     print(f"\nStatus:\t\t\t\t{str(status).upper()}")
-    if platform:
-        print(f"Platform:\t\t\t{platform}")
+    if psn_platform:
+        print(f"Platform:\t\t\t{psn_platform}")
     print(f"PS+ user:\t\t\t{isplus}")
 
     if aboutme:
         print(f"\nAbout me:\t\t\t{aboutme}")
 
     if status!="offline" and game_name:
-        platform_str=""
+        launchplatform_str=""
         if launchplatform:
-            platform_str=f" ({launchplatform})"        
-        print(f"\nUser is currently in-game:\t{game_name}{platform_str}")
+            launchplatform_str=f" ({launchplatform})"        
+        print(f"\nUser is currently in-game:\t{game_name}{launchplatform_str}")
         game_ts_old=int(time.time())
 
     if last_status_ts==0:
@@ -665,11 +665,11 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
 
             user_in_game=""
             if status!="offline" and game_name:
-                platform_str=""
+                launchplatform_str=""
                 if launchplatform:
-                    platform_str=f" ({launchplatform})"                
-                print(f"User is currently in-game: {game_name}{platform_str}")
-                user_in_game=f"\n\nUser is currently in-game: {game_name}{platform_str}"
+                    launchplatform_str=f" ({launchplatform})"                
+                print(f"User is currently in-game: {game_name}{launchplatform_str}")
+                user_in_game=f"\n\nUser is currently in-game: {game_name}{launchplatform_str}"
 
             change=True
 
@@ -685,24 +685,24 @@ def psn_monitor_user(psnid,error_notification,csv_file_name,csv_exists):
         if game_name != game_name_old: 
             game_ts=int(time.time())
 
-            platform_str=""
+            launchplatform_str=""
             if launchplatform:
-                platform_str=f" ({launchplatform})"
+                launchplatform_str=f" ({launchplatform})"
 
             # User changed the game
             if game_name_old and game_name:
-                print(f"PSN user {psnid} changed game from '{game_name_old}' to '{game_name}'{platform_str} after {calculate_timespan(int(game_ts),int(game_ts_old))}")
+                print(f"PSN user {psnid} changed game from '{game_name_old}' to '{game_name}'{launchplatform_str} after {calculate_timespan(int(game_ts),int(game_ts_old))}")
                 print(f"User played game from {get_range_of_dates_from_tss(int(game_ts_old),int(game_ts),short=True,between_sep=" to ")}")
-                m_body=f"PSN user {psnid} changed game from '{game_name_old}' to '{game_name}'{platform_str} after {calculate_timespan(int(game_ts),int(game_ts_old))}\n\nUser played game from {get_range_of_dates_from_tss(int(game_ts_old),int(game_ts),short=True,between_sep=" to ")}{get_cur_ts("\n\nTimestamp: ")}"
+                m_body=f"PSN user {psnid} changed game from '{game_name_old}' to '{game_name}'{launchplatform_str} after {calculate_timespan(int(game_ts),int(game_ts_old))}\n\nUser played game from {get_range_of_dates_from_tss(int(game_ts_old),int(game_ts),short=True,between_sep=" to ")}{get_cur_ts("\n\nTimestamp: ")}"
                 if launchplatform:
-                    platform_str=f"{launchplatform}, "                       
-                m_subject=f"PSN user {psnid} changed game to '{game_name}' ({platform_str}after {calculate_timespan(int(game_ts),int(game_ts_old),show_seconds=False)}: {get_range_of_dates_from_tss(int(game_ts_old),int(game_ts),short=True)})"
+                    launchplatform_str=f"{launchplatform}, "                       
+                m_subject=f"PSN user {psnid} changed game to '{game_name}' ({launchplatform_str}after {calculate_timespan(int(game_ts),int(game_ts_old),show_seconds=False)}: {get_range_of_dates_from_tss(int(game_ts_old),int(game_ts),short=True)})"
 
             # User started playing new game
             elif not game_name_old and game_name:
-                print(f"PSN user {psnid} started playing '{game_name}'{platform_str}")
-                m_subject=f"PSN user {psnid} now plays '{game_name}'{platform_str}"
-                m_body=f"PSN user {psnid} now plays '{game_name}'{platform_str}{get_cur_ts("\n\nTimestamp: ")}"
+                print(f"PSN user {psnid} started playing '{game_name}'{launchplatform_str}")
+                m_subject=f"PSN user {psnid} now plays '{game_name}'{launchplatform_str}"
+                m_body=f"PSN user {psnid} now plays '{game_name}'{launchplatform_str}{get_cur_ts("\n\nTimestamp: ")}"
 
             # User stopped playing the game
             elif game_name_old and not game_name:
