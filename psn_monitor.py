@@ -749,7 +749,7 @@ def psn_monitor_user(psnid, error_notification, csv_file_name, csv_exists):
                 if csv_file_name:
                     write_csv_entry(csv_file_name, datetime.fromtimestamp(int(time.time())), status, game_name)
             except Exception as e:
-                    print(f"* Error: cannot write CSV entry - {e}")
+                print(f"* Error: cannot write CSV entry - {e}")
 
             print_cur_ts("Timestamp:\t\t\t")
 
