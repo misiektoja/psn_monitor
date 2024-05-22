@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.2
+v1.3
 
 Script implementing real-time monitoring of Sony Playstation (PSN) players activity:
 https://github.com/misiektoja/psn_monitor/
@@ -15,7 +15,7 @@ tzlocal
 requests
 """
 
-VERSION = 1.2
+VERSION = 1.3
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -348,40 +348,75 @@ def print_cur_ts(ts_str=""):
     print("---------------------------------------------------------------------------------------------------------")
 
 
-# Function to return the timestamp in human readable format (long version); eg. Sun, 21 Apr 2024, 15:08:45
+# Function to return the timestamp/datetime object in human readable format (long version); eg. Sun, 21 Apr 2024, 15:08:45
 def get_date_from_ts(ts):
-    return (f"{calendar.day_abbr[(datetime.fromtimestamp(ts)).weekday()]} {datetime.fromtimestamp(ts).strftime("%d %b %Y, %H:%M:%S")}")
+    if type(ts) is datetime:
+        ts_new = int(round(ts.timestamp()))
+    elif type(ts) is int:
+        ts_new = ts
+    else:
+        return ""
+
+    return (f"{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime("%d %b %Y, %H:%M:%S")}")
 
 
-# Function to return the timestamp in human readable format (short version); eg. Sun 21 Apr 15:08
+# Function to return the timestamp/datetime object in human readable format (short version); eg. Sun 21 Apr 15:08
 def get_short_date_from_ts(ts):
-    return (f"{calendar.day_abbr[(datetime.fromtimestamp(ts)).weekday()]} {datetime.fromtimestamp(ts).strftime("%d %b %H:%M")}")
+    if type(ts) is datetime:
+        ts_new = int(round(ts.timestamp()))
+    elif type(ts) is int:
+        ts_new = ts
+    else:
+        return ""
+
+    return (f"{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime("%d %b %H:%M")}")
 
 
-# Function to return the timestamp in human readable format (only hour, minutes and optionally seconds): eg. 15:08:12
+# Function to return the timestamp/datetime object in human readable format (only hour, minutes and optionally seconds): eg. 15:08:12
 def get_hour_min_from_ts(ts, show_seconds=False):
+    if type(ts) is datetime:
+        ts_new = int(round(ts.timestamp()))
+    elif type(ts) is int:
+        ts_new = ts
+    else:
+        return ""
+
     if show_seconds:
         out_strf = "%H:%M:%S"
     else:
         out_strf = "%H:%M"
-    return (str(datetime.fromtimestamp(ts).strftime(out_strf)))
+    return (str(datetime.fromtimestamp(ts_new).strftime(out_strf)))
 
 
-# Function to return the range between two timestamps; eg. Sun 21 Apr 14:09 - 14:15
+# Function to return the range between two timestamps/datetime objects; eg. Sun 21 Apr 14:09 - 14:15
 def get_range_of_dates_from_tss(ts1, ts2, between_sep=" - ", short=False):
-    ts1_strf = datetime.fromtimestamp(ts1).strftime("%Y%m%d")
-    ts2_strf = datetime.fromtimestamp(ts2).strftime("%Y%m%d")
+    if type(ts1) is datetime:
+        ts1_new = int(round(ts1.timestamp()))
+    elif type(ts1) is int:
+        ts1_new = ts1
+    else:
+        return ""
+
+    if type(ts2) is datetime:
+        ts2_new = int(round(ts2.timestamp()))
+    elif type(ts2) is int:
+        ts2_new = ts2
+    else:
+        return ""
+
+    ts1_strf = datetime.fromtimestamp(ts1_new).strftime("%Y%m%d")
+    ts2_strf = datetime.fromtimestamp(ts2_new).strftime("%Y%m%d")
 
     if ts1_strf == ts2_strf:
         if short:
-            out_str = f"{get_short_date_from_ts(ts1)}{between_sep}{get_hour_min_from_ts(ts2)}"
+            out_str = f"{get_short_date_from_ts(ts1_new)}{between_sep}{get_hour_min_from_ts(ts2_new)}"
         else:
-            out_str = f"{get_date_from_ts(ts1)}{between_sep}{get_hour_min_from_ts(ts2, show_seconds=True)}"
+            out_str = f"{get_date_from_ts(ts1_new)}{between_sep}{get_hour_min_from_ts(ts2_new, show_seconds=True)}"
     else:
         if short:
-            out_str = f"{get_short_date_from_ts(ts1)}{between_sep}{get_short_date_from_ts(ts2)}"
+            out_str = f"{get_short_date_from_ts(ts1_new)}{between_sep}{get_short_date_from_ts(ts2_new)}"
         else:
-            out_str = f"{get_date_from_ts(ts1)}{between_sep}{get_date_from_ts(ts2)}"
+            out_str = f"{get_date_from_ts(ts1_new)}{between_sep}{get_date_from_ts(ts2_new)}"
     return (str(out_str))
 
 
