@@ -892,7 +892,10 @@ if __name__ == "__main__":
 
     print(f"* PSN timers:\t\t\t[check interval: {display_time(PSN_CHECK_INTERVAL)}] [active check interval: {display_time(PSN_ACTIVE_CHECK_INTERVAL)}]")
     print(f"* Email notifications:\t\t[active/inactive status changes = {active_inactive_notification}] [game changes = {game_change_notification}] [errors = {args.error_notification}]")
-    print(f"* Output logging disabled:\t{args.disable_logging}")
+    if not args.disable_logging:
+        print(f"* Output logging enabled:\t{not args.disable_logging} ({PSN_LOGFILE})")
+    else:
+        print(f"* Output logging enabled:\t{not args.disable_logging}")
     if csv_enabled:
         print(f"* CSV logging enabled:\t\t{csv_enabled} ({args.csv_file})")
     else:
