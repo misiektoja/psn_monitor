@@ -85,6 +85,10 @@ LOCAL_TIMEZONE='Europe/Warsaw'
 
 In such case it is not needed to install *tzlocal* pip module.
 
+### User privacy settings
+
+In order to monitor Playstation user activity, proper privacy settings need to be enabled on the monitored user account, i.e. in Playstation *'Account Settings'* -> *'Privacy Settings'* -> *'Personal Info | Messaging'*, the value in section *'Online Status and Now Playing'* should be set to *'Friends only'* (if you are friends) or to *'Anyone'*. 
+
 ### SMTP settings
 
 If you want to use email notifications functionality you need to change the SMTP settings (host, port, user, password, sender, recipient). If you leave the default settings then no notifications will be sent.
@@ -123,7 +127,7 @@ You can monitor multiple PSN players by spawning multiple copies of the script.
 
 It is suggested to use sth like **tmux** or **screen** to have the script running after you log out from the server (unless you are running it on your desktop).
 
-The tool automatically saves its output to *psn_monitor_{psnid}.log* file (can be changed in the settings or disabled with **-d** parameter).
+The tool automatically saves its output to *psn_monitor_{psnid}.log* file (can be changed in the settings via **PSN_LOGFILE** variable or disabled completely with **-d** parameter).
 
 The tool also saves the timestamp and last status (after every change) to *psn_{psnid}_last_status.json* file, so the last status is available after the restart of the tool.
 
