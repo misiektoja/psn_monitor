@@ -2,6 +2,15 @@
 
 This is a high-level summary of the most important changes. 
 
+# Changes in 1.3 (23 May 2024)
+
+**Features and Improvements**:
+
+- New feature counting overall time and number of played games in the session
+- Support for short offline interruption, so if user gets offline and online again (for example due to rebooting the console) during the next OFFLINE_INTERRUPT seconds (configurable in .py file, by default 7 mins) then we set online start timestamp back to the previous one + we also keep stats from the previous session (like total time and number of played games)
+- Information about log file name visible in the start screen
+- Rewritten get_date_from_ts(), get_short_date_from_ts(), get_hour_min_from_ts() and get_range_of_dates_from_tss() functions to automatically detect if time object is timestamp or datetime
+
 # Changes in 1.2 (19 May 2024)
 
 **Features and Improvements**:
