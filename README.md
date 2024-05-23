@@ -5,7 +5,7 @@ psn_monitor is a Python script which allows for real-time monitoring of Sony Pla
 ## Features
 
 - Real-time tracking of Playstation users gaming activity (including detection when user gets online/offline or played games)
-- Basics statistics for user activity (how long in different states, how long played game etc.)
+- Basics statistics for user activity (how long in different states, how long played game, overall time and number of played games in the session etc.)
 - Email notifications for different events (player gets online/offline, starts/finishes/changes game, errors)
 - Saving all user activity with timestamps to the CSV file
 - Possibility to control the running copy of the script via signals
