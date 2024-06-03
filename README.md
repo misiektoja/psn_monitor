@@ -1,10 +1,10 @@
 # psn_monitor
 
-psn_monitor is a Python script which allows for real-time monitoring of Sony Playstation (PSN) players activity. 
+psn_monitor is a Python script which allows for real-time monitoring of Sony PlayStation (PSN) players activity. 
 
 ## Features
 
-- Real-time tracking of Playstation users gaming activity (including detection when user gets online/offline or played games)
+- Real-time tracking of PlayStation users gaming activity (including detection when user gets online/offline or played games)
 - Basics statistics for user activity (how long in different states, how long played game, overall time and number of played games in the session etc.)
 - Email notifications for different events (player gets online/offline, starts/finishes/changes game, errors)
 - Saving all user activity with timestamps to the CSV file
@@ -28,7 +28,7 @@ The script requires Python 3.x.
 
 It uses [PSNAWP](https://github.com/isFakeAccount/psnawp) library, also requests, pytz, tzlocal and python-dateutil.
 
-It has been tested succesfully on:
+It has been tested successfully on:
 - macOS (Ventura & Sonoma)
 - Linux (Raspberry Pi Bullseye & Bookworm based on Debian, Ubuntu 24)
 - Windows (10 & 11)
@@ -63,7 +63,7 @@ Edit the *[psn_monitor.py](psn_monitor.py)* file and change any desired configur
 
 ### PSN npsso code
 
-Log in to your [My Playstation](https://my.playstation.com/) account.
+Log in to your [My PlayStation](https://my.playstation.com/) account.
 
 In another tab, go to: [https://ca.account.sony.com/api/v1/ssocookie](https://ca.account.sony.com/api/v1/ssocookie)
 
@@ -87,7 +87,7 @@ In such case it is not needed to install *tzlocal* pip module.
 
 ### User privacy settings
 
-In order to monitor Playstation user activity, proper privacy settings need to be enabled on the monitored user account, i.e. in Playstation *'Account Settings'* -> *'Privacy Settings'* -> *'Personal Info | Messaging'*, the value in section *'Online Status and Now Playing'* should be set to *'Friends only'* (if you are friends) or to *'Anyone'*. 
+In order to monitor PlayStation user activity, proper privacy settings need to be enabled on the monitored user account, i.e. in PlayStation *'Account Settings'* -> *'Privacy Settings'* -> *'Personal Info | Messaging'*, the value in section *'Online Status and Now Playing'* should be set to *'Friends only'* (if you are friends) or to *'Anyone'*. 
 
 ### SMTP settings
 
@@ -115,7 +115,7 @@ python3 ./psn_monitor.py -h
 
 ### Monitoring mode
 
-To monitor specific user activity, just type the Playstation (PSN) id (**misiektoja** in the example below):
+To monitor specific user activity, just type the PlayStation (PSN) id (**misiektoja** in the example below):
 
 ```sh
 ./psn_monitor.py misiektoja
@@ -174,7 +174,7 @@ If you want to change the check interval when the user is online to 30 seconds u
 ### Controlling the script via signals (only macOS/Linux/Unix)
 
 
-The tool has several signal handlers implemented which allow to change behaviour of the tool without a need to restart it with new parameters.
+The tool has several signal handlers implemented which allow to change behavior of the tool without a need to restart it with new parameters.
 
 List of supported signals:
 
@@ -201,9 +201,9 @@ Check other supported parameters using **-h**.
 
 You can combine all the parameters mentioned earlier.
 
-## Colouring log output with GRC
+## Coloring log output with GRC
 
-If you use [GRC](https://github.com/garabik/grc) and want to have the output properly coloured you can use the configuration file available [here](grc/conf.monitor_logs)
+If you use [GRC](https://github.com/garabik/grc) and want to have the tool's log output properly colored you can use the configuration file available [here](grc/conf.monitor_logs)
 
 Change your grc configuration (typically *.grc/grc.conf*) and add this part:
 
@@ -213,7 +213,7 @@ Change your grc configuration (typically *.grc/grc.conf*) and add this part:
 conf.monitor_logs
 ```
 
-Now copy the *conf.monitor_logs* to your .grc directory and psn_monitor log files should be nicely coloured.
+Now copy the *conf.monitor_logs* to your *.grc* directory and psn_monitor log files should be nicely colored when using *grc* tool.
 
 ## License
 
