@@ -28,7 +28,7 @@ This is a high-level summary of the most important changes.
 - Platform info is put into subject of game change emails now
 - pep8 style convention corrections
 
-**Bugfixes**:
+**Bug fixes**:
 
 - Handling situations when JSON file storing info about the last status gets corrupted or when there are issuing saving the state
 - Handling situations when platform is returned empty
@@ -39,7 +39,7 @@ This is a high-level summary of the most important changes.
 
 - After some testing it turned out "busy" status is not reported by PSN, so it leaves us only with online & offline; that's why "-s" parameter and corresponding code has been removed
 
-**Bugfixes**:
+**Bug fixes**:
 
 - Fixes for detecting situations where reported user status is empty
 - Cleaning the code related to capitalization of reported user status
@@ -51,6 +51,6 @@ This is a high-level summary of the most important changes.
 - Periodic refreshing of PSN NPSSO token
 - Additional information in the subject of email notifications
 
-**Bugfixes**:
+**Bug fixes**:
 
 - Fixes for handling situations where some profile information is not available
