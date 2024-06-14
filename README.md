@@ -1,13 +1,13 @@
 # psn_monitor
 
-psn_monitor is a Python script which allows for real-time monitoring of Sony PlayStation (PSN) players activity. 
+psn_monitor is a Python tool which allows for real-time monitoring of Sony PlayStation (PSN) players activities. 
 
 ## Features
 
 - Real-time tracking of PlayStation users gaming activity (including detection when user gets online/offline or played games)
 - Basics statistics for user activity (how long in different states, how long played game, overall time and number of played games in the session etc.)
 - Email notifications for different events (player gets online/offline, starts/finishes/changes game, errors)
-- Saving all user activity with timestamps to the CSV file
+- Saving all user activities with timestamps to the CSV file
 - Possibility to control the running copy of the script via signals
 
 <p align="center">
@@ -24,13 +24,13 @@ I'm not a dev, project done as a hobby. Code is ugly and as-is, but it works (at
 
 ## Requirements
 
-The script requires Python 3.x.
+The tool requires Python 3.9 or higher.
 
 It uses [PSNAWP](https://github.com/isFakeAccount/psnawp) library, also requests, pytz, tzlocal and python-dateutil.
 
 It has been tested successfully on:
 - macOS (Ventura & Sonoma)
-- Linux (Raspberry Pi Bullseye & Bookworm based on Debian, Ubuntu 24)
+- Linux (Raspberry Pi Bullseye & Bookworm based on Debian, Ubuntu 24, Kali Linux 2024)
 - Windows (10 & 11)
 
 It should work on other versions of macOS, Linux, Unix and Windows as well.
@@ -91,7 +91,13 @@ In order to monitor PlayStation user activity, proper privacy settings need to b
 
 ### SMTP settings
 
-If you want to use email notifications functionality you need to change the SMTP settings (host, port, user, password, sender, recipient). If you leave the default settings then no notifications will be sent.
+If you want to use email notifications functionality you need to change the SMTP settings (host, port, user, password, sender, recipient) in the *[psn_monitor.py](psn_monitor.py)* file. If you leave the default settings then no notifications will be sent.
+
+You can verify if your SMTP settings are correct by using **-z** parameter (the tool will try to send a test email notification):
+
+```sh
+./psn_monitor.py -z
+```
 
 ### Other settings
 
@@ -172,7 +178,6 @@ If you want to change the check interval when the user is online to 30 seconds u
 ```
 
 ### Controlling the script via signals (only macOS/Linux/Unix)
-
 
 The tool has several signal handlers implemented which allow to change behavior of the tool without a need to restart it with new parameters.
 
