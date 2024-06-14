@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.3
+v1.4
 
-Script implementing real-time monitoring of Sony Playstation (PSN) players activity:
+Tool implementing real-time tracking of Sony PlayStation (PSN) players activities:
 https://github.com/misiektoja/psn_monitor/
 
 Python pip3 requirements:
@@ -15,7 +15,7 @@ tzlocal
 requests
 """
 
-VERSION = 1.3
+VERSION = 1.4
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -84,6 +84,9 @@ csvfieldnames = ['Date', 'Status', 'Game name']
 
 active_inactive_notification = False
 game_change_notification = False
+
+# to solve the issue: 'SyntaxError: f-string expression part cannot include a backslash'
+nl_ch = "\n"
 
 
 import sys
@@ -195,6 +198,9 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
 
     if type(timestamp1) is int:
         dt1 = datetime.fromtimestamp(int(ts1))
+    elif type(timestamp1) is float:
+        ts1 = int(round(ts1))
+        dt1 = datetime.fromtimestamp(ts1)
     elif type(timestamp1) is datetime:
         dt1 = timestamp1
         ts1 = int(round(dt1.timestamp()))
@@ -203,6 +209,9 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
 
     if type(timestamp2) is int:
         dt2 = datetime.fromtimestamp(int(ts2))
+    elif type(timestamp2) is float:
+        ts2 = int(round(ts2))
+        dt2 = datetime.fromtimestamp(ts2)
     elif type(timestamp2) is datetime:
         dt2 = timestamp2
         ts2 = int(round(dt2.timestamp()))
@@ -342,7 +351,7 @@ def convert_utc_str_to_tz_datetime(utc_string, timezone):
 
 # Function to return the timestamp in human readable format; eg. Sun, 21 Apr 2024, 15:08:45
 def get_cur_ts(ts_str=""):
-    return (f"{ts_str}{calendar.day_abbr[(datetime.fromtimestamp(int(time.time()))).weekday()]}, {datetime.fromtimestamp(int(time.time())).strftime("%d %b %Y, %H:%M:%S")}")
+    return (f'{ts_str}{calendar.day_abbr[(datetime.fromtimestamp(int(time.time()))).weekday()]}, {datetime.fromtimestamp(int(time.time())).strftime("%d %b %Y, %H:%M:%S")}')
 
 
 # Function to print the current timestamp in human readable format; eg. Sun, 21 Apr 2024, 15:08:45
@@ -357,22 +366,41 @@ def get_date_from_ts(ts):
         ts_new = int(round(ts.timestamp()))
     elif type(ts) is int:
         ts_new = ts
+    elif type(ts) is float:
+        ts_new = int(round(ts))
     else:
         return ""
 
-    return (f"{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime("%d %b %Y, %H:%M:%S")}")
+    return (f'{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime("%d %b %Y, %H:%M:%S")}')
 
 
-# Function to return the timestamp/datetime object in human readable format (short version); eg. Sun 21 Apr 15:08
-def get_short_date_from_ts(ts):
+# Function to return the timestamp/datetime object in human readable format (short version); eg.
+# Sun 21 Apr 15:08
+# Sun 21 Apr 24, 15:08 (if show_year == True and current year is different)
+# Sun 21 Apr (if show_hour == False)
+def get_short_date_from_ts(ts, show_year=False, show_hour=True):
     if type(ts) is datetime:
         ts_new = int(round(ts.timestamp()))
     elif type(ts) is int:
         ts_new = ts
+    elif type(ts) is float:
+        ts_new = int(round(ts))
     else:
         return ""
 
-    return (f"{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime("%d %b %H:%M")}")
+    if show_hour:
+        hour_strftime = " %H:%M"
+    else:
+        hour_strftime = ""
+
+    if show_year and int(datetime.fromtimestamp(ts_new).strftime("%Y")) != int(datetime.now().strftime("%Y")):
+        if show_hour:
+            hour_prefix = ","
+        else:
+            hour_prefix = ""
+        return (f'{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime(f"%d %b %y{hour_prefix}{hour_strftime}")}')
+    else:
+        return (f'{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime(f"%d %b{hour_strftime}")}')
 
 
 # Function to return the timestamp/datetime object in human readable format (only hour, minutes and optionally seconds): eg. 15:08:12
@@ -381,6 +409,8 @@ def get_hour_min_from_ts(ts, show_seconds=False):
         ts_new = int(round(ts.timestamp()))
     elif type(ts) is int:
         ts_new = ts
+    elif type(ts) is float:
+        ts_new = int(round(ts))
     else:
         return ""
 
@@ -397,6 +427,8 @@ def get_range_of_dates_from_tss(ts1, ts2, between_sep=" - ", short=False):
         ts1_new = int(round(ts1.timestamp()))
     elif type(ts1) is int:
         ts1_new = ts1
+    elif type(ts1) is float:
+        ts1_new = int(round(ts1))
     else:
         return ""
 
@@ -404,6 +436,8 @@ def get_range_of_dates_from_tss(ts1, ts2, between_sep=" - ", short=False):
         ts2_new = int(round(ts2.timestamp()))
     elif type(ts2) is int:
         ts2_new = ts2
+    elif type(ts2) is float:
+        ts2_new = int(round(ts2))
     else:
         return ""
 
@@ -589,7 +623,7 @@ def psn_monitor_user(psnid, error_notification, csv_file_name, csv_exists):
     except Exception as e:
         print(f"* Error: cannot write CSV entry - {e}")
 
-    print(f"\nPlaystation ID:\t\t\t{psnid}")
+    print(f"\nPlayStation ID:\t\t\t{psnid}")
     print(f"PSN account ID:\t\t\t{accountid}")
 
     print(f"\nStatus:\t\t\t\t{str(status).upper()}")
@@ -681,7 +715,7 @@ def psn_monitor_user(psnid, error_notification, csv_file_name, csv_exists):
                 print("* PSN NPSSO key might not be valid anymore!")
                 if error_notification and not email_sent:
                     m_subject = f"psn_monitor: PSN NPSSO key error! (user: {psnid})"
-                    m_body = f"PSN NPSSO key might not be valid anymore: {e}{get_cur_ts("\n\nTimestamp: ")}"
+                    m_body = f"PSN NPSSO key might not be valid anymore: {e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                     print(f"Sending email notification to {RECEIVER_EMAIL}")
                     send_email(m_subject, m_body, "", SMTP_SSL)
                     email_sent = True
@@ -763,7 +797,7 @@ def psn_monitor_user(psnid, error_notification, csv_file_name, csv_exists):
             change = True
 
             m_subject = f"PSN user {psnid} is now {status} (after {m_subject_after}{m_subject_was_since})"
-            m_body = f"PSN user {psnid} changed status from {status_old} to {status}\n\nUser was {status_old} for {calculate_timespan(int(status_ts), int(status_ts_old))}{m_body_was_since}{m_body_short_offline_msg}{m_body_user_in_game}{m_body_played_games}{get_cur_ts("\n\nTimestamp: ")}"
+            m_body = f"PSN user {psnid} changed status from {status_old} to {status}\n\nUser was {status_old} for {calculate_timespan(int(status_ts), int(status_ts_old))}{m_body_was_since}{m_body_short_offline_msg}{m_body_user_in_game}{m_body_played_games}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
             if active_inactive_notification and act_inact_flag:
                 print(f"Sending email notification to {RECEIVER_EMAIL}")
                 send_email(m_subject, m_body, "", SMTP_SSL)
@@ -781,10 +815,10 @@ def psn_monitor_user(psnid, error_notification, csv_file_name, csv_exists):
             # User changed the game
             if game_name_old and game_name:
                 print(f"PSN user {psnid} changed game from '{game_name_old}' to '{game_name}'{launchplatform_str} after {calculate_timespan(int(game_ts), int(game_ts_old))}")
-                print(f"User played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=" to ")}")
+                print(f"User played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to ')}")
                 game_total_ts += (int(game_ts) - int(game_ts_old))
                 games_number += 1    
-                m_body = f"PSN user {psnid} changed game from '{game_name_old}' to '{game_name}'{launchplatform_str} after {calculate_timespan(int(game_ts), int(game_ts_old))}\n\nUser played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=" to ")}{get_cur_ts("\n\nTimestamp: ")}"
+                m_body = f"PSN user {psnid} changed game from '{game_name_old}' to '{game_name}'{launchplatform_str} after {calculate_timespan(int(game_ts), int(game_ts_old))}\n\nUser played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to ')}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                 if launchplatform:
                     launchplatform_str = f"{launchplatform}, "
                 m_subject = f"PSN user {psnid} changed game to '{game_name}' ({launchplatform_str}after {calculate_timespan(int(game_ts), int(game_ts_old), show_seconds=False)}: {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True)})"
@@ -794,16 +828,16 @@ def psn_monitor_user(psnid, error_notification, csv_file_name, csv_exists):
                 print(f"PSN user {psnid} started playing '{game_name}'{launchplatform_str}")
                 games_number += 1
                 m_subject = f"PSN user {psnid} now plays '{game_name}'{launchplatform_str}"
-                m_body = f"PSN user {psnid} now plays '{game_name}'{launchplatform_str}{get_cur_ts("\n\nTimestamp: ")}"
+                m_body = f"PSN user {psnid} now plays '{game_name}'{launchplatform_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
 
             # User stopped playing the game
             elif game_name_old and not game_name:
                 print(f"PSN user {psnid} stopped playing '{game_name_old}' after {calculate_timespan(int(game_ts), int(game_ts_old))}")
-                print(f"User played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=" to ")}")
+                print(f"User played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to ')}")
                 if not game_total_after_offline_counted:
                     game_total_ts += (int(game_ts) - int(game_ts_old))
                 m_subject = f"PSN user {psnid} stopped playing '{game_name_old}' (after {calculate_timespan(int(game_ts), int(game_ts_old), show_seconds=False)}: {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True)})"
-                m_body = f"PSN user {psnid} stopped playing '{game_name_old}' after {calculate_timespan(int(game_ts), int(game_ts_old))}\n\nUser played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=" to ")}{get_cur_ts("\n\nTimestamp: ")}"
+                m_body = f"PSN user {psnid} stopped playing '{game_name_old}' after {calculate_timespan(int(game_ts), int(game_ts_old))}\n\nUser played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to ')}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
 
             change = True
 
@@ -855,7 +889,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser("psn_monitor")
     parser.add_argument("PSN_ID", nargs="?", help="User's PSN ID", type=str)
-    parser.add_argument("-n", "--npsso_key", help="Playstation NPSSO key to override the value defined within the script (PSN_NPSSO)", type=str)
+    parser.add_argument("-n", "--npsso_key", help="PlayStation NPSSO key to override the value defined within the script (PSN_NPSSO)", type=str)
     parser.add_argument("-a", "--active_inactive_notification", help="Send email notification once user changes status from active to inactive and vice versa (online/offline)", action='store_true')
     parser.add_argument("-g", "--game_change_notification", help="Send email notification once user starts/changes/stops playing the game", action='store_true')
     parser.add_argument("-e", "--error_notification", help="Disable sending email notifications in case of errors like invalid NPSSO key", action='store_false')
