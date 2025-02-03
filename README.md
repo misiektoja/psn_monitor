@@ -1,13 +1,13 @@
 # psn_monitor
 
-psn_monitor is a Python tool which allows for real-time monitoring of Sony PlayStation (PSN) players activities. 
+psn_monitor is a Python tool that allows for real-time monitoring of Sony PlayStation (PSN) players' activities.
 
 ## Features
 
-- Real-time tracking of PlayStation users gaming activity (including detection when user gets online/offline or played games)
-- Basics statistics for user activity (how long in different states, how long played game, overall time and number of played games in the session etc.)
-- Email notifications for different events (player gets online/offline, starts/finishes/changes game, errors)
-- Saving all user activities with timestamps to the CSV file
+- Real-time tracking of PlayStation users' gaming activity (including detection when a user gets online/offline or plays games)
+- Basic statistics for user activity (duration in different states, time spent playing a game, overall time and number of games played in a session etc.)
+- Email notifications for various events (player gets online/offline, starts/finishes/changes a game, errors)
+- Saving all user activities with timestamps to a CSV file
 - Possibility to control the running copy of the script via signals
 
 <p align="center">
@@ -18,18 +18,14 @@ psn_monitor is a Python tool which allows for real-time monitoring of Sony PlayS
 
 Release notes can be found [here](RELEASE_NOTES.md)
 
-## Disclaimer
-
-I'm not a dev, project done as a hobby. Code is ugly and as-is, but it works (at least for me) ;-)
-
 ## Requirements
 
-The tool requires Python 3.9 or higher.
+The tool requires Python 3.10 or higher.
 
 It uses [PSNAWP](https://github.com/isFakeAccount/psnawp) library, also requests, pytz, tzlocal and python-dateutil.
 
 It has been tested successfully on:
-- macOS (Ventura & Sonoma)
+- macOS (Ventura, Sonoma & Sequoia)
 - Linux:
    - Raspberry Pi Bullseye & Bookworm
    - Ubuntu 24
