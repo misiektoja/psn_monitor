@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.4
+v1.5
 
 Tool implementing real-time tracking of Sony PlayStation (PSN) players activities:
 https://github.com/misiektoja/psn_monitor/
@@ -15,7 +15,7 @@ tzlocal
 requests
 """
 
-VERSION = 1.4
+VERSION = 1.5
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -91,8 +91,8 @@ nl_ch = "\n"
 
 import sys
 
-if sys.version_info < (3, 9):
-    print("* Error: Python version 3.9 or higher required !")
+if sys.version_info < (3, 10):
+    print("* Error: Python version 3.10 or higher required !")
     sys.exit(1)
 
 import time
