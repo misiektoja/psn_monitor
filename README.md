@@ -1,6 +1,6 @@
 # psn_monitor
 
-psn_monitor is a Python tool that allows for real-time monitoring of Sony PlayStation (PSN) players' activities.
+psn_monitor is a tool that allows for real-time monitoring of Sony PlayStation (PSN) players' activities.
 
 ## Features
 
@@ -27,9 +27,10 @@ It uses [PSNAWP](https://github.com/isFakeAccount/psnawp) library, also requests
 It has been tested successfully on:
 - macOS (Ventura, Sonoma & Sequoia)
 - Linux:
-   - Raspberry Pi Bullseye & Bookworm
+   - Raspberry Pi OS (Bullseye & Bookworm)
    - Ubuntu 24
-   - Kali Linux 2024
+   - Rocky Linux (8.x, 9.x)
+   - Kali Linux (2024, 2025)
 - Windows (10 & 11)
 
 It should work on other versions of macOS, Linux, Unix and Windows as well.
@@ -68,15 +69,15 @@ In another tab, go to: [https://ca.account.sony.com/api/v1/ssocookie](https://ca
 
 Copy the value of **npsso** code.
 
-Change the **PSN_NPSSO** variable to respective value (or use **-n** parameter).
+Change the `PSN_NPSSO` variable to respective value (or use **-n** parameter).
 
 The refresh token that is generated from npsso should be valid for 2 months. You will be informed by the tool once the token expires (proper message on the console and in email if errors notifications have not been disabled via **-e** parameter).
 
 ### Timezone
 
-The tool will try to automatically detect your local time zone so it can convert PSN API timestamps to your time. 
+The tool will attempt to automatically detect your local time zone so it can convert PSN API timestamps to your time. 
 
-In case you want to specify your timezone manually then change **LOCAL_TIMEZONE** variable from *'Auto'* to specific location, e.g.
+If you prefer to specify your time zone manually set the `LOCAL_TIMEZONE` variable from *'Auto'* to a specific location, e.g.
 
 ```
 LOCAL_TIMEZONE='Europe/Warsaw'
@@ -86,7 +87,9 @@ In such case it is not needed to install *tzlocal* pip module.
 
 ### User privacy settings
 
-In order to monitor PlayStation user activity, proper privacy settings need to be enabled on the monitored user account, i.e. in PlayStation *'Account Settings'* -> *'Privacy Settings'* -> *'Personal Info | Messaging'*, the value in section *'Online Status and Now Playing'* should be set to *'Friends only'* (if you are friends) or to *'Anyone'*. 
+In order to monitor PlayStation user activity, proper privacy settings need to be enabled on the monitored user account.
+
+In PlayStation *'Account Settings'* -> *'Privacy Settings'* -> *'Personal Info | Messaging'*, the value in section *'Online Status and Now Playing'* should be set to *'Friends only'* (if you are friends) or to *'Anyone'*. 
 
 ### SMTP settings
 
@@ -120,19 +123,25 @@ python3 ./psn_monitor.py -h
 
 ### Monitoring mode
 
-To monitor specific user activity, just type the PlayStation (PSN) id (**misiektoja** in the example below):
+To monitor specific user activity, just type the PlayStation (PSN) user id (**psn_user_id** in the example below):
 
 ```sh
-./psn_monitor.py misiektoja
+./psn_monitor.py psn_user_id
 ```
 
-The tool will run infinitely and monitor the player until the script is interrupted (Ctrl+C) or killed the other way.
+If you have not changed `PSN_NPSSO` variable in the *[psn_monitor.py](psn_monitor.py)* file, you can use **-n** parameter:
 
-You can monitor multiple PSN players by spawning multiple copies of the script. 
+```sh
+./psn_monitor.py psn_user_id -n "your_psn_npsso_code"
+```
 
-It is suggested to use sth like **tmux** or **screen** to have the script running after you log out from the server (unless you are running it on your desktop).
+The tool will run indefinitely and monitor the user until the script is interrupted (Ctrl+C) or terminated in another way.
 
-The tool automatically saves its output to *psn_monitor_{psnid}.log* file (can be changed in the settings via **PSN_LOGFILE** variable or disabled completely with **-d** parameter).
+You can monitor multiple PSN players by running multiple instances of the script.
+
+It is recommended to use something like **tmux** or **screen** to keep the script running after you log out from the server (unless you are running it on your desktop).
+
+The tool automatically saves its output to *psn_monitor_{psnid}.log* file (can be changed in the settings via `PSN_LOGFILE` variable or disabled completely with **-d** parameter).
 
 The tool also saves the timestamp and last status (after every change) to *psn_{psnid}_last_status.json* file, so the last status is available after the restart of the tool.
 
@@ -140,10 +149,16 @@ The tool also saves the timestamp and last status (after every change) to *psn_{
 
 ### Email notifications
 
-If you want to get email notifications once the user gets online or offline use **-a** parameter:
+If you want to receive email notifications when the user goes online or offline, use the **-a** parameter:
 
 ```sh
-./psn_monitor.py misiektoja -a
+./psn_monitor.py psn_user_id -a
+```
+
+If you want to be informed when user starts, stops or changes the played game, then use **-g** parameter:
+
+```sh
+./psn_monitor.py psn_user_id -g
 ```
 
 Make sure you defined your SMTP settings earlier (see [SMTP settings](#smtp-settings)).
@@ -154,31 +169,25 @@ Example email:
    <img src="./assets/psn_monitor_email_notifications.png" alt="psn_monitor_email_notifications" width="80%"/>
 </p>
 
-If you want to be informed when user starts, stops or changes the played game then use **-g** parameter:
-
-```sh
-./psn_monitor.py misiektoja -g
-```
-
 ### Saving gaming activity to the CSV file
 
 If you want to save all reported activities of the PSN user, use **-b** parameter with the name of the file (it will be automatically created if it does not exist):
 
 ```sh
-./psn_monitor.py misiektoja -b psn_misiektoja.csv
+./psn_monitor.py psn_user_id -b psn_user_id.csv
 ```
 
 ### Check intervals
 
-If you want to change the check interval when the user is online to 30 seconds use **-k** parameter and when the user is offline to 2 mins (120 seconds) use **-c** parameter:
+If you want to change the check interval when the user is online to 30 seconds, use **-k** parameter and when the user is offline to 2 mins (120 seconds), use **-c** parameter:
 
 ```sh
-./psn_monitor.py misiektoja -k 30 -c 120
+./psn_monitor.py psn_user_id -k 30 -c 120
 ```
 
 ### Controlling the script via signals (only macOS/Linux/Unix)
 
-The tool has several signal handlers implemented which allow to change behavior of the tool without a need to restart it with new parameters.
+The tool has several signal handlers implemented which allow changing the behavior of the tool without needing to restart it with new parameters.
 
 List of supported signals:
 
@@ -189,12 +198,12 @@ List of supported signals:
 | TRAP | Increase the check timer for player activity when user is online (by 30 seconds) |
 | ABRT | Decrease check timer for player activity when user is online (by 30 seconds) |
 
-So if you want to change functionality of the running tool, just send the proper signal to the desired copy of the script.
+So if you want to change the functionality of the running tool, just send the appropriate signal to the desired copy of the script.
 
-I personally use **pkill** tool, so for example to toggle email notifications when user gets online or offline, for the tool instance monitoring the *misiektoja* user:
+I personally use the **pkill** tool. For example, to toggle email notifications when a user comes online or goes offline for the tool instance monitoring the *psn_user_id* user:
 
 ```sh
-pkill -f -USR1 "python3 ./psn_monitor.py misiektoja"
+pkill -f -USR1 "python3 ./psn_monitor.py psn_user_id"
 ```
 
 As Windows supports limited number of signals, this functionality is available only on Linux/Unix/macOS.
