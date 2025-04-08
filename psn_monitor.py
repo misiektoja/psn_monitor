@@ -110,8 +110,9 @@ import time
 import string
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from dateutil import relativedelta
+from dateutil.parser import isoparse
 import calendar
 import requests as req
 import signal
@@ -222,24 +223,44 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
     ts1 = timestamp1
     ts2 = timestamp2
 
-    if type(timestamp1) is int:
-        dt1 = datetime.fromtimestamp(int(ts1))
-    elif type(timestamp1) is float:
+    if isinstance(timestamp1, str):
+        try:
+            timestamp1 = isoparse(timestamp1)
+        except Exception:
+            return ""
+
+    if isinstance(timestamp1, int):
+        dt1 = datetime.fromtimestamp(int(ts1), tz=timezone.utc)
+    elif isinstance(timestamp1, float):
         ts1 = int(round(ts1))
-        dt1 = datetime.fromtimestamp(ts1)
-    elif type(timestamp1) is datetime:
+        dt1 = datetime.fromtimestamp(ts1, tz=timezone.utc)
+    elif isinstance(timestamp1, datetime):
         dt1 = timestamp1
+        if dt1.tzinfo is None:
+            dt1 = pytz.utc.localize(dt1)
+        else:
+            dt1 = dt1.astimezone(pytz.utc)
         ts1 = int(round(dt1.timestamp()))
     else:
         return ""
 
-    if type(timestamp2) is int:
-        dt2 = datetime.fromtimestamp(int(ts2))
-    elif type(timestamp2) is float:
+    if isinstance(timestamp2, str):
+        try:
+            timestamp2 = isoparse(timestamp2)
+        except Exception:
+            return ""
+
+    if isinstance(timestamp2, int):
+        dt2 = datetime.fromtimestamp(int(ts2), tz=timezone.utc)
+    elif isinstance(timestamp2, float):
         ts2 = int(round(ts2))
-        dt2 = datetime.fromtimestamp(ts2)
-    elif type(timestamp2) is datetime:
+        dt2 = datetime.fromtimestamp(ts2, tz=timezone.utc)
+    elif isinstance(timestamp2, datetime):
         dt2 = timestamp2
+        if dt2.tzinfo is None:
+            dt2 = pytz.utc.localize(dt2)
+        else:
+            dt2 = dt2.astimezone(pytz.utc)
         ts2 = int(round(dt2.timestamp()))
     else:
         return ""
@@ -254,21 +275,19 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
         date_diff = relativedelta.relativedelta(dt1, dt2)
         years = date_diff.years
         months = date_diff.months
-        weeks = date_diff.weeks
-        if not show_weeks:
+        days_total = date_diff.days
+
+        if show_weeks:
+            weeks = days_total // 7
+            days = days_total % 7
+        else:
             weeks = 0
-        days = date_diff.days
-        if weeks > 0:
-            days = days - (weeks * 7)
-        hours = date_diff.hours
-        if (not show_hours and ts_diff > 86400):
-            hours = 0
-        minutes = date_diff.minutes
-        if (not show_minutes and ts_diff > 3600):
-            minutes = 0
-        seconds = date_diff.seconds
-        if (not show_seconds and ts_diff > 60):
-            seconds = 0
+            days = days_total
+
+        hours = date_diff.hours if show_hours or ts_diff <= 86400 else 0
+        minutes = date_diff.minutes if show_minutes or ts_diff <= 3600 else 0
+        seconds = date_diff.seconds if show_seconds or ts_diff <= 60 else 0
+
         date_list = [years, months, weeks, days, hours, minutes, seconds]
 
         for index, interval in enumerate(date_list):
@@ -277,6 +296,7 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
                 if interval == 1:
                     name = name.rstrip('s')
                 result.append(f"{interval} {name}")
+
         return ', '.join(result[:granularity])
     else:
         return '0 seconds'
@@ -372,24 +392,33 @@ def write_csv_entry(csv_file_name, timestamp, status, game_name):
         raise RuntimeError(f"Failed to write to CSV file '{csv_file_name}': {e}")
 
 
-# Converts UTC string returned by PSN API to datetime object in specified timezone
-def convert_utc_str_to_tz_datetime(utc_string, timezone):
-    try:
-        utc_string_sanitize = utc_string.split('+', 1)[0]
-        utc_string_sanitize = utc_string_sanitize.split('.', 1)[0]
-        dt_utc = datetime.strptime(utc_string_sanitize, '%Y-%m-%dT%H:%M:%S')
+# Returns current local time without timezone info (naive)
+def now_local_naive():
+    return datetime.now(pytz.timezone(LOCAL_TIMEZONE)).replace(microsecond=0, tzinfo=None)
 
-        old_tz = pytz.timezone("UTC")
-        new_tz = pytz.timezone(timezone)
-        dt_new_tz = old_tz.localize(dt_utc).astimezone(new_tz)
-        return dt_new_tz
+
+# Returns current local time with timezone info (aware)
+def now_local():
+    return datetime.now(pytz.timezone(LOCAL_TIMEZONE))
+
+
+# Converts ISO datetime string to localized datetime (aware)
+def convert_iso_str_to_datetime(dt_str):
+    if not dt_str:
+        return None
+
+    try:
+        utc_dt = isoparse(dt_str)
+        if utc_dt.tzinfo is None:
+            utc_dt = pytz.utc.localize(utc_dt)
+        return utc_dt.astimezone(pytz.timezone(LOCAL_TIMEZONE))
     except Exception:
-        return datetime.fromtimestamp(0)
+        return None
 
 
 # Returns the current date/time in human readable format; eg. Sun 21 Apr 2024, 15:08:45
 def get_cur_ts(ts_str=""):
-    return (f'{ts_str}{calendar.day_abbr[(datetime.fromtimestamp(int(time.time()))).weekday()]}, {datetime.fromtimestamp(int(time.time())).strftime("%d %b %Y, %H:%M:%S")}')
+    return (f'{ts_str}{calendar.day_abbr[(now_local_naive()).weekday()]}, {now_local_naive().strftime("%d %b %Y, %H:%M:%S")}')
 
 
 # Prints the current date/time in human readable format with separator; eg. Sun 21 Apr 2024, 15:08:45
@@ -400,87 +429,132 @@ def print_cur_ts(ts_str=""):
 
 # Returns the timestamp/datetime object in human readable format (long version); eg. Sun 21 Apr 2024, 15:08:45
 def get_date_from_ts(ts):
-    if type(ts) is datetime:
-        ts_new = int(round(ts.timestamp()))
-    elif type(ts) is int:
-        ts_new = ts
-    elif type(ts) is float:
-        ts_new = int(round(ts))
+    tz = pytz.timezone(LOCAL_TIMEZONE)
+
+    if isinstance(ts, str):
+        try:
+            ts = isoparse(ts)
+        except Exception:
+            return ""
+
+    if isinstance(ts, datetime):
+        if ts.tzinfo is None:
+            ts = pytz.utc.localize(ts)
+        ts_new = ts.astimezone(tz)
+
+    elif isinstance(ts, int):
+        ts_new = datetime.fromtimestamp(ts, tz)
+
+    elif isinstance(ts, float):
+        ts_rounded = int(round(ts))
+        ts_new = datetime.fromtimestamp(ts_rounded, tz)
+
     else:
         return ""
 
-    return (f'{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime("%d %b %Y, %H:%M:%S")}')
+    return (f'{calendar.day_abbr[ts_new.weekday()]} {ts_new.strftime("%d %b %Y, %H:%M:%S")}')
 
 
 # Returns the timestamp/datetime object in human readable format (short version); eg.
 # Sun 21 Apr 15:08
 # Sun 21 Apr 24, 15:08 (if show_year == True and current year is different)
+# Sun 21 Apr 25, 15:08 (if always_show_year == True and current year can be the same)
 # Sun 21 Apr (if show_hour == False)
-def get_short_date_from_ts(ts, show_year=False, show_hour=True):
-    if type(ts) is datetime:
-        ts_new = int(round(ts.timestamp()))
-    elif type(ts) is int:
-        ts_new = ts
-    elif type(ts) is float:
-        ts_new = int(round(ts))
+# Sun 21 Apr 15:08:32 (if show_seconds == True)
+# 21 Apr 15:08 (if show_weekday == False)
+def get_short_date_from_ts(ts, show_year=False, show_hour=True, show_weekday=True, show_seconds=False, always_show_year=False):
+    tz = pytz.timezone(LOCAL_TIMEZONE)
+    if always_show_year:
+        show_year = True
+
+    if isinstance(ts, str):
+        try:
+            ts = isoparse(ts)
+        except Exception:
+            return ""
+
+    if isinstance(ts, datetime):
+        if ts.tzinfo is None:
+            ts = pytz.utc.localize(ts)
+        ts_new = ts.astimezone(tz)
+
+    elif isinstance(ts, int):
+        ts_new = datetime.fromtimestamp(ts, tz)
+
+    elif isinstance(ts, float):
+        ts_rounded = int(round(ts))
+        ts_new = datetime.fromtimestamp(ts_rounded, tz)
+
     else:
         return ""
 
     if show_hour:
-        hour_strftime = " %H:%M"
+        hour_strftime = " %H:%M:%S" if show_seconds else " %H:%M"
     else:
         hour_strftime = ""
 
-    if show_year and int(datetime.fromtimestamp(ts_new).strftime("%Y")) != int(datetime.now().strftime("%Y")):
-        if show_hour:
-            hour_prefix = ","
-        else:
-            hour_prefix = ""
-        return (f'{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime(f"%d %b %y{hour_prefix}{hour_strftime}")}')
+    weekday_str = f"{calendar.day_abbr[ts_new.weekday()]} " if show_weekday else ""
+
+    if (show_year and ts_new.year != datetime.now(tz).year) or always_show_year:
+        hour_prefix = "," if show_hour else ""
+        return f'{weekday_str}{ts_new.strftime(f"%d %b %y{hour_prefix}{hour_strftime}")}'
     else:
-        return (f'{calendar.day_abbr[(datetime.fromtimestamp(ts_new)).weekday()]} {datetime.fromtimestamp(ts_new).strftime(f"%d %b{hour_strftime}")}')
+        return f'{weekday_str}{ts_new.strftime(f"%d %b{hour_strftime}")}'
 
 
 # Returns the timestamp/datetime object in human readable format (only hour, minutes and optionally seconds): eg. 15:08:12
 def get_hour_min_from_ts(ts, show_seconds=False):
-    if type(ts) is datetime:
-        ts_new = int(round(ts.timestamp()))
-    elif type(ts) is int:
-        ts_new = ts
-    elif type(ts) is float:
-        ts_new = int(round(ts))
+    tz = pytz.timezone(LOCAL_TIMEZONE)
+
+    if isinstance(ts, str):
+        try:
+            ts = isoparse(ts)
+        except Exception:
+            return ""
+
+    if isinstance(ts, datetime):
+        if ts.tzinfo is None:
+            ts = pytz.utc.localize(ts)
+        ts_new = ts.astimezone(tz)
+
+    elif isinstance(ts, int):
+        ts_new = datetime.fromtimestamp(ts, tz)
+
+    elif isinstance(ts, float):
+        ts_rounded = int(round(ts))
+        ts_new = datetime.fromtimestamp(ts_rounded, tz)
+
     else:
         return ""
 
-    if show_seconds:
-        out_strf = "%H:%M:%S"
-    else:
-        out_strf = "%H:%M"
-    return (str(datetime.fromtimestamp(ts_new).strftime(out_strf)))
+    out_strf = "%H:%M:%S" if show_seconds else "%H:%M"
+    return ts_new.strftime(out_strf)
 
 
 # Returns the range between two timestamps/datetime objects; eg. Sun 21 Apr 14:09 - 14:15
 def get_range_of_dates_from_tss(ts1, ts2, between_sep=" - ", short=False):
-    if type(ts1) is datetime:
+    tz = pytz.timezone(LOCAL_TIMEZONE)
+
+    if isinstance(ts1, datetime):
         ts1_new = int(round(ts1.timestamp()))
-    elif type(ts1) is int:
+    elif isinstance(ts1, int):
         ts1_new = ts1
-    elif type(ts1) is float:
+    elif isinstance(ts1, float):
         ts1_new = int(round(ts1))
     else:
         return ""
 
-    if type(ts2) is datetime:
+    if isinstance(ts2, datetime):
         ts2_new = int(round(ts2.timestamp()))
-    elif type(ts2) is int:
+    elif isinstance(ts2, int):
         ts2_new = ts2
-    elif type(ts2) is float:
+    elif isinstance(ts2, float):
         ts2_new = int(round(ts2))
     else:
         return ""
 
-    ts1_strf = datetime.fromtimestamp(ts1_new).strftime("%Y%m%d")
-    ts2_strf = datetime.fromtimestamp(ts2_new).strftime("%Y%m%d")
+    ts1_strf = datetime.fromtimestamp(ts1_new, tz).strftime("%Y%m%d")
+    ts2_strf = datetime.fromtimestamp(ts2_new, tz).strftime("%Y%m%d")
 
     if ts1_strf == ts2_strf:
         if short:
@@ -492,7 +566,8 @@ def get_range_of_dates_from_tss(ts1, ts2, between_sep=" - ", short=False):
             out_str = f"{get_short_date_from_ts(ts1_new)}{between_sep}{get_short_date_from_ts(ts2_new)}"
         else:
             out_str = f"{get_date_from_ts(ts1_new)}{between_sep}{get_date_from_ts(ts2_new)}"
-    return (str(out_str))
+
+    return str(out_str)
 
 
 # Checks if the timezone name is correct
@@ -591,8 +666,12 @@ def psn_monitor_user(psnid, error_notification, csv_file_name):
     psn_platform = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("platform")
     psn_platform = str(psn_platform).upper()
     lastonline = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("lastOnlineDate")
-    lastonline_dt = convert_utc_str_to_tz_datetime(str(lastonline), LOCAL_TIMEZONE)
-    lastonline_ts = int(lastonline_dt.timestamp())
+
+    lastonline_dt = convert_iso_str_to_datetime(lastonline)
+    if lastonline_dt:
+        lastonline_ts = int(lastonline_dt.timestamp())
+    else:
+        lastonline_ts = 0
     gametitleinfolist = psn_user_presence["basicPresence"].get("gameTitleInfoList")
     game_name = ""
     launchplatform = ""
@@ -622,17 +701,14 @@ def psn_monitor_user(psnid, error_notification, csv_file_name):
         if last_status_read:
             last_status_ts = last_status_read[0]
             last_status = last_status_read[1]
-            psn_last_status_file_mdate_dt = datetime.fromtimestamp(int(os.path.getmtime(psn_last_status_file)))
-            psn_last_status_file_mdate = psn_last_status_file_mdate_dt.strftime("%d %b %Y, %H:%M:%S")
-            psn_last_status_file_mdate_weekday = str(calendar.day_abbr[(psn_last_status_file_mdate_dt).weekday()])
+            psn_last_status_file_mdate_dt = datetime.fromtimestamp(int(os.path.getmtime(psn_last_status_file)), pytz.timezone(LOCAL_TIMEZONE))
 
-            print(f"* Last status loaded from file '{psn_last_status_file}' ({psn_last_status_file_mdate_weekday} {psn_last_status_file_mdate})")
+            print(f"* Last status loaded from file '{psn_last_status_file}' ({get_short_date_from_ts(psn_last_status_file_mdate_dt, show_weekday=False, always_show_year=True)})")
 
             if last_status_ts > 0:
-                last_status_dt_str = datetime.fromtimestamp(last_status_ts).strftime("%d %b %Y, %H:%M:%S")
+                last_status_dt_str = get_short_date_from_ts(last_status_ts, show_weekday=False, always_show_year=True)
                 last_status_str = str(last_status.upper())
-                last_status_ts_weekday = str(calendar.day_abbr[(datetime.fromtimestamp(last_status_ts)).weekday()])
-                print(f"* Last status read from file: {last_status_str} ({last_status_ts_weekday} {last_status_dt_str})")
+                print(f"* Last status read from file: {last_status_str} ({last_status_dt_str})")
 
                 if lastonline_ts and status == "offline":
                     if lastonline_ts >= last_status_ts:
@@ -658,7 +734,7 @@ def psn_monitor_user(psnid, error_notification, csv_file_name):
 
     try:
         if csv_file_name and (status != last_status):
-            write_csv_entry(csv_file_name, datetime.fromtimestamp(int(time.time())), status, game_name)
+            write_csv_entry(csv_file_name, now_local_naive(), status, game_name)
     except Exception as e:
         print(f"* Error: {e}")
 
@@ -695,10 +771,9 @@ def psn_monitor_user(psnid, error_notification, csv_file_name):
 
     if status_ts_old != status_ts_old_bck:
         if status == "offline":
-            last_status_dt_str = datetime.fromtimestamp(status_ts_old).strftime("%d %b %Y, %H:%M:%S")
-            last_status_ts_weekday = str(calendar.day_abbr[(datetime.fromtimestamp(status_ts_old)).weekday()])
-            print(f"\n* Last time user was available:\t{last_status_ts_weekday} {last_status_dt_str}")
-        print(f"\n* User is {str(status).upper()} for:\t\t{calculate_timespan(int(time.time()), int(status_ts_old), show_seconds=False)}")
+            last_status_dt_str = get_date_from_ts(status_ts_old)
+            print(f"\n* Last time user was available:\t{last_status_dt_str}")
+        print(f"\n* User is {str(status).upper()} for:\t\t{calculate_timespan(now_local(), int(status_ts_old), show_seconds=False)}")
 
     status_old = status
     game_name_old = game_name
@@ -808,8 +883,9 @@ def psn_monitor_user(psnid, error_notification, csv_file_name):
                     games_number = 0
                 elif (status_ts - status_ts_old) <= OFFLINE_INTERRUPT and status_online_start_ts_old > 0:
                     status_online_start_ts = status_online_start_ts_old
-                    m_body_short_offline_msg = f"\n\nShort offline interruption ({display_time(status_ts - status_ts_old)}), online start timestamp set back to {get_short_date_from_ts(status_online_start_ts_old)}"
-                    print(f"Short offline interruption ({display_time(status_ts - status_ts_old)}), online start timestamp set back to {get_short_date_from_ts(status_online_start_ts_old)}")
+                    short_offline_msg = f"Short offline interruption ({display_time(status_ts - status_ts_old)}), online start timestamp set back to {get_short_date_from_ts(status_online_start_ts_old)}"
+                    m_body_short_offline_msg = f"\n\n{short_offline_msg}"
+                    print(short_offline_msg)
                 act_inact_flag = True
 
             m_body_played_games = ""
@@ -901,7 +977,7 @@ def psn_monitor_user(psnid, error_notification, csv_file_name):
 
             try:
                 if csv_file_name:
-                    write_csv_entry(csv_file_name, datetime.fromtimestamp(int(time.time())), status, game_name)
+                    write_csv_entry(csv_file_name, now_local_naive(), status, game_name)
             except Exception as e:
                 print(f"* Error: {e}")
 
