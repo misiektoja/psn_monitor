@@ -9,9 +9,9 @@ https://github.com/misiektoja/psn_monitor/
 Python pip3 requirements:
 
 PSNAWP
+requests
 python-dateutil
 pytz
-requests
 tzlocal (optional)
 python-dotenv (optional)
 """
@@ -58,23 +58,23 @@ SENDER_EMAIL = "your_sender_email"
 RECEIVER_EMAIL = "your_receiver_email"
 
 # Whether to send an email when user goes online/offline
-# Can also be enabled via the -a parameter
+# Can also be enabled via the -a flag
 ACTIVE_INACTIVE_NOTIFICATION = False
 
 # Whether to send an email on game start/change/stop
-# Can also be enabled via the -g parameter
+# Can also be enabled via the -g flag
 GAME_CHANGE_NOTIFICATION = False
 
 # Whether to send an email on errors
-# Can also be disabled via the -e parameter
+# Can also be disabled via the -e flag
 ERROR_NOTIFICATION = True
 
 # How often to check for player activity when the user is offline; in seconds
-# Can also be set using the -c parameter
+# Can also be set using the -c flag
 PSN_CHECK_INTERVAL = 180  # 3 min
 
 # How often to check for player activity when the user is online; in seconds
-# Can also be set using the -k parameter
+# Can also be set using the -k flag
 PSN_ACTIVE_CHECK_INTERVAL = 60  # 1 min
 
 # Set your local time zone so that PSN API timestamps are converted accordingly (e.g. 'Europe/Warsaw').
@@ -84,12 +84,13 @@ PSN_ACTIVE_CHECK_INTERVAL = 60  # 1 min
 LOCAL_TIMEZONE = 'Auto'
 
 # If the user disconnects (offline) and reconnects (online) within OFFLINE_INTERRUPT seconds,
-# the online session start time will be restored to the previous session’s start time (short offline interruption),
+# the online session start time will be restored to the previous session's start time (short offline interruption),
 # and previous session statistics (like total playtime and number of played games) will be preserved
 OFFLINE_INTERRUPT = 420  # 7 mins
 
-# How often to print an "alive check" message to the output; in seconds
-TOOL_ALIVE_INTERVAL = 21600  # 6 hours
+# How often to print a "liveness check" message to the output; in seconds
+# Set to 0 to disable
+LIVENESS_CHECK_INTERVAL = 43200  # 12 hours
 
 # URL used to verify internet connectivity at startup
 CHECK_INTERNET_URL = 'https://ca.account.sony.com/'
@@ -98,20 +99,20 @@ CHECK_INTERNET_URL = 'https://ca.account.sony.com/'
 CHECK_INTERNET_TIMEOUT = 5
 
 # CSV file to write all status & game changes
-# Can also be set using the -b parameter
+# Can also be set using the -b flag
 CSV_FILE = ""
 
 # Location of the optional dotenv file which can keep secrets
 # If not specified it will try to auto-search for .env files
 # To disable auto-search, set this to the literal string "none"
-# Can also be set using the --env-file parameter
+# Can also be set using the --env-file flag
 DOTENV_FILE = ""
 
 # Base name of the log file. The tool will save its output to psn_monitor_<psn_user_id>.log file
 PSN_LOGFILE = "psn_monitor"
 
 # Whether to disable logging to psn_monitor_<psn_user_id>.log
-# Can also be disabled via the -d parameter
+# Can also be disabled via the -d flag
 DISABLE_LOGGING = False
 
 # Width of horizontal line (─)
@@ -120,7 +121,8 @@ HORIZONTAL_LINE = 113
 # Whether to clear the terminal screen after starting the tool
 CLEAR_SCREEN = True
 
-# Value used by signal handlers to increase or decrease the online activity check interval (PSN_ACTIVE_CHECK_INTERVAL); in seconds
+# Value used by signal handlers increasing/decreasing the check for player activity
+# when user is online (PSN_ACTIVE_CHECK_INTERVAL); in seconds
 PSN_ACTIVE_CHECK_SIGNAL_VALUE = 30  # 30 seconds
 """
 
@@ -129,7 +131,7 @@ PSN_ACTIVE_CHECK_SIGNAL_VALUE = 30  # 30 seconds
 # -------------------------
 
 # Default dummy values so linters shut up
-# Do not change values below — modify them in the configuration section or config file instead
+# Do not change values below - modify them in the configuration section or config file instead
 PSN_NPSSO = ""
 SMTP_HOST = ""
 SMTP_PORT = 0
@@ -145,7 +147,7 @@ PSN_CHECK_INTERVAL = 0
 PSN_ACTIVE_CHECK_INTERVAL = 0
 LOCAL_TIMEZONE = ""
 OFFLINE_INTERRUPT = 0
-TOOL_ALIVE_INTERVAL = 0
+LIVENESS_CHECK_INTERVAL = 0
 CHECK_INTERNET_URL = ""
 CHECK_INTERNET_TIMEOUT = 0
 CSV_FILE = ""
@@ -167,7 +169,7 @@ SECRET_KEYS = ("PSN_NPSSO", "SMTP_PASSWORD")
 # Default value for timeouts in alarm signal handler; in seconds
 FUNCTION_TIMEOUT = 15
 
-TOOL_ALIVE_COUNTER = TOOL_ALIVE_INTERVAL / PSN_CHECK_INTERVAL
+LIVENESS_CHECK_COUNTER = LIVENESS_CHECK_INTERVAL / PSN_CHECK_INTERVAL
 
 stdout_bck = None
 csvfieldnames = ['Date', 'Status', 'Game name']
@@ -204,7 +206,7 @@ import csv
 try:
     import pytz
 except ModuleNotFoundError:
-    raise SystemExit("Error: Couldn’t find the pytz library !\n\nTo install it, run:\n    pip3 install pytz\n\nOnce installed, re-run this tool")
+    raise SystemExit("Error: Couldn't find the pytz library !\n\nTo install it, run:\n    pip3 install pytz\n\nOnce installed, re-run this tool")
 try:
     from tzlocal import get_localzone
 except ImportError:
@@ -215,7 +217,7 @@ import ipaddress
 try:
     from psnawp_api import PSNAWP
 except ModuleNotFoundError:
-    raise SystemExit("Error: Couldn’t find the PSNAWP library !\n\nTo install it, run:\n    pip3 install PSNAWP\n\nOnce installed, re-run this tool. For more help, visit:\nhttps://github.com/isFakeAccount/psnawp")
+    raise SystemExit("Error: Couldn't find the PSNAWP library !\n\nTo install it, run:\n    pip3 install PSNAWP\n\nOnce installed, re-run this tool. For more help, visit:\nhttps://github.com/isFakeAccount/psnawp")
 import shutil
 from pathlib import Path
 
@@ -1149,8 +1151,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         game_name_old = game_name
         alive_counter += 1
 
-        if alive_counter >= TOOL_ALIVE_COUNTER and (status == "offline" or not status):
-            print_cur_ts("Alive check, timestamp:\t\t")
+        if LIVENESS_CHECK_COUNTER and alive_counter >= LIVENESS_CHECK_COUNTER and (status == "offline" or not status):
+            print_cur_ts("Liveness check, timestamp:\t")
             alive_counter = 0
 
         if status and status != "offline":
@@ -1160,7 +1162,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
 
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, LOCAL_TIMEZONE, TOOL_ALIVE_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, stdout_bck
+    global CLI_CONFIG_PATH, DOTENV_FILE, LOCAL_TIMEZONE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, stdout_bck
 
     if "--generate-config" in sys.argv:
         print(CONFIG_BLOCK.strip("\n"))
@@ -1181,7 +1183,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         prog="psn_monitor",
-        description=("Monitor a PSN user’s playing status and send customizable email alerts [ https://github.com/misiektoja/psn_monitor/ ]"), formatter_class=argparse.RawTextHelpFormatter
+        description=("Monitor a PSN user's playing status and send customizable email alerts [ https://github.com/misiektoja/psn_monitor/ ]"), formatter_class=argparse.RawTextHelpFormatter
     )
 
     # Positional
@@ -1274,7 +1276,7 @@ def main():
         dest="active_interval",
         metavar="SECONDS",
         type=int,
-        help="Polling interval when user is in game"
+        help="Polling interval when user is online"
     )
 
     # Features & Output
@@ -1391,7 +1393,7 @@ def main():
 
     if args.check_interval:
         PSN_CHECK_INTERVAL = args.check_interval
-        TOOL_ALIVE_COUNTER = TOOL_ALIVE_INTERVAL / PSN_CHECK_INTERVAL
+        LIVENESS_CHECK_COUNTER = LIVENESS_CHECK_INTERVAL / PSN_CHECK_INTERVAL
 
     if args.active_interval:
         PSN_ACTIVE_CHECK_INTERVAL = args.active_interval
@@ -1439,8 +1441,9 @@ def main():
         GAME_CHANGE_NOTIFICATION = False
         ERROR_NOTIFICATION = False
 
-    print(f"* PSN timers:\t\t\t[check interval: {display_time(PSN_CHECK_INTERVAL)}] [active check interval: {display_time(PSN_ACTIVE_CHECK_INTERVAL)}]")
-    print(f"* Email notifications:\t\t[active/inactive status changes = {ACTIVE_INACTIVE_NOTIFICATION}] [game changes = {GAME_CHANGE_NOTIFICATION}] [errors = {ERROR_NOTIFICATION}]")
+    print(f"* PSN polling intervals:\t[offline: {display_time(PSN_CHECK_INTERVAL)}] [online: {display_time(PSN_ACTIVE_CHECK_INTERVAL)}]")
+    print(f"* Email notifications:\t\t[online/offline status changes = {ACTIVE_INACTIVE_NOTIFICATION}] [game changes = {GAME_CHANGE_NOTIFICATION}]\n*\t\t\t\t[errors = {ERROR_NOTIFICATION}]")
+    print(f"* Liveness check:\t\t{bool(LIVENESS_CHECK_INTERVAL)}" + (f" ({display_time(LIVENESS_CHECK_INTERVAL)})" if LIVENESS_CHECK_INTERVAL else ""))
     print(f"* CSV logging enabled:\t\t{bool(CSV_FILE)}" + (f" ({CSV_FILE})" if CSV_FILE else ""))
     print(f"* Output logging enabled:\t{not DISABLE_LOGGING}" + (f" ({FINAL_LOG_PATH})" if not DISABLE_LOGGING else ""))
     print(f"* Configuration file:\t\t{cfg_path}")
