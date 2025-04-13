@@ -11,8 +11,9 @@ Python pip3 requirements:
 PSNAWP
 python-dateutil
 pytz
-tzlocal
 requests
+tzlocal (optional)
+python-dotenv (optional)
 """
 
 VERSION = 1.5
@@ -21,18 +22,33 @@ VERSION = 1.5
 # CONFIGURATION SECTION START
 # ---------------------------
 
+CONFIG_BLOCK = """
 # Log in to your PSN account:
 # https://my.playstation.com/
 #
 # In another tab, visit:
 # https://ca.account.sony.com/api/v1/ssocookie
 #
-# Copy the value of the npsso code below (or use the -n parameter)
+# Copy the value of the npsso code
+#
+# Provide the PSN_NPSSO secret using one of the following methods:
+#   - Pass it at runtime with -n / --npsso-key
+#   - Set it as an environment variable (e.g. export PSN_NPSSO=...)
+#   - Add it to ".env" file (PSN_NPSSO=...) for persistent use
+# Fallback:
+#   - Hard-code it in the code or config file
+#
 # The refresh token generated from the npsso should remain valid for about 2 months
 PSN_NPSSO = "your_psn_npsso_code"
 
 # SMTP settings for sending email notifications
 # If left as-is, no notifications will be sent
+#
+# Provide the SMTP_PASSWORD secret using one of the following methods:
+#   - Set it as an environment variable (e.g. export SMTP_PASSWORD=...)
+#   - Add it to ".env" file (SMTP_PASSWORD=...) for persistent use
+# Fallback:
+#   - Hard-code it in the code or config file
 SMTP_HOST = "your_smtp_server_ssl"
 SMTP_PORT = 587
 SMTP_USER = "your_smtp_user"
@@ -41,9 +57,21 @@ SMTP_SSL = True
 SENDER_EMAIL = "your_sender_email"
 RECEIVER_EMAIL = "your_receiver_email"
 
+# Whether to send an email when user goes online/offline
+# Can also be enabled via the -a parameter
+ACTIVE_INACTIVE_NOTIFICATION = False
+
+# Whether to send an email on game start/change/stop
+# Can also be enabled via the -g parameter
+GAME_CHANGE_NOTIFICATION = False
+
+# Whether to send an email on errors
+# Can also be disabled via the -e parameter
+ERROR_NOTIFICATION = True
+
 # How often to check for player activity when the user is offline; in seconds
 # Can also be set using the -c parameter
-PSN_CHECK_INTERVAL = 150  # 2.5 min
+PSN_CHECK_INTERVAL = 180  # 3 min
 
 # How often to check for player activity when the user is online; in seconds
 # Can also be set using the -k parameter
@@ -51,8 +79,8 @@ PSN_ACTIVE_CHECK_INTERVAL = 60  # 1 min
 
 # Set your local time zone so that PSN API timestamps are converted accordingly (e.g. 'Europe/Warsaw').
 # Use this command to list all time zones supported by pytz:
-# python3 -c "import pytz; print('\n'.join(pytz.all_timezones))"
-# If set to 'Auto', the tool will try to detect your local time zone automatically
+#   python3 -c "import pytz; print('\\n'.join(pytz.all_timezones))"
+# If set to 'Auto', the tool will try to detect your local time zone automatically (requires tzlocal)
 LOCAL_TIMEZONE = 'Auto'
 
 # If the user disconnects (offline) and reconnects (online) within OFFLINE_INTERRUPT seconds,
@@ -69,32 +97,82 @@ CHECK_INTERNET_URL = 'https://ca.account.sony.com/'
 # Timeout used when checking initial internet connectivity; in seconds
 CHECK_INTERNET_TIMEOUT = 5
 
+# CSV file to write all status & game changes
+# Can also be set using the -b parameter
+CSV_FILE = ""
+
+# Location of the optional dotenv file which can keep secrets
+# If not specified it will try to auto-search for .env files
+# To disable auto-search, set this to the literal string "none"
+# Can also be set using the --env-file parameter
+DOTENV_FILE = ""
+
 # Base name of the log file. The tool will save its output to psn_monitor_<psnid>.log file
 PSN_LOGFILE = "psn_monitor"
 
-# Value used by signal handlers to increase or decrease the online activity check interval (PSN_ACTIVE_CHECK_INTERVAL); in seconds
-PSN_ACTIVE_CHECK_SIGNAL_VALUE = 30  # 30 seconds
+# Whether to disable logging to psn_monitor_<psn_id>.log
+# Can also be disabled via the -d parameter
+DISABLE_LOGGING = False
+
+# Width of horizontal line (─)
+HORIZONTAL_LINE = 113
 
 # Whether to clear the terminal screen after starting the tool
 CLEAR_SCREEN = True
+
+# Value used by signal handlers to increase or decrease the online activity check interval (PSN_ACTIVE_CHECK_INTERVAL); in seconds
+PSN_ACTIVE_CHECK_SIGNAL_VALUE = 30  # 30 seconds
+"""
 
 # -------------------------
 # CONFIGURATION SECTION END
 # -------------------------
 
+# Default dummy values so linters shut up
+# Do not change values below — modify them in the configuration section or config file instead
+PSN_NPSSO = ""
+SMTP_HOST = ""
+SMTP_PORT = 0
+SMTP_USER = ""
+SMTP_PASSWORD = ""
+SMTP_SSL = False
+SENDER_EMAIL = ""
+RECEIVER_EMAIL = ""
+ACTIVE_INACTIVE_NOTIFICATION = False
+GAME_CHANGE_NOTIFICATION = False
+ERROR_NOTIFICATION = False
+PSN_CHECK_INTERVAL = 0
+PSN_ACTIVE_CHECK_INTERVAL = 0
+LOCAL_TIMEZONE = ""
+OFFLINE_INTERRUPT = 0
+TOOL_ALIVE_INTERVAL = 0
+CHECK_INTERNET_URL = ""
+CHECK_INTERNET_TIMEOUT = 0
+CSV_FILE = ""
+DOTENV_FILE = ""
+PSN_LOGFILE = ""
+DISABLE_LOGGING = False
+HORIZONTAL_LINE = 0
+CLEAR_SCREEN = False
+PSN_ACTIVE_CHECK_SIGNAL_VALUE = 0
+
+exec(CONFIG_BLOCK, globals())
+
+# Default name for the optional config file
+DEFAULT_CONFIG_FILENAME = "psn_monitor.conf"
+
+# List of secret keys to load from env/config
+SECRET_KEYS = ("PSN_NPSSO", "SMTP_PASSWORD")
+
 # Default value for timeouts in alarm signal handler; in seconds
 FUNCTION_TIMEOUT = 15
-
-# Width of horizontal line (─)
-HORIZONTAL_LINE = 105
 
 TOOL_ALIVE_COUNTER = TOOL_ALIVE_INTERVAL / PSN_CHECK_INTERVAL
 
 stdout_bck = None
 csvfieldnames = ['Date', 'Status', 'Game name']
 
-active_inactive_notification = False
-game_change_notification = False
+CLI_CONFIG_PATH = None
 
 # to solve the issue: 'SyntaxError: f-string expression part cannot include a backslash'
 nl_ch = "\n"
@@ -123,7 +201,10 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import argparse
 import csv
-import pytz
+try:
+    import pytz
+except ModuleNotFoundError:
+    raise SystemExit("Error: Couldn’t find the pytz library !\n\nTo install it, run:\n    pip3 install pytz\n\nOnce installed, re-run this tool")
 try:
     from tzlocal import get_localzone
 except ImportError:
@@ -131,7 +212,12 @@ except ImportError:
 import platform
 import re
 import ipaddress
-from psnawp_api import PSNAWP
+try:
+    from psnawp_api import PSNAWP
+except ModuleNotFoundError:
+    raise SystemExit("Error: Couldn’t find the PSNAWP library !\n\nTo install it, run:\n    pip3 install PSNAWP\n\nOnce installed, re-run this tool. For more help, visit:\nhttps://github.com/isFakeAccount/psnawp")
+import shutil
+from pathlib import Path
 
 
 # Logger class to output messages to stdout and log file
@@ -577,21 +663,21 @@ def is_valid_timezone(tz_name):
 
 # Signal handler for SIGUSR1 allowing to switch active/inactive email notifications
 def toggle_active_inactive_notifications_signal_handler(sig, frame):
-    global active_inactive_notification
-    active_inactive_notification = not active_inactive_notification
+    global ACTIVE_INACTIVE_NOTIFICATION
+    ACTIVE_INACTIVE_NOTIFICATION = not ACTIVE_INACTIVE_NOTIFICATION
     sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
-    print(f"* Email notifications: [active/inactive status changes = {active_inactive_notification}]")
+    print(f"* Email notifications: [active/inactive status changes = {ACTIVE_INACTIVE_NOTIFICATION}]")
     print_cur_ts("Timestamp:\t\t\t")
 
 
 # Signal handler for SIGUSR2 allowing to switch played game changes notifications
 def toggle_game_change_notifications_signal_handler(sig, frame):
-    global game_change_notification
-    game_change_notification = not game_change_notification
+    global GAME_CHANGE_NOTIFICATION
+    GAME_CHANGE_NOTIFICATION = not GAME_CHANGE_NOTIFICATION
     sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
-    print(f"* Email notifications: [game changes = {game_change_notification}]")
+    print(f"* Email notifications: [game changes = {GAME_CHANGE_NOTIFICATION}]")
     print_cur_ts("Timestamp:\t\t\t")
 
 
@@ -616,8 +702,81 @@ def decrease_active_check_signal_handler(sig, frame):
     print_cur_ts("Timestamp:\t\t\t")
 
 
+# Signal handler for SIGHUP allowing to reload secrets from .env
+def reload_secrets_signal_handler(sig, frame):
+    sig_name = signal.Signals(sig).name
+    print(f"* Signal {sig_name} received")
+
+    # disable autoscan if DOTENV_FILE set to none
+    if DOTENV_FILE and DOTENV_FILE.lower() == 'none':
+        env_path = None
+    else:
+        # reload .env if python-dotenv is installed
+        try:
+            from dotenv import load_dotenv, find_dotenv
+            if DOTENV_FILE:
+                env_path = DOTENV_FILE
+            else:
+                env_path = find_dotenv()
+            if env_path:
+                load_dotenv(env_path, override=True)
+            else:
+                print("* No .env file found, skipping env-var reload")
+        except ImportError:
+            env_path = None
+            print("* python-dotenv not installed, skipping env-var reload")
+
+    if env_path:
+        for secret in SECRET_KEYS:
+            old_val = globals().get(secret)
+            val = os.getenv(secret)
+            if val is not None and val != old_val:
+                globals()[secret] = val
+                print(f"* Reloaded {secret} from {env_path}")
+
+    print_cur_ts("Timestamp:\t\t\t")
+
+
+# Finds an optional config file
+def find_config_file(cli_path=None):
+    """
+    Search for an optional config file in:
+      1) CLI-provided path (must exist if given)
+      2) ./{DEFAULT_CONFIG_FILENAME}
+      3) ~/.{DEFAULT_CONFIG_FILENAME}
+      4) script-directory/{DEFAULT_CONFIG_FILENAME}
+    """
+
+    if cli_path:
+        p = Path(os.path.expanduser(cli_path))
+        return str(p) if p.is_file() else None
+
+    candidates = [
+        Path.cwd() / DEFAULT_CONFIG_FILENAME,
+        Path.home() / f".{DEFAULT_CONFIG_FILENAME}",
+        Path(__file__).parent / DEFAULT_CONFIG_FILENAME,
+    ]
+
+    for p in candidates:
+        if p.is_file():
+            return str(p)
+    return None
+
+
+# Resolves an executable path by checking if it's a valid file or searching in $PATH
+def resolve_executable(path):
+    if os.path.isfile(path) and os.access(path, os.X_OK):
+        return path
+
+    found = shutil.which(path)
+    if found:
+        return found
+
+    raise FileNotFoundError(f"Could not find executable '{path}'")
+
+
 # Main function that monitors gaming activity of the specified PSN user
-def psn_monitor_user(psnid, error_notification, csv_file_name):
+def psn_monitor_user(psnid, csv_file_name):
 
     alive_counter = 0
     status_ts = 0
@@ -658,7 +817,7 @@ def psn_monitor_user(psnid, error_notification, csv_file_name):
     status = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
 
     if not status:
-        print(f"* Error: cannot get status for user {psnid}")
+        print(f"* Error: Cannot get status for user {psnid}")
         sys.exit(1)
 
     status = str(status).lower()
@@ -833,17 +992,15 @@ def psn_monitor_user(psnid, error_notification, csv_file_name):
                 sleep_interval = PSN_CHECK_INTERVAL
 
             if 'Remote end closed connection' in str(e):
-                # print("* Stale HTTP connection detected; re-initializing PSNAWP session ...")
                 psnawp = PSNAWP(PSN_NPSSO)
                 psn_user = psnawp.user(online_id=psnid)
-                print_cur_ts("Timestamp:\t\t\t")
                 time.sleep(2)
                 continue
 
             print(f"* Error, retrying in {display_time(sleep_interval)}: {e}")
             if 'npsso' in str(e):
                 print("* PSN NPSSO key might not be valid anymore!")
-                if error_notification and not email_sent:
+                if ERROR_NOTIFICATION and not email_sent:
                     m_subject = f"psn_monitor: PSN NPSSO key error! (user: {psnid})"
                     m_body = f"PSN NPSSO key might not be valid anymore: {e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                     print(f"Sending email notification to {RECEIVER_EMAIL}")
@@ -929,7 +1086,7 @@ def psn_monitor_user(psnid, error_notification, csv_file_name):
 
             m_subject = f"PSN user {psnid} is now {status} (after {m_subject_after}{m_subject_was_since})"
             m_body = f"PSN user {psnid} changed status from {status_old} to {status}\n\nUser was {status_old} for {calculate_timespan(int(status_ts), int(status_ts_old))}{m_body_was_since}{m_body_short_offline_msg}{m_body_user_in_game}{m_body_played_games}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-            if active_inactive_notification and act_inact_flag:
+            if ACTIVE_INACTIVE_NOTIFICATION and act_inact_flag:
                 print(f"Sending email notification to {RECEIVER_EMAIL}")
                 send_email(m_subject, m_body, "", SMTP_SSL)
 
@@ -972,7 +1129,7 @@ def psn_monitor_user(psnid, error_notification, csv_file_name):
 
             change = True
 
-            if game_change_notification and m_subject and m_body:
+            if GAME_CHANGE_NOTIFICATION and m_subject and m_body:
                 print(f"Sending email notification to {RECEIVER_EMAIL}")
                 send_email(m_subject, m_body, "", SMTP_SSL)
 
@@ -1002,7 +1159,16 @@ def psn_monitor_user(psnid, error_notification, csv_file_name):
             time.sleep(PSN_CHECK_INTERVAL)
 
 
-if __name__ == "__main__":
+def main():
+    global CLI_CONFIG_PATH, DOTENV_FILE, LOCAL_TIMEZONE, TOOL_ALIVE_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, stdout_bck
+
+    if "--generate-config" in sys.argv:
+        print(CONFIG_BLOCK.strip("\n"))
+        sys.exit(0)
+
+    if "--version" in sys.argv:
+        print(f"{os.path.basename(sys.argv[0])} v{VERSION}")
+        sys.exit(0)
 
     stdout_bck = sys.stdout
 
@@ -1015,7 +1181,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
         prog="psn_monitor",
-        description="Monitor a PSN user’s playing status and send customizable email alerts [ https://github.com/misiektoja/psn_monitor/ ]"
+        description=("Monitor a PSN user’s playing status and send customizable email alerts [ https://github.com/misiektoja/psn_monitor/ ]"), formatter_class=argparse.RawTextHelpFormatter
     )
 
     # Positional
@@ -1025,6 +1191,33 @@ if __name__ == "__main__":
         metavar="PSN_ID",
         help="User's PSN ID",
         type=str
+    )
+
+    # Version, just to list in help, it is handled earlier
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s v{VERSION}"
+    )
+
+    # Configuration & dotenv files
+    conf = parser.add_argument_group("Configuration & dotenv files")
+    conf.add_argument(
+        "--config-file",
+        dest="config_file",
+        metavar="PATH",
+        help="Location of the optional config file",
+    )
+    conf.add_argument(
+        "--generate-config",
+        action="store_true",
+        help="Print default config template and exit",
+    )
+    conf.add_argument(
+        "--env-file",
+        dest="env_file",
+        metavar="PATH",
+        help="Path to optional dotenv file (auto-search if not set, disable with 'none')",
     )
 
     # API credentials
@@ -1043,22 +1236,25 @@ if __name__ == "__main__":
         "-a", "--notify-active-inactive",
         dest="notify_active_inactive",
         action="store_true",
+        default=None,
         help="Email when user goes online/offline"
     )
     notify.add_argument(
         "-g", "--notify-game-change",
         dest="notify_game_change",
         action="store_true",
+        default=None,
         help="Email on game start/change/stop"
     )
     notify.add_argument(
         "-e", "--no-error-notify",
         dest="notify_errors",
         action="store_false",
+        default=None,
         help="Disable email on errors (e.g. invalid NPSSO)"
     )
     notify.add_argument(
-        "-z", "--send-test-email",
+        "--send-test-email",
         dest="send_test_email",
         action="store_true",
         help="Send test email to verify SMTP settings"
@@ -1094,6 +1290,7 @@ if __name__ == "__main__":
         "-d", "--disable-logging",
         dest="disable_logging",
         action="store_true",
+        default=None,
         help="Disable logging to psn_monitor_<psn_id>.log"
     )
 
@@ -1102,6 +1299,56 @@ if __name__ == "__main__":
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
         sys.exit(1)
+
+    if args.config_file:
+        CLI_CONFIG_PATH = os.path.expanduser(args.config_file)
+
+    cfg_path = find_config_file(CLI_CONFIG_PATH)
+
+    if not cfg_path and CLI_CONFIG_PATH:
+        print(f"* Error: Config file '{CLI_CONFIG_PATH}' does not exist")
+        sys.exit(1)
+
+    if cfg_path:
+        try:
+            with open(cfg_path, "r") as cf:
+                exec(cf.read(), globals())
+        except Exception as e:
+            print(f"* Error loading config file '{cfg_path}': {e}")
+            sys.exit(1)
+
+    if args.env_file:
+        DOTENV_FILE = os.path.expanduser(args.env_file)
+    else:
+        if DOTENV_FILE:
+            DOTENV_FILE = os.path.expanduser(DOTENV_FILE)
+
+    if DOTENV_FILE and DOTENV_FILE.lower() == 'none':
+        env_path = None
+    else:
+        try:
+            from dotenv import load_dotenv, find_dotenv
+
+            if DOTENV_FILE:
+                env_path = DOTENV_FILE
+                if not os.path.isfile(env_path):
+                    print(f"* Warning: dotenv file '{env_path}' does not exist\n")
+                else:
+                    load_dotenv(env_path, override=True)
+            else:
+                env_path = find_dotenv() or None
+                if env_path:
+                    load_dotenv(env_path, override=True)
+        except ImportError:
+            env_path = DOTENV_FILE if DOTENV_FILE else None
+            if env_path:
+                print(f"* Warning: Cannot load dotenv file '{env_path}' because 'python-dotenv' is not installed\n\nTo install it, run:\n    pip3 install python-dotenv\n\nOnce installed, re-run this tool\n")
+
+    if env_path:
+        for secret in SECRET_KEYS:
+            val = os.getenv(secret)
+            if val is not None:
+                globals()[secret] = val
 
     local_tz = None
     if LOCAL_TIMEZONE == "Auto":
@@ -1150,25 +1397,54 @@ if __name__ == "__main__":
         PSN_ACTIVE_CHECK_INTERVAL = args.active_interval
 
     if args.csv_file:
+        CSV_FILE = os.path.expanduser(args.csv_file)
+    else:
+        if CSV_FILE:
+            CSV_FILE = os.path.expanduser(CSV_FILE)
+
+    if CSV_FILE:
         try:
-            with open(args.csv_file, 'a', newline='', buffering=1, encoding="utf-8") as _:
+            with open(CSV_FILE, 'a', newline='', buffering=1, encoding="utf-8") as _:
                 pass
         except Exception as e:
             print(f"* Error, CSV file cannot be opened for writing: {e}")
             sys.exit(1)
 
-    if not args.disable_logging:
-        PSN_LOGFILE = f"{PSN_LOGFILE}_{args.psn_id}.log"
-        sys.stdout = Logger(PSN_LOGFILE)
+    if args.disable_logging is True:
+        DISABLE_LOGGING = True
 
-    active_inactive_notification = args.notify_active_inactive
-    game_change_notification = args.notify_game_change
-    error_notification = args.notify_errors
+    if not DISABLE_LOGGING:
+        log_path = Path(os.path.expanduser(PSN_LOGFILE))
+        if log_path.is_dir():
+            raise SystemExit(f"* Error: PSN_LOGFILE '{log_path}' is a directory, expected a filename")
+        if log_path.suffix == "":
+            log_path = log_path.with_name(f"{log_path.name}_{args.psn_id}.log")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        FINAL_LOG_PATH = str(log_path)
+        sys.stdout = Logger(FINAL_LOG_PATH)
+    else:
+        FINAL_LOG_PATH = None
+
+    if args.notify_active_inactive is True:
+        ACTIVE_INACTIVE_NOTIFICATION = True
+
+    if args.notify_game_change is True:
+        GAME_CHANGE_NOTIFICATION = True
+
+    if args.notify_errors is False:
+        ERROR_NOTIFICATION = False
+
+    if SMTP_HOST.startswith("your_smtp_server_"):
+        ACTIVE_INACTIVE_NOTIFICATION = False
+        GAME_CHANGE_NOTIFICATION = False
+        ERROR_NOTIFICATION = False
 
     print(f"* PSN timers:\t\t\t[check interval: {display_time(PSN_CHECK_INTERVAL)}] [active check interval: {display_time(PSN_ACTIVE_CHECK_INTERVAL)}]")
-    print(f"* Email notifications:\t\t[active/inactive status changes = {active_inactive_notification}] [game changes = {game_change_notification}] [errors = {error_notification}]")
-    print(f"* Output logging enabled:\t{not args.disable_logging}" + (f" ({PSN_LOGFILE})" if not args.disable_logging else ""))
-    print(f"* CSV logging enabled:\t\t{bool(args.csv_file)}" + (f" ({args.csv_file})" if args.csv_file else ""))
+    print(f"* Email notifications:\t\t[active/inactive status changes = {ACTIVE_INACTIVE_NOTIFICATION}] [game changes = {GAME_CHANGE_NOTIFICATION}] [errors = {ERROR_NOTIFICATION}]")
+    print(f"* CSV logging enabled:\t\t{bool(CSV_FILE)}" + (f" ({CSV_FILE})" if CSV_FILE else ""))
+    print(f"* Output logging enabled:\t{not DISABLE_LOGGING}" + (f" ({FINAL_LOG_PATH})" if not DISABLE_LOGGING else ""))
+    print(f"* Configuration file:\t\t{cfg_path}")
+    print(f"* Dotenv file:\t\t\t{env_path or 'None'}")
     print(f"* Local timezone:\t\t{LOCAL_TIMEZONE}")
 
     out = f"\nMonitoring user with PSN ID {args.psn_id}"
@@ -1181,8 +1457,13 @@ if __name__ == "__main__":
         signal.signal(signal.SIGUSR2, toggle_game_change_notifications_signal_handler)
         signal.signal(signal.SIGTRAP, increase_active_check_signal_handler)
         signal.signal(signal.SIGABRT, decrease_active_check_signal_handler)
+        signal.signal(signal.SIGHUP, reload_secrets_signal_handler)
 
-    psn_monitor_user(args.psn_id, args.notify_errors, args.csv_file)
+    psn_monitor_user(args.psn_id, CSV_FILE)
 
     sys.stdout = stdout_bck
     sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
