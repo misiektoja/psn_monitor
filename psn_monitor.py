@@ -388,7 +388,7 @@ def write_csv_entry(csv_file_name, timestamp, status, game_name):
             csvwriter = csv.DictWriter(csv_file, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
             csvwriter.writerow({'Date': timestamp, 'Status': status, 'Game name': game_name})
 
-    except Exception:
+    except Exception as e:
         raise RuntimeError(f"Failed to write to CSV file '{csv_file_name}': {e}")
 
 
@@ -799,9 +799,6 @@ def psn_monitor_user(psnid, error_notification, csv_file_name):
             signal.signal(signal.SIGALRM, timeout_handler)
             signal.alarm(FUNCTION_TIMEOUT)
         try:
-            if alive_counter >= (TOOL_ALIVE_COUNTER - 1) and (status == "offline" or not status):
-                psnawp = PSNAWP(PSN_NPSSO)
-                psn_user = psnawp.user(online_id=psnid)
             psn_user_presence = psn_user.get_presence()
             status = ""
             status = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
@@ -829,10 +826,20 @@ def psn_monitor_user(psnid, error_notification, csv_file_name):
         except Exception as e:
             if platform.system() != 'Windows':
                 signal.alarm(0)
+
             if status and status != "offline":
                 sleep_interval = PSN_ACTIVE_CHECK_INTERVAL
             else:
                 sleep_interval = PSN_CHECK_INTERVAL
+
+            if 'Remote end closed connection' in str(e):
+                # print("* Stale HTTP connection detected; re-initializing PSNAWP session ...")
+                psnawp = PSNAWP(PSN_NPSSO)
+                psn_user = psnawp.user(online_id=psnid)
+                print_cur_ts("Timestamp:\t\t\t")
+                time.sleep(2)
+                continue
+
             print(f"* Error, retrying in {display_time(sleep_interval)}: {e}")
             if 'npsso' in str(e):
                 print("* PSN NPSSO key might not be valid anymore!")
