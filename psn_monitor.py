@@ -107,10 +107,10 @@ CSV_FILE = ""
 # Can also be set using the --env-file parameter
 DOTENV_FILE = ""
 
-# Base name of the log file. The tool will save its output to psn_monitor_<psnid>.log file
+# Base name of the log file. The tool will save its output to psn_monitor_<psn_user_id>.log file
 PSN_LOGFILE = "psn_monitor"
 
-# Whether to disable logging to psn_monitor_<psn_id>.log
+# Whether to disable logging to psn_monitor_<psn_user_id>.log
 # Can also be disabled via the -d parameter
 DISABLE_LOGGING = False
 
@@ -776,7 +776,7 @@ def resolve_executable(path):
 
 
 # Main function that monitors gaming activity of the specified PSN user
-def psn_monitor_user(psnid, csv_file_name):
+def psn_monitor_user(psn_user_id, csv_file_name):
 
     alive_counter = 0
     status_ts = 0
@@ -799,7 +799,7 @@ def psn_monitor_user(psnid, csv_file_name):
 
     try:
         psnawp = PSNAWP(PSN_NPSSO)
-        psn_user = psnawp.user(online_id=psnid)
+        psn_user = psnawp.user(online_id=psn_user_id)
         accountid = psn_user.account_id
         profile = psn_user.profile()
         aboutme = profile.get("aboutMe")
@@ -811,13 +811,13 @@ def psn_monitor_user(psnid, csv_file_name):
     try:
         psn_user_presence = psn_user.get_presence()
     except Exception as e:
-        print(f"* Error, cannot get presence for user {psnid}: {e}")
+        print(f"* Error, cannot get presence for user {psn_user_id}: {e}")
         sys.exit(1)
 
     status = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
 
     if not status:
-        print(f"* Error: Cannot get status for user {psnid}")
+        print(f"* Error: Cannot get status for user {psn_user_id}")
         sys.exit(1)
 
     status = str(status).lower()
@@ -846,7 +846,7 @@ def psn_monitor_user(psnid, csv_file_name):
         status_online_start_ts = status_ts_old
         status_online_start_ts_old = status_online_start_ts
 
-    psn_last_status_file = f"psn_{psnid}_last_status.json"
+    psn_last_status_file = f"psn_{psn_user_id}_last_status.json"
     last_status_read = []
     last_status_ts = 0
     last_status = ""
@@ -897,7 +897,7 @@ def psn_monitor_user(psnid, csv_file_name):
     except Exception as e:
         print(f"* Error: {e}")
 
-    print(f"\nPlayStation ID:\t\t\t{psnid}")
+    print(f"\nPlayStation ID:\t\t\t{psn_user_id}")
     print(f"PSN account ID:\t\t\t{accountid}")
 
     print(f"\nStatus:\t\t\t\t{str(status).upper()}")
@@ -993,7 +993,7 @@ def psn_monitor_user(psnid, csv_file_name):
 
             if 'Remote end closed connection' in str(e):
                 psnawp = PSNAWP(PSN_NPSSO)
-                psn_user = psnawp.user(online_id=psnid)
+                psn_user = psnawp.user(online_id=psn_user_id)
                 time.sleep(2)
                 continue
 
@@ -1001,7 +1001,7 @@ def psn_monitor_user(psnid, csv_file_name):
             if 'npsso' in str(e):
                 print("* PSN NPSSO key might not be valid anymore!")
                 if ERROR_NOTIFICATION and not email_sent:
-                    m_subject = f"psn_monitor: PSN NPSSO key error! (user: {psnid})"
+                    m_subject = f"psn_monitor: PSN NPSSO key error! (user: {psn_user_id})"
                     m_body = f"PSN NPSSO key might not be valid anymore: {e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                     print(f"Sending email notification to {RECEIVER_EMAIL}")
                     send_email(m_subject, m_body, "", SMTP_SSL)
@@ -1028,7 +1028,7 @@ def psn_monitor_user(psnid, csv_file_name):
             except Exception as e:
                 print(f"* Cannot save last status to '{psn_last_status_file}' file: {e}")
 
-            print(f"PSN user {psnid} changed status from {status_old} to {status}")
+            print(f"PSN user {psn_user_id} changed status from {status_old} to {status}")
             print(f"User was {status_old} for {calculate_timespan(int(status_ts), int(status_ts_old))} ({get_range_of_dates_from_tss(int(status_ts_old), int(status_ts), short=True)})")
 
             m_subject_was_since = f", was {status_old}: {get_range_of_dates_from_tss(int(status_ts_old), int(status_ts), short=True)}"
@@ -1084,8 +1084,8 @@ def psn_monitor_user(psnid, csv_file_name):
 
             change = True
 
-            m_subject = f"PSN user {psnid} is now {status} (after {m_subject_after}{m_subject_was_since})"
-            m_body = f"PSN user {psnid} changed status from {status_old} to {status}\n\nUser was {status_old} for {calculate_timespan(int(status_ts), int(status_ts_old))}{m_body_was_since}{m_body_short_offline_msg}{m_body_user_in_game}{m_body_played_games}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+            m_subject = f"PSN user {psn_user_id} is now {status} (after {m_subject_after}{m_subject_was_since})"
+            m_body = f"PSN user {psn_user_id} changed status from {status_old} to {status}\n\nUser was {status_old} for {calculate_timespan(int(status_ts), int(status_ts_old))}{m_body_was_since}{m_body_short_offline_msg}{m_body_user_in_game}{m_body_played_games}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
             if ACTIVE_INACTIVE_NOTIFICATION and act_inact_flag:
                 print(f"Sending email notification to {RECEIVER_EMAIL}")
                 send_email(m_subject, m_body, "", SMTP_SSL)
@@ -1102,30 +1102,30 @@ def psn_monitor_user(psnid, csv_file_name):
 
             # User changed the game
             if game_name_old and game_name:
-                print(f"PSN user {psnid} changed game from '{game_name_old}' to '{game_name}'{launchplatform_str} after {calculate_timespan(int(game_ts), int(game_ts_old))}")
+                print(f"PSN user {psn_user_id} changed game from '{game_name_old}' to '{game_name}'{launchplatform_str} after {calculate_timespan(int(game_ts), int(game_ts_old))}")
                 print(f"User played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to ')}")
                 game_total_ts += (int(game_ts) - int(game_ts_old))
                 games_number += 1
-                m_body = f"PSN user {psnid} changed game from '{game_name_old}' to '{game_name}'{launchplatform_str} after {calculate_timespan(int(game_ts), int(game_ts_old))}\n\nUser played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to ')}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                m_body = f"PSN user {psn_user_id} changed game from '{game_name_old}' to '{game_name}'{launchplatform_str} after {calculate_timespan(int(game_ts), int(game_ts_old))}\n\nUser played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to ')}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                 if launchplatform:
                     launchplatform_str = f"{launchplatform}, "
-                m_subject = f"PSN user {psnid} changed game to '{game_name}' ({launchplatform_str}after {calculate_timespan(int(game_ts), int(game_ts_old), show_seconds=False)}: {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True)})"
+                m_subject = f"PSN user {psn_user_id} changed game to '{game_name}' ({launchplatform_str}after {calculate_timespan(int(game_ts), int(game_ts_old), show_seconds=False)}: {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True)})"
 
             # User started playing new game
             elif not game_name_old and game_name:
-                print(f"PSN user {psnid} started playing '{game_name}'{launchplatform_str}")
+                print(f"PSN user {psn_user_id} started playing '{game_name}'{launchplatform_str}")
                 games_number += 1
-                m_subject = f"PSN user {psnid} now plays '{game_name}'{launchplatform_str}"
-                m_body = f"PSN user {psnid} now plays '{game_name}'{launchplatform_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                m_subject = f"PSN user {psn_user_id} now plays '{game_name}'{launchplatform_str}"
+                m_body = f"PSN user {psn_user_id} now plays '{game_name}'{launchplatform_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
 
             # User stopped playing the game
             elif game_name_old and not game_name:
-                print(f"PSN user {psnid} stopped playing '{game_name_old}' after {calculate_timespan(int(game_ts), int(game_ts_old))}")
+                print(f"PSN user {psn_user_id} stopped playing '{game_name_old}' after {calculate_timespan(int(game_ts), int(game_ts_old))}")
                 print(f"User played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to ')}")
                 if not game_total_after_offline_counted:
                     game_total_ts += (int(game_ts) - int(game_ts_old))
-                m_subject = f"PSN user {psnid} stopped playing '{game_name_old}' (after {calculate_timespan(int(game_ts), int(game_ts_old), show_seconds=False)}: {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True)})"
-                m_body = f"PSN user {psnid} stopped playing '{game_name_old}' after {calculate_timespan(int(game_ts), int(game_ts_old))}\n\nUser played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to ')}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                m_subject = f"PSN user {psn_user_id} stopped playing '{game_name_old}' (after {calculate_timespan(int(game_ts), int(game_ts_old), show_seconds=False)}: {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True)})"
+                m_body = f"PSN user {psn_user_id} stopped playing '{game_name_old}' after {calculate_timespan(int(game_ts), int(game_ts_old))}\n\nUser played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to ')}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
 
             change = True
 
@@ -1186,9 +1186,9 @@ def main():
 
     # Positional
     parser.add_argument(
-        "psn_id",
+        "psn_user_id",
         nargs="?",
-        metavar="PSN_ID",
+        metavar="PSN_USER_ID",
         help="User's PSN ID",
         type=str
     )
@@ -1291,7 +1291,7 @@ def main():
         dest="disable_logging",
         action="store_true",
         default=None,
-        help="Disable logging to psn_monitor_<psn_id>.log"
+        help="Disable logging to psn_monitor_<psn_user_id>.log"
     )
 
     args = parser.parse_args()
@@ -1378,8 +1378,8 @@ def main():
             sys.exit(1)
         sys.exit(0)
 
-    if not args.psn_id:
-        print("* Error: PSN_ID needs to be defined !")
+    if not args.psn_user_id:
+        print("* Error: PSN_USER_ID needs to be defined !")
         sys.exit(1)
 
     if args.npsso_key:
@@ -1418,7 +1418,7 @@ def main():
         if log_path.is_dir():
             raise SystemExit(f"* Error: PSN_LOGFILE '{log_path}' is a directory, expected a filename")
         if log_path.suffix == "":
-            log_path = log_path.with_name(f"{log_path.name}_{args.psn_id}.log")
+            log_path = log_path.with_name(f"{log_path.name}_{args.psn_user_id}.log")
         log_path.parent.mkdir(parents=True, exist_ok=True)
         FINAL_LOG_PATH = str(log_path)
         sys.stdout = Logger(FINAL_LOG_PATH)
@@ -1447,7 +1447,7 @@ def main():
     print(f"* Dotenv file:\t\t\t{env_path or 'None'}")
     print(f"* Local timezone:\t\t{LOCAL_TIMEZONE}")
 
-    out = f"\nMonitoring user with PSN ID {args.psn_id}"
+    out = f"\nMonitoring user with PSN ID {args.psn_user_id}"
     print(out)
     print("-" * len(out))
 
@@ -1459,7 +1459,7 @@ def main():
         signal.signal(signal.SIGABRT, decrease_active_check_signal_handler)
         signal.signal(signal.SIGHUP, reload_secrets_signal_handler)
 
-    psn_monitor_user(args.psn_id, CSV_FILE)
+    psn_monitor_user(args.psn_user_id, CSV_FILE)
 
     sys.stdout = stdout_bck
     sys.exit(0)
