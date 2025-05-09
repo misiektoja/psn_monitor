@@ -108,7 +108,8 @@ CSV_FILE = ""
 # Can also be set using the --env-file flag
 DOTENV_FILE = ""
 
-# Base name of the log file. The tool will save its output to psn_monitor_<psn_user_id>.log file
+# Base name for the log file. Output will be saved to psn_monitor_<psn_user_id>.log
+# Can include a directory path to specify the location, e.g. ~/some_dir/psn_monitor
 PSN_LOGFILE = "psn_monitor"
 
 # Whether to disable logging to psn_monitor_<psn_user_id>.log
@@ -1428,10 +1429,12 @@ def main():
 
     if not DISABLE_LOGGING:
         log_path = Path(os.path.expanduser(PSN_LOGFILE))
-        if log_path.is_dir():
-            raise SystemExit(f"* Error: PSN_LOGFILE '{log_path}' is a directory, expected a filename")
-        if log_path.suffix == "":
-            log_path = log_path.with_name(f"{log_path.name}_{args.psn_user_id}.log")
+        if log_path.parent != Path('.'):
+            if log_path.suffix == "":
+                log_path = log_path.parent / f"{log_path.name}_{args.psn_user_id}.log"
+        else:
+            if log_path.suffix == "":
+                log_path = Path(f"{log_path.name}_{args.psn_user_id}.log")
         log_path.parent.mkdir(parents=True, exist_ok=True)
         FINAL_LOG_PATH = str(log_path)
         sys.stdout = Logger(FINAL_LOG_PATH)
