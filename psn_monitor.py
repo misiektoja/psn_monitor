@@ -216,6 +216,7 @@ import re
 import ipaddress
 try:
     from psnawp_api import PSNAWP
+    from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
 except ModuleNotFoundError:
     raise SystemExit("Error: Couldn't find the PSNAWP library !\n\nTo install it, run:\n    pip3 install PSNAWP\n\nOnce installed, re-run this tool. For more help, visit:\nhttps://github.com/isFakeAccount/psnawp")
 import shutil
@@ -813,7 +814,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     try:
         psn_user_presence = psn_user.get_presence()
     except Exception as e:
-        print(f"* Error, cannot get presence for user {psn_user_id}: {e}")
+        print(f"* Error: Cannot get presence for user {psn_user_id}: {e}")
         sys.exit(1)
 
     status = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
@@ -946,10 +947,10 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
     m_subject = m_body = ""
 
-    if status and status != "offline":
-        sleep_interval = PSN_ACTIVE_CHECK_INTERVAL
-    else:
-        sleep_interval = PSN_CHECK_INTERVAL
+    def get_sleep_interval():
+        return PSN_ACTIVE_CHECK_INTERVAL if status and status != "offline" else PSN_CHECK_INTERVAL
+
+    sleep_interval = get_sleep_interval()
 
     time.sleep(sleep_interval)
 
@@ -961,7 +962,6 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             signal.alarm(FUNCTION_TIMEOUT)
         try:
             psn_user_presence = psn_user.get_presence()
-            status = ""
             status = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
             gametitleinfolist = psn_user_presence["basicPresence"].get("gameTitleInfoList")
             game_name = ""
@@ -970,7 +970,6 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 game_name = gametitleinfolist[0].get("titleName")
                 launchplatform = gametitleinfolist[0].get("launchPlatform")
                 launchplatform = str(launchplatform).upper()
-            email_sent = False
             if platform.system() != 'Windows':
                 signal.alarm(0)
             if not status:
@@ -984,33 +983,47 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             print_cur_ts("Timestamp:\t\t\t")
             time.sleep(FUNCTION_TIMEOUT)
             continue
+
+        except PSNAWPAuthenticationError as auth_err:
+            if platform.system() != 'Windows':
+                signal.alarm(0)
+            sleep_interval = get_sleep_interval()
+            print(f"* PSN NPSSO key might not be valid anymore: {auth_err}")
+            if ERROR_NOTIFICATION and not email_sent:
+                m_subject = f"psn_monitor: PSN NPSSO key error! (user: {psn_user_id})"
+                m_body = f"PSN NPSSO key might not be valid anymore: {auth_err}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                print(f"Sending email notification to {RECEIVER_EMAIL}")
+                send_email(m_subject, m_body, "", SMTP_SSL)
+                email_sent = True
+            print_cur_ts("Timestamp:\t\t\t")
+            time.sleep(sleep_interval)
+            continue
+
         except Exception as e:
             if platform.system() != 'Windows':
                 signal.alarm(0)
 
-            if status and status != "offline":
-                sleep_interval = PSN_ACTIVE_CHECK_INTERVAL
-            else:
-                sleep_interval = PSN_CHECK_INTERVAL
-
             if 'Remote end closed connection' in str(e):
-                psnawp = PSNAWP(PSN_NPSSO)
-                psn_user = psnawp.user(online_id=psn_user_id)
-                time.sleep(2)
+                try:
+                    psnawp = PSNAWP(PSN_NPSSO)
+                    psn_user = psnawp.user(online_id=psn_user_id)
+                except Exception:
+                    pass
+                time.sleep(FUNCTION_TIMEOUT)
                 continue
 
+            sleep_interval = get_sleep_interval()
             print(f"* Error, retrying in {display_time(sleep_interval)}: {e}")
-            if 'npsso' in str(e):
-                print("* PSN NPSSO key might not be valid anymore!")
-                if ERROR_NOTIFICATION and not email_sent:
-                    m_subject = f"psn_monitor: PSN NPSSO key error! (user: {psn_user_id})"
-                    m_body = f"PSN NPSSO key might not be valid anymore: {e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                    print(f"Sending email notification to {RECEIVER_EMAIL}")
-                    send_email(m_subject, m_body, "", SMTP_SSL)
-                    email_sent = True
             print_cur_ts("Timestamp:\t\t\t")
             time.sleep(sleep_interval)
             continue
+
+        else:
+            email_sent = False
+
+        finally:
+            if platform.system() != 'Windows':
+                signal.alarm(0)
 
         change = False
         act_inact_flag = False
@@ -1155,10 +1168,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             print_cur_ts("Liveness check, timestamp:\t")
             alive_counter = 0
 
-        if status and status != "offline":
-            time.sleep(PSN_ACTIVE_CHECK_INTERVAL)
-        else:
-            time.sleep(PSN_CHECK_INTERVAL)
+        sleep_interval = get_sleep_interval()
+        time.sleep(sleep_interval)
 
 
 def main():
