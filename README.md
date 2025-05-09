@@ -2,6 +2,7 @@
 
 psn_monitor is a tool for real-time monitoring of Sony PlayStation (PSN) players' activities.
 
+<a id="features"></a>
 ## Features
 
 - Real-time tracking of PlayStation users' gaming activity (including detection when a user gets online/offline or plays games)
@@ -11,9 +12,10 @@ psn_monitor is a tool for real-time monitoring of Sony PlayStation (PSN) players
 - Possibility to control the running copy of the script via signals
 
 <p align="center">
-   <img src="./assets/psn_monitor.png" alt="psn_monitor_screenshot" width="85%"/>
+   <img src="https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/assets/psn_monitor.png" alt="psn_monitor_screenshot" width="85%"/>
 </p>
 
+<a id="table-of-contents"></a>
 ## Table of Contents
 
 1. [Requirements](#requirements)
@@ -38,6 +40,7 @@ psn_monitor is a tool for real-time monitoring of Sony PlayStation (PSN) players
 6. [Change Log](#change-log)
 7. [License](#license)
 
+<a id="requirements"></a>
 ## Requirements
 
 * Python 3.10 or higher
@@ -51,17 +54,20 @@ Tested on:
 
 It should work on other versions of macOS, Linux, Unix and Windows as well.
 
+<a id="installation"></a>
 ## Installation
 
+<a id="install-from-pypi"></a>
 ### Install from PyPI
 
 ```sh
 pip install psn_monitor
 ```
 
+<a id="manual-installation"></a>
 ### Manual Installation
 
-Download the *[psn_monitor.py](psn_monitor.py)* file to the desired location.
+Download the *[psn_monitor.py](https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/psn_monitor.py)* file to the desired location.
 
 Install dependencies via pip:
 
@@ -69,12 +75,13 @@ Install dependencies via pip:
 pip install PSNAWP requests python-dateutil pytz tzlocal python-dotenv
 ```
 
-Alternatively, from the downloaded *[requirements.txt](requirements.txt)*:
+Alternatively, from the downloaded *[requirements.txt](https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/requirements.txt)*:
 
 ```sh
 pip install -r requirements.txt
 ```
 
+<a id="quick-start"></a>
 ## Quick Start
 
 - Grab your [PSN npsso code](#psn-npsso-code) and track the `psn_user_id` gaming activities:
@@ -95,8 +102,10 @@ To get the list of all supported command-line arguments / flags:
 psn_monitor --help
 ```
 
+<a id="configuration"></a>
 ## Configuration
 
+<a id="configuration-file"></a>
 ### Configuration File
 
 Most settings can be configured via command-line arguments.
@@ -110,6 +119,7 @@ psn_monitor --generate-config > psn_monitor.conf
 
 Edit the `psn_monitor.conf` file and change any desired configuration options (detailed comments are provided for each).
 
+<a id="psn-npsso-code"></a>
 ### PSN NPSSO Code
 
 Log in to your [My PlayStation](https://my.playstation.com/) account.
@@ -130,6 +140,7 @@ Tokens expire after 2 months. The tool alerts on expiration.
 
 If you store the `PSN_NPSSO` in a dotenv file you can update its value and send a `SIGHUP` signal to the process to reload the file with the new `npsso` value without restarting the tool. More info in [Storing Secrets](#storing-secrets) and [Signal Controls (macOS/Linux/Unix)](#signal-controls-macoslinuxunix).
 
+<a id="user-privacy-settings"></a>
 ### User Privacy Settings
 
 In order to monitor PlayStation user activity, proper privacy settings need to be enabled on the monitored user account.
@@ -138,6 +149,7 @@ The user should go to [PlayStation account management](https://www.playstation.c
 
 The value in **Privacy Settings → Personal Info | Messaging → Online Status and Now Playing** should be set set to **Friends only** or **Anyone**.
 
+<a id="time-zone"></a>
 ### Time Zone
 
 By default, time zone is auto-detected using `tzlocal`. You can set it manually in `psn_monitor.conf`:
@@ -152,6 +164,7 @@ You can get the list of all time zones supported by pytz like this:
 python3 -c "import pytz; print('\n'.join(pytz.all_timezones))"
 ```
 
+<a id="smtp-settings"></a>
 ### SMTP Settings
 
 If you want to use email notifications functionality, configure SMTP settings in the `psn_monitor.conf` file. 
@@ -162,6 +175,7 @@ Verify your SMTP settings by using `--send-test-email` flag (the tool will try t
 psn_monitor --send-test-email
 ```
 
+<a id="storing-secrets"></a>
 ### Storing Secrets
 
 It is recommended to store secrets like `PSN_NPSSO` or `SMTP_PASSWORD` as either an environment variable or in a dotenv file.
@@ -198,8 +212,10 @@ psn_monitor <psn_user_id> --env-file none
 
 As a fallback, you can also store secrets in the configuration file or source code.
 
+<a id="usage"></a>
 ## Usage
 
+<a id="monitoring-mode"></a>
 ### Monitoring Mode
 
 To monitor specific user activity, just type the PlayStation (PSN) user's id (`psn_user_id` in the example below):
@@ -234,6 +250,7 @@ The tool automatically saves its output to `psn_monitor_<psn_user_id>.log` file.
 
 The tool also saves the timestamp and last status (after every change) to `psn_<psn_user_id>_last_status.json` file, so the last status is available after the restart of the tool.
 
+<a id="email-notifications"></a>
 ### Email Notifications
 
 To enable email notifications when a user gets online or offline:
@@ -265,9 +282,10 @@ Make sure you defined your SMTP settings earlier (see [SMTP settings](#smtp-sett
 Example email:
 
 <p align="center">
-   <img src="./assets/psn_monitor_email_notifications.png" alt="psn_monitor_email_notifications" width="80%"/>
+   <img src="https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/assets/psn_monitor_email_notifications.png" alt="psn_monitor_email_notifications" width="80%"/>
 </p>
 
+<a id="csv-export"></a>
 ### CSV Export
 
 If you want to save all reported activities of the PSN user to a CSV file, set `CSV_FILE` or use `-b` flag:
@@ -278,6 +296,7 @@ psn_monitor <psn_user_id> -b psn_user_id.csv
 
 The file will be automatically created if it does not exist.
 
+<a id="check-intervals"></a>
 ### Check Intervals
 
 If you want to customize polling intervals, use `-k` and `-c` flags (or corresponding configuration options):
@@ -289,6 +308,7 @@ psn_monitor <psn_user_id> -k 30 -c 120
 * `PSN_ACTIVE_CHECK_INTERVAL`, `-k`: check interval when the user is online (seconds)
 * `PSN_CHECK_INTERVAL`, `-c`: check interval when the user is offline (seconds)
 
+<a id="signal-controls-macoslinuxunix"></a>
 ### Signal Controls (macOS/Linux/Unix)
 
 The tool has several signal handlers implemented which allow to change behavior of the tool without a need to restart it with new configuration options / flags.
@@ -311,6 +331,7 @@ pkill -USR1 -f "psn_monitor <psn_user_id>"
 
 As Windows supports limited number of signals, this functionality is available only on Linux/Unix/macOS.
 
+<a id="coloring-log-output-with-grc"></a>
 ### Coloring Log Output with GRC
 
 You can use [GRC](https://github.com/garabik/grc) to color logs.
@@ -323,7 +344,7 @@ Add to your GRC config (`~/.grc/grc.conf`):
 conf.monitor_logs
 ```
 
-Now copy the [conf.monitor_logs](grc/conf.monitor_logs) to your `~/.grc/` and log files should be nicely colored when using `grc` tool.
+Now copy the [conf.monitor_logs](https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/grc/conf.monitor_logs) to your `~/.grc/` and log files should be nicely colored when using `grc` tool.
 
 Example:
 
@@ -331,10 +352,12 @@ Example:
 grc tail -F -n 100 psn_monitor_<psn_user_id>.log
 ```
 
+<a id="change-log"></a>
 ## Change Log
 
-See [RELEASE_NOTES.md](RELEASE_NOTES.md) for details.
+See [RELEASE_NOTES.md](https://github.com/misiektoja/psn_monitor/blob/main/RELEASE_NOTES.md) for details.
 
+<a id="license"></a>
 ## License
 
-Licensed under GPLv3. See [LICENSE](LICENSE).
+Licensed under GPLv3. See [LICENSE](https://github.com/misiektoja/psn_monitor/blob/main/LICENSE).
