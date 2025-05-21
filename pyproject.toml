@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "psn_monitor"
+version = "1.5"
+description = "Tool implementing real-time tracking of Sony PlayStation (PSN) players activities"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICEN[CS]E*"]
+authors = [{ name = "Michal Szymanski", email = "misiektoja-pypi@rm-rf.ninja" }]
+requires-python = ">=3.10"
+dependencies = [
+  "PSNAWP>=2.0.0",
+  "requests>=2.0",
+  "python-dateutil>=2.8",
+  "pytz>=2020.1",
+  "tzlocal>=4.0",
+  "python-dotenv>=0.19",
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS :: MacOS X",
+]
+keywords = ["psn", "playstation","monitoring", "tracking", "real-time", "osint", "psnawp"]
+
+[project.urls]
+Homepage = "https://github.com/misiektoja/psn_monitor"
+Source   = "https://github.com/misiektoja/psn_monitor"
+Changelog= "https://github.com/misiektoja/psn_monitor/blob/main/RELEASE_NOTES.md"
+
+[project.scripts]
+psn_monitor = "psn_monitor:main"
+
+[tool.setuptools]
+py-modules = ["psn_monitor"]
+include-package-data = true
