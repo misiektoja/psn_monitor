@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.5
+v1.5.1
 
 Tool implementing real-time tracking of Sony PlayStation (PSN) players activities:
 https://github.com/misiektoja/psn_monitor/
@@ -16,7 +16,7 @@ tzlocal (optional)
 python-dotenv (optional)
 """
 
-VERSION = 1.5
+VERSION = "1.5.1"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -116,7 +116,7 @@ PSN_LOGFILE = "psn_monitor"
 # Can also be disabled via the -d flag
 DISABLE_LOGGING = False
 
-# Width of horizontal line (─)
+# Width of horizontal line
 HORIZONTAL_LINE = 113
 
 # Whether to clear the terminal screen after starting the tool
