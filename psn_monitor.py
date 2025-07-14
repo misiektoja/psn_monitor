@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.5.1
+v1.5.2
 
 Tool implementing real-time tracking of Sony PlayStation (PSN) players activities:
 https://github.com/misiektoja/psn_monitor/
@@ -16,7 +16,7 @@ tzlocal (optional)
 python-dotenv (optional)
 """
 
-VERSION = "1.5.1"
+VERSION = "1.5.2"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -947,6 +947,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     email_sent = False
 
     m_subject = m_body = ""
+    error_streak = 0
 
     def get_sleep_interval():
         return PSN_ACTIVE_CHECK_INTERVAL if status and status != "offline" else PSN_CHECK_INTERVAL
@@ -1010,8 +1011,20 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                     psn_user = psnawp.user(online_id=psn_user_id)
                 except Exception:
                     pass
+                error_streak += 1
                 time.sleep(FUNCTION_TIMEOUT)
-                continue
+
+            else:
+                error_streak += 1
+
+            msg = str(e).lower()
+            likely_auth = ('401' in msg) or ('expired' in msg) or ('invalid' in msg) or ('connection reset by peer' in msg) or ('connection aborted' in msg)
+            if likely_auth and ERROR_NOTIFICATION and not email_sent and error_streak >= 5:
+                m_subject = f"psn_monitor: PSN NPSSO key error! (user: {psn_user_id})"
+                m_body = f"PSN NPSSO key might not be valid anymore: {e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                print(f"Sending email notification to {RECEIVER_EMAIL}")
+                send_email(m_subject, m_body, "", SMTP_SSL)
+                email_sent = True
 
             sleep_interval = get_sleep_interval()
             print(f"* Error, retrying in {display_time(sleep_interval)}: {e}")
@@ -1021,6 +1034,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
         else:
             email_sent = False
+            error_streak = 0
 
         finally:
             if platform.system() != 'Windows':
