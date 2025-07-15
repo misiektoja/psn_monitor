@@ -1005,20 +1005,36 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             if platform.system() != 'Windows':
                 signal.alarm(0)
 
-            if 'Remote end closed connection' in str(e):
+            msg = str(e).lower()
+            # Connection-related errors that can often be fixed by recreating the session
+            connection_error = ('remote end closed connection' in msg or 'connection reset by peer' in msg or 'connection aborted' in msg)
+
+            if connection_error:
                 try:
                     psnawp = PSNAWP(PSN_NPSSO)
                     psn_user = psnawp.user(online_id=psn_user_id)
                 except Exception:
                     pass
                 error_streak += 1
-                time.sleep(FUNCTION_TIMEOUT)
+                # For connection errors, retry quickly since they're often transient
+                retry_delay = FUNCTION_TIMEOUT
+                # However, if connection errors persist, it might indicate an expired NPSSO token
+                # Send notification after 5+ consecutive connection errors
+                if ERROR_NOTIFICATION and not email_sent and error_streak >= 5:
+                    m_subject = f"psn_monitor: PSN NPSSO key might be expired! (user: {psn_user_id})"
+                    m_body = f"Multiple consecutive connection errors detected - this may indicate an expired NPSSO token.\n\nError: {e}\n\nError streak: {error_streak}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                    print(f"Sending email notification to {RECEIVER_EMAIL}")
+                    send_email(m_subject, m_body, "", SMTP_SSL)
+                    email_sent = True
+                # print(f"* Connection error, recreating session and retrying in {display_time(retry_delay)}: {e}")
+                print_cur_ts("Timestamp:\t\t\t")
+                time.sleep(retry_delay)
+                continue
 
-            else:
-                error_streak += 1
+            error_streak += 1
 
-            msg = str(e).lower()
-            likely_auth = ('401' in msg) or ('expired' in msg) or ('invalid' in msg) or ('connection reset by peer' in msg) or ('connection aborted' in msg)
+            # Check for authentication errors (excluding connection errors which we already handled)
+            likely_auth = ('401' in msg) or ('expired' in msg) or ('invalid' in msg)
             if likely_auth and ERROR_NOTIFICATION and not email_sent and error_streak >= 5:
                 m_subject = f"psn_monitor: PSN NPSSO key error! (user: {psn_user_id})"
                 m_body = f"PSN NPSSO key might not be valid anymore: {e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
