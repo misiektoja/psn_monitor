@@ -982,8 +982,8 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
         print(f"- {dt_fmt} | {game} | {ttype} | {tname}")
 
 
-# Does a single poll and displays user status (for -l/--list mode)
-def list_user_status(psn_user_id):
+# Gets detailed user information and displays it (for -i/--info mode)
+def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
     print(f"* Fetching details for PlayStation user '{psn_user_id}'... this may take a moment\n")
 
     try:
@@ -1031,7 +1031,8 @@ def list_user_status(psn_user_id):
     launchplatform = ""
 
     if gametitleinfolist:
-        game_name = gametitleinfolist[0].get("titleName")
+        game_name_raw = gametitleinfolist[0].get("titleName")
+        game_name = normalize_ascii(game_name_raw) if game_name_raw else ""
         launchplatform = gametitleinfolist[0].get("launchPlatform")
         launchplatform = str(launchplatform).upper()
 
@@ -1125,132 +1126,135 @@ def list_user_status(psn_user_id):
             except Exception:
                 pass
 
-    try:
-        print(f"\n* Getting trophy summary ...")
-        ts = psn_user.trophy_summary()
-        et = ts.earned_trophies
-        prog = int(ts.progress) if ts.progress is not None else 0
-        print(f"\nTrophy level:\t\t\t{ts.trophy_level} ({prog}% to next, tier {ts.tier})")
-        print(
-            "Trophies earned:\t\t"
-            f"{et.platinum} Platinum, {et.gold} Gold, {et.silver} Silver, {et.bronze} Bronze "
-            f"({et.platinum + et.gold + et.silver + et.bronze} total)"
-        )
-    except Exception:
-        pass
-
-    # Show the latest earned trophies
-    num_trophies = 5
-    try:
-        print(f"\n* Getting list of last {num_trophies} earned trophies ...\n")
-        print_last_earned_trophies(psn_user, max_items=num_trophies, title_limit=15)
-    except Exception:
-        pass
-
-    try:
-        # Helper function to compact duration format, convert "X day(s), HH:MM:SS" to "Xd HH:MM:SS"
-        def _compact_duration(s):
-            if not s:
-                return "0:00:00"
-            s = str(s).strip()
-
-            if "day" in s.lower():
-                try:
-                    if "," in s:
-                        parts = s.split(",", 1)
-                        days_part = parts[0].strip()            # "1 day" / "2 days"
-                        time_part = parts[1].strip()            # "23:47:54"
-                        d = int(days_part.split()[0])
-                        return f"{d}d {time_part}"
-                    else:
-                        # No comma, try to extract days anyway (unlikely but handle it)
-                        words = s.split()
-                        if len(words) >= 2 and words[1].lower().startswith("day"):
-                            d = int(words[0])
-                            if len(words) > 2:
-                                time_part = " ".join(words[2:])
-                                return f"{d}d {time_part}"
-                            return f"{d}d"
-                except (ValueError, IndexError):
-                    return s  # fallback to original if parsing fails
-            return s
-
-        def _shorten_middle(s, max_len, ellipsis="..."):
-            if s is None:
-                return ""
-            s = str(s)
-            if len(s) <= max_len:
-                return s
-            keep = max_len - len(ellipsis)
-            if keep <= 0:
-                return ellipsis[:max_len]
-            left = keep // 2
-            right = keep - left
-            return f"{s[:left]}{ellipsis}{s[-right:]}"
-
-        recent_entries = []
-        print(f"\n* Getting list of recently played games ...")
-        for i, t in enumerate(psn_user.title_stats(limit=10, page_size=50), 1):
-            if not t:
-                continue
-            name = t.name or "(unknown)"
-            cat = getattr(getattr(t, "category", None), "name", "UNKNOWN")
-            last_played = (
-                get_date_from_ts(int(t.last_played_date_time.timestamp()))
-                if t.last_played_date_time else "n/a"
-            )
-            total_raw = str(t.play_duration) if t.play_duration else "0:00:00"
-            # Compact duration immediately to ensure it fits in the column
-            total = _compact_duration(total_raw)
-            recent_entries.append(f"Recent #{i}:\t\t\t{name} | {cat} | last played {last_played} | total {total}")
-
-        # Decide column widths based on terminal size
+    # Show trophy summary and last earned trophies only if requested
+    if include_trophies:
         try:
-            import shutil
-            term_width = shutil.get_terminal_size(fallback=(100, 24)).columns
+            print(f"\n* Getting trophy summary ...")
+            ts = psn_user.trophy_summary()
+            et = ts.earned_trophies
+            prog = int(ts.progress) if ts.progress is not None else 0
+            print(f"\nTrophy level:\t\t\t{ts.trophy_level} ({prog}% to next, tier {ts.tier})")
+            print(
+                "Trophies earned:\t\t"
+                f"{et.platinum} Platinum, {et.gold} Gold, {et.silver} Silver, {et.bronze} Bronze "
+                f"({et.platinum + et.gold + et.silver + et.bronze} total)"
+            )
         except Exception:
-            term_width = 100
+            pass
 
-        w_num = 3
-        w_platform = 8
-        w_last = 24
-        w_total = 14  # fits "999d 23:59:59" (14 chars) after compacting "X day(s), HH:MM:SS" -> "Xd HH:MM:SS"
-        fixed = 1 + w_num + 2 + w_platform + 2 + w_last + 2 + w_total
-        w_title = max(24, term_width - fixed)
+        num_trophies = 5
+        try:
+            print(f"\n* Getting list of last {num_trophies} earned trophies ...\n")
+            print_last_earned_trophies(psn_user, max_items=num_trophies, title_limit=15)
+        except Exception:
+            pass
 
-        # Only print the table if we have entries
-        if recent_entries:
-            print()
-            hdr = f"{'#'.ljust(w_num)}  {'Title'.ljust(w_title)}  {'Platform'.ljust(w_platform)}  {'Last played'.ljust(w_last)}  {'Total'.ljust(w_total)}"
-            sep = f"{'-' * w_num}  {'-' * w_title}  {'-' * w_platform}  {'-' * w_last}  {'-' * w_total}"
-            print(hdr)
-            print(sep)
+    # Show recently played games only if requested
+    if show_recent_games:
+        try:
+            # Helper function to compact duration format, convert "X day(s), HH:MM:SS" to "Xd HH:MM:SS"
+            def _compact_duration(s):
+                if not s:
+                    return "0:00:00"
+                s = str(s).strip()
 
-            for i, entry in enumerate(recent_entries, 1):
-                try:
-                    _, rest = entry.split(":", 1)
-                    parts = rest.strip().split("|")
-                    name = parts[0].strip()
-                    cat = parts[1].strip()
-                    last_played = parts[2].replace("last played", "").strip()
-                    total = _compact_duration(parts[3].replace("total", "").strip())
-                except Exception:
-                    # If parsing ever fails, print raw line as a fallback
-                    print(entry)
+                if "day" in s.lower():
+                    try:
+                        if "," in s:
+                            parts = s.split(",", 1)
+                            days_part = parts[0].strip()            # "1 day" / "2 days"
+                            time_part = parts[1].strip()            # "23:47:54"
+                            d = int(days_part.split()[0])
+                            return f"{d}d {time_part}"
+                        else:
+                            # No comma, try to extract days anyway (unlikely but handle it)
+                            words = s.split()
+                            if len(words) >= 2 and words[1].lower().startswith("day"):
+                                d = int(words[0])
+                                if len(words) > 2:
+                                    time_part = " ".join(words[2:])
+                                    return f"{d}d {time_part}"
+                                return f"{d}d"
+                    except (ValueError, IndexError):
+                        return s  # fallback to original if parsing fails
+                return s
+
+            def _shorten_middle(s, max_len, ellipsis="..."):
+                if s is None:
+                    return ""
+                s = str(s)
+                if len(s) <= max_len:
+                    return s
+                keep = max_len - len(ellipsis)
+                if keep <= 0:
+                    return ellipsis[:max_len]
+                left = keep // 2
+                right = keep - left
+                return f"{s[:left]}{ellipsis}{s[-right:]}"
+
+            recent_entries = []
+            print(f"\n* Getting list of recently played games ...")
+            for i, t in enumerate(psn_user.title_stats(limit=10, page_size=50), 1):
+                if not t:
                     continue
-
-                name_fmt = _shorten_middle(name, w_title)
-                row = (
-                    f"{str(i).ljust(w_num)}  "
-                    f"{name_fmt.ljust(w_title)}  "
-                    f"{cat.ljust(w_platform)}  "
-                    f"{last_played.ljust(w_last)}  "
-                    f"{total.ljust(w_total)}"
+                name_raw = t.name or "(unknown)"
+                name = normalize_ascii(name_raw)
+                cat = getattr(getattr(t, "category", None), "name", "UNKNOWN")
+                last_played = (
+                    get_date_from_ts(int(t.last_played_date_time.timestamp()))
+                    if t.last_played_date_time else "n/a"
                 )
-                print(row)
+                total_raw = str(t.play_duration) if t.play_duration else "0:00:00"
+                # Compact duration immediately to ensure it fits in the column
+                total = _compact_duration(total_raw)
+                recent_entries.append(f"Recent #{i}:\t\t\t{name} | {cat} | last played {last_played} | total {total}")
 
-    except Exception:
-        pass
+            # Decide column widths based on terminal size
+            try:
+                import shutil
+                term_width = shutil.get_terminal_size(fallback=(100, 24)).columns
+            except Exception:
+                term_width = 100
+
+            w_num = 3
+            w_platform = 8
+            w_last = 24
+            w_total = 14  # fits "999d 23:59:59" (14 chars) after compacting "X day(s), HH:MM:SS" -> "Xd HH:MM:SS"
+            fixed = 1 + w_num + 2 + w_platform + 2 + w_last + 2 + w_total
+            w_title = max(24, term_width - fixed)
+
+            # Only print the table if we have entries
+            if recent_entries:
+                print()
+                hdr = f"{'#'.ljust(w_num)}  {'Title'.ljust(w_title)}  {'Platform'.ljust(w_platform)}  {'Last played'.ljust(w_last)}  {'Total'.ljust(w_total)}"
+                sep = f"{'-' * w_num}  {'-' * w_title}  {'-' * w_platform}  {'-' * w_last}  {'-' * w_total}"
+                print(hdr)
+                print(sep)
+
+                for i, entry in enumerate(recent_entries, 1):
+                    try:
+                        _, rest = entry.split(":", 1)
+                        parts = rest.strip().split("|")
+                        name = parts[0].strip()
+                        cat = parts[1].strip()
+                        last_played = parts[2].replace("last played", "").strip()
+                        total = _compact_duration(parts[3].replace("total", "").strip())
+                    except Exception:
+                        # If parsing ever fails, print raw line as a fallback
+                        print(entry)
+                        continue
+
+                    name_fmt = _shorten_middle(name, w_title)
+                    row = (
+                        f"{str(i).ljust(w_num)}  "
+                        f"{name_fmt.ljust(w_title)}  "
+                        f"{cat.ljust(w_platform)}  "
+                        f"{last_played.ljust(w_last)}  "
+                        f"{total.ljust(w_total)}"
+                    )
+                    print(row)
+        except Exception:
+            pass
 
     if game_name:
         launchplatform_str = ""
@@ -1328,7 +1332,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     launchplatform = ""
 
     if gametitleinfolist:
-        game_name = gametitleinfolist[0].get("titleName")
+        game_name_raw = gametitleinfolist[0].get("titleName")
+        game_name = normalize_ascii(game_name_raw) if game_name_raw else ""
         launchplatform = gametitleinfolist[0].get("launchPlatform")
         launchplatform = str(launchplatform).upper()
 
@@ -1497,7 +1502,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             game_name = ""
             launchplatform = ""
             if gametitleinfolist:
-                game_name = gametitleinfolist[0].get("titleName")
+                game_name_raw = gametitleinfolist[0].get("titleName")
+                game_name = normalize_ascii(game_name_raw) if game_name_raw else ""
                 launchplatform = gametitleinfolist[0].get("launchPlatform")
                 launchplatform = str(launchplatform).upper()
             if platform.system() != 'Windows':
@@ -1549,13 +1555,15 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 # However, if connection errors persist, it might indicate an expired NPSSO token
                 # Send notification after 5+ consecutive connection errors
                 if ERROR_NOTIFICATION and not email_sent and error_streak >= 5:
+                    print(f"* Multiple consecutive connection errors detected - this may indicate an expired NPSSO token, error streak {error_streak}: {e}")
                     m_subject = f"psn_monitor: PSN NPSSO key might be expired! (user: {psn_user_id})"
                     m_body = f"Multiple consecutive connection errors detected - this may indicate an expired NPSSO token.\n\nError: {e}\n\nError streak: {error_streak}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                     print(f"Sending email notification to {RECEIVER_EMAIL}")
                     send_email(m_subject, m_body, "", SMTP_SSL)
                     email_sent = True
+                    print_cur_ts("Timestamp:\t\t\t")
                 # print(f"* Connection error, recreating session and retrying in {display_time(retry_delay)}: {e}")
-                print_cur_ts("Timestamp:\t\t\t")
+                # print_cur_ts("Timestamp:\t\t\t")
                 time.sleep(retry_delay)
                 continue
 
@@ -1832,13 +1840,25 @@ def main():
         help="Send test email to verify SMTP settings"
     )
 
-    # Listing
-    listing = parser.add_argument_group("Listing")
-    listing.add_argument(
-        "-l", "--list",
-        dest="list_mode",
+    # User information
+    info = parser.add_argument_group("User information")
+    info.add_argument(
+        "-i", "--info",
+        dest="info_mode",
         action="store_true",
-        help="Perform a single status check and display user information, then exit"
+        help="Get detailed user information and display it, then exit"
+    )
+    info.add_argument(
+        "--trophies",
+        dest="include_trophies",
+        action="store_true",
+        help="Show trophy summary and last earned trophies (only works with -i/--info)"
+    )
+    info.add_argument(
+        "--no-recent-games",
+        dest="no_recent_games",
+        action="store_true",
+        help="Don't fetch recently played games list (only works with -i/--info)"
     )
 
     # Intervals & timers
@@ -1970,8 +1990,10 @@ def main():
         print("* Error: PSN_NPSSO (-n / --npsso_key) value is empty or incorrect")
         sys.exit(1)
 
-    if args.list_mode:
-        list_user_status(args.psn_user_id)
+    if args.info_mode:
+        include_trophies = args.include_trophies if hasattr(args, 'include_trophies') and args.include_trophies else False
+        show_recent_games = not (hasattr(args, 'no_recent_games') and args.no_recent_games)
+        get_user_info(args.psn_user_id, include_trophies=include_trophies, show_recent_games=show_recent_games)
         sys.exit(0)
 
     if args.check_interval:
