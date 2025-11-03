@@ -781,7 +781,7 @@ def resolve_executable(path):
 
 # Does a single poll and displays user status (for -l/--list mode)
 def list_user_status(psn_user_id):
-    print(f"* Getting detailed info for user with Playstation ID '{psn_user_id}' ...\n")
+    print(f"* Getting detailed info for the user with Playstation ID '{psn_user_id}' ... (be patient, it might take time)\n")
 
     try:
         psnawp = PSNAWP(PSN_NPSSO)
@@ -790,6 +790,10 @@ def list_user_status(psn_user_id):
         profile = psn_user.profile()
         aboutme = profile.get("aboutMe")
         isplus = profile.get("isPlus")
+        langs = profile.get("languages") or []
+        is_verified = profile.get("isOfficiallyVerified")
+        fs = psn_user.friendship()
+        share = psn_user.get_shareable_profile_link()
     except Exception as e:
         print(f"* Error: {e}")
         sys.exit(1)
@@ -811,6 +815,7 @@ def list_user_status(psn_user_id):
     psn_platform = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("platform")
     psn_platform = str(psn_platform).upper() if psn_platform else ""
     lastonline = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("lastOnlineDate")
+    availability = psn_user_presence["basicPresence"].get("availability")
 
     lastonline_dt = convert_iso_str_to_datetime(lastonline)
     if lastonline_dt:
@@ -856,13 +861,66 @@ def list_user_status(psn_user_id):
 
     print(f"PlayStation ID:\t\t\t{psn_user_id}")
     print(f"PSN account ID:\t\t\t{accountid}")
-    print(f"Status:\t\t\t\t{str(status).upper()}")
+    print(f"\nStatus:\t\t\t\t{str(status).upper()}")
+    if availability:
+        available_str = "Yes" if availability == "availableToPlay" else "No"
+        print(f"Available to play:\t\t{available_str}")
+
     if psn_platform:
         print(f"Platform:\t\t\t{psn_platform}")
     print(f"PS+ user:\t\t\t{isplus}")
 
+    if is_verified is not None:
+        print(f"Verified:\t\t\t{is_verified}")
+
+    newline_needed = False
+
     if aboutme:
         print(f"\nAbout me:\t\t\t{aboutme}")
+        newline_needed = True
+
+    if langs:
+        prefix = "\n" if not newline_needed else ""
+        print(f"{prefix}Languages:\t\t\t{', '.join(langs)}")
+
+    try:
+        relation = fs.get("friendRelation")
+        print(f"\nRelation:\t\t\t{relation}")
+
+        if relation == "friend":
+            mf = fs.get("mutualFriendsCount")
+            if isinstance(mf, int) and mf >= 0:
+                print(f"Mutual friends:\t\t\t{mf}")
+            elif mf is None:
+                print("Mutual friends:\t\t\tunknown")
+            else:
+                print("Mutual friends:\t\t\thidden")
+        else:
+            # Don't print mutual friends at all
+            pass
+
+    except Exception:
+        pass
+
+    try:
+        print(f"\nProfile URL:\t\t\t{share.get('shareUrl')}")
+        # print(f"Profile QR image:\t\t{share.get('shareImageUrl')}")
+    except Exception:
+        pass
+
+    try:
+        print(f"\n* Getting trophy summary ...")
+        ts = psn_user.trophy_summary()
+        et = ts.earned_trophies
+        prog = int(ts.progress) if ts.progress is not None else 0
+        print(f"\nTrophy level:\t\t\t{ts.trophy_level} ({prog}% to next, tier {ts.tier})")
+        print(
+            "Trophies earned:\t\t"
+            f"{et.platinum} Platinum, {et.gold} Gold, {et.silver} Silver, {et.bronze} Bronze "
+            f"({et.platinum + et.gold + et.silver + et.bronze} total)"
+        )
+    except Exception:
+        pass
 
     if status == "offline" and status_ts_old > 0:
         last_status_dt_str = get_date_from_ts(status_ts_old)
@@ -877,6 +935,111 @@ def list_user_status(psn_user_id):
                     print(f"* User is {str(status).upper()} for:\t\t{calculate_timespan(now_local(), int(last_status_read[0]), show_seconds=False)}")
             except Exception:
                 pass
+
+    try:
+        # Helper function to compact duration format, convert "X day(s), HH:MM:SS" to "Xd HH:MM:SS"
+        def _compact_duration(s):
+            if not s:
+                return "0:00:00"
+            s = str(s).strip()
+
+            if "day" in s.lower():
+                try:
+                    if "," in s:
+                        parts = s.split(",", 1)
+                        days_part = parts[0].strip()            # "1 day" / "2 days"
+                        time_part = parts[1].strip()            # "23:47:54"
+                        d = int(days_part.split()[0])
+                        return f"{d}d {time_part}"
+                    else:
+                        # No comma, try to extract days anyway (unlikely but handle it)
+                        words = s.split()
+                        if len(words) >= 2 and words[1].lower().startswith("day"):
+                            d = int(words[0])
+                            if len(words) > 2:
+                                time_part = " ".join(words[2:])
+                                return f"{d}d {time_part}"
+                            return f"{d}d"
+                except (ValueError, IndexError):
+                    return s  # fallback to original if parsing fails
+            return s
+
+        def _shorten_middle(s, max_len, ellipsis="..."):
+            if s is None:
+                return ""
+            s = str(s)
+            if len(s) <= max_len:
+                return s
+            keep = max_len - len(ellipsis)
+            if keep <= 0:
+                return ellipsis[:max_len]
+            left = keep // 2
+            right = keep - left
+            return f"{s[:left]}{ellipsis}{s[-right:]}"
+
+        recent_entries = []
+        print(f"\n* Getting list of recently played games ...")
+        for i, t in enumerate(psn_user.title_stats(limit=10, page_size=50), 1):
+            if not t:
+                continue
+            name = t.name or "(unknown)"
+            cat = getattr(getattr(t, "category", None), "name", "UNKNOWN")
+            last_played = (
+                get_date_from_ts(int(t.last_played_date_time.timestamp()))
+                if t.last_played_date_time else "n/a"
+            )
+            total_raw = str(t.play_duration) if t.play_duration else "0:00:00"
+            # Compact duration immediately to ensure it fits in the column
+            total = _compact_duration(total_raw)
+            recent_entries.append(f"Recent #{i}:\t\t\t{name} | {cat} | last played {last_played} | total {total}")
+
+        # Decide column widths based on terminal size
+        try:
+            import shutil
+            term_width = shutil.get_terminal_size(fallback=(100, 24)).columns
+        except Exception:
+            term_width = 100
+
+        w_num = 3
+        w_platform = 8
+        w_last = 24
+        w_total = 14  # fits "999d 23:59:59" (14 chars) after compacting "X day(s), HH:MM:SS" -> "Xd HH:MM:SS"
+        fixed = 1 + w_num + 2 + w_platform + 2 + w_last + 2 + w_total
+        w_title = max(24, term_width - fixed)
+
+        # Only print the table if we have entries
+        if recent_entries:
+            print()
+            hdr = f"{'#'.ljust(w_num)}  {'Title'.ljust(w_title)}  {'Platform'.ljust(w_platform)}  {'Last played'.ljust(w_last)}  {'Total'.ljust(w_total)}"
+            sep = f"{'-' * w_num}  {'-' * w_title}  {'-' * w_platform}  {'-' * w_last}  {'-' * w_total}"
+            print(hdr)
+            print(sep)
+
+            for i, entry in enumerate(recent_entries, 1):
+                try:
+                    _, rest = entry.split(":", 1)
+                    parts = rest.strip().split("|")
+                    name = parts[0].strip()
+                    cat = parts[1].strip()
+                    last_played = parts[2].replace("last played", "").strip()
+                    total = _compact_duration(parts[3].replace("total", "").strip())
+                except Exception:
+                    # If parsing ever fails, print raw line as a fallback
+                    print(entry)
+                    continue
+
+                name_fmt = _shorten_middle(name, w_title)
+                row = (
+                    f"{str(i).ljust(w_num)}  "
+                    f"{name_fmt.ljust(w_title)}  "
+                    f"{cat.ljust(w_platform)}  "
+                    f"{last_played.ljust(w_last)}  "
+                    f"{total.ljust(w_total)}"
+                )
+                print(row)
+
+    except Exception:
+        pass
 
     if game_name:
         launchplatform_str = ""
@@ -907,6 +1070,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     except Exception as e:
         print(f"* Error: {e}")
 
+    print("Sneaking into PlayStation like a ninja ... (be patient, secrets take time)\n")
+
     try:
         psnawp = PSNAWP(PSN_NPSSO)
         psn_user = psnawp.user(online_id=psn_user_id)
@@ -914,6 +1079,10 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         profile = psn_user.profile()
         aboutme = profile.get("aboutMe")
         isplus = profile.get("isPlus")
+        langs = profile.get("languages") or []
+        is_verified = profile.get("isOfficiallyVerified")
+        fs = psn_user.friendship()
+        share = psn_user.get_shareable_profile_link()
     except Exception as e:
         print("* Error:", e)
         sys.exit(1)
@@ -935,6 +1104,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     psn_platform = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("platform")
     psn_platform = str(psn_platform).upper() if psn_platform else ""
     lastonline = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("lastOnlineDate")
+    availability = psn_user_presence["basicPresence"].get("availability")
 
     lastonline_dt = convert_iso_str_to_datetime(lastonline)
     if lastonline_dt:
@@ -1013,12 +1183,51 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     print(f"PSN account ID:\t\t\t{accountid}")
 
     print(f"\nStatus:\t\t\t\t{str(status).upper()}")
+    if availability:
+        available_str = "Yes" if availability == "availableToPlay" else "No"
+        print(f"Available to play:\t\t{available_str}")
+
     if psn_platform:
         print(f"Platform:\t\t\t{psn_platform}")
     print(f"PS+ user:\t\t\t{isplus}")
 
+    if is_verified is not None:
+        print(f"Verified:\t\t\t{is_verified}")
+
+    newline_needed = False
+
     if aboutme:
         print(f"\nAbout me:\t\t\t{aboutme}")
+        newline_needed = True
+
+    if langs:
+        prefix = "\n" if not newline_needed else ""
+        print(f"{prefix}Languages:\t\t\t{', '.join(langs)}")
+
+    try:
+        relation = fs.get("friendRelation")
+        print(f"\nRelation:\t\t\t{relation}")
+
+        if relation == "friend":
+            mf = fs.get("mutualFriendsCount")
+            if isinstance(mf, int) and mf >= 0:
+                print(f"Mutual friends:\t\t\t{mf}")
+            elif mf is None:
+                print("Mutual friends:\t\t\tunknown")
+            else:
+                print("Mutual friends:\t\t\thidden")
+        else:
+            # Don't print mutual friends at all
+            pass
+
+    except Exception:
+        pass
+
+    try:
+        print(f"\nProfile URL:\t\t\t{share.get('shareUrl')}")
+        # print(f"Profile QR image:\t\t{share.get('shareImageUrl')}")
+    except Exception:
+        pass
 
     if status != "offline" and game_name:
         launchplatform_str = ""
