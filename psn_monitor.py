@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.5.2
+v1.6
 
 Tool implementing real-time tracking of Sony PlayStation (PSN) players activities:
 https://github.com/misiektoja/psn_monitor/
@@ -16,7 +16,7 @@ tzlocal (optional)
 python-dotenv (optional)
 """
 
-VERSION = "1.5.2"
+VERSION = "1.6"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -779,6 +779,112 @@ def resolve_executable(path):
     raise FileNotFoundError(f"Could not find executable '{path}'")
 
 
+# Does a single poll and displays user status (for -l/--list mode)
+def list_user_status(psn_user_id):
+    print(f"* Getting detailed info for user with Playstation ID '{psn_user_id}' ...\n")
+
+    try:
+        psnawp = PSNAWP(PSN_NPSSO)
+        psn_user = psnawp.user(online_id=psn_user_id)
+        accountid = psn_user.account_id
+        profile = psn_user.profile()
+        aboutme = profile.get("aboutMe")
+        isplus = profile.get("isPlus")
+    except Exception as e:
+        print(f"* Error: {e}")
+        sys.exit(1)
+
+    try:
+        psn_user_presence = psn_user.get_presence()
+    except Exception as e:
+        print(f"* Error: Cannot get presence for user {psn_user_id}: {e}")
+        sys.exit(1)
+
+    status = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
+
+    if not status:
+        print(f"* Error: Cannot get status for user {psn_user_id}")
+        sys.exit(1)
+
+    status = str(status).lower()
+
+    psn_platform = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("platform")
+    psn_platform = str(psn_platform).upper() if psn_platform else ""
+    lastonline = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("lastOnlineDate")
+
+    lastonline_dt = convert_iso_str_to_datetime(lastonline)
+    if lastonline_dt:
+        lastonline_ts = int(lastonline_dt.timestamp())
+    else:
+        lastonline_ts = 0
+
+    gametitleinfolist = psn_user_presence["basicPresence"].get("gameTitleInfoList")
+    game_name = ""
+    launchplatform = ""
+
+    if gametitleinfolist:
+        game_name = gametitleinfolist[0].get("titleName")
+        launchplatform = gametitleinfolist[0].get("launchPlatform")
+        launchplatform = str(launchplatform).upper()
+
+    psn_last_status_file = f"psn_{psn_user_id}_last_status.json"
+    status_ts_old = int(time.time())
+
+    if os.path.isfile(psn_last_status_file):
+        try:
+            with open(psn_last_status_file, 'r', encoding="utf-8") as f:
+                last_status_read = json.load(f)
+            if last_status_read:
+                last_status_ts = last_status_read[0]
+                last_status = last_status_read[1]
+
+                if lastonline_ts and status == "offline":
+                    if lastonline_ts >= last_status_ts:
+                        status_ts_old = lastonline_ts
+                    else:
+                        status_ts_old = last_status_ts
+                elif not lastonline_ts and status == "offline":
+                    status_ts_old = last_status_ts
+                elif status and status != "offline" and status == last_status:
+                    status_ts_old = last_status_ts
+        except Exception:
+            if lastonline_ts and status == "offline":
+                status_ts_old = lastonline_ts
+    else:
+        if lastonline_ts and status == "offline":
+            status_ts_old = lastonline_ts
+
+    print(f"PlayStation ID:\t\t\t{psn_user_id}")
+    print(f"PSN account ID:\t\t\t{accountid}")
+    print(f"Status:\t\t\t\t{str(status).upper()}")
+    if psn_platform:
+        print(f"Platform:\t\t\t{psn_platform}")
+    print(f"PS+ user:\t\t\t{isplus}")
+
+    if aboutme:
+        print(f"\nAbout me:\t\t\t{aboutme}")
+
+    if status == "offline" and status_ts_old > 0:
+        last_status_dt_str = get_date_from_ts(status_ts_old)
+        print(f"\n* Last time user was available:\t{last_status_dt_str}")
+        print(f"* User is OFFLINE for:\t\t{calculate_timespan(now_local(), int(status_ts_old), show_seconds=False)}")
+    elif status != "offline":
+        if os.path.isfile(psn_last_status_file):
+            try:
+                with open(psn_last_status_file, 'r', encoding="utf-8") as f:
+                    last_status_read = json.load(f)
+                if last_status_read and last_status_read[1] == status:
+                    print(f"* User is {str(status).upper()} for:\t\t{calculate_timespan(now_local(), int(last_status_read[0]), show_seconds=False)}")
+            except Exception:
+                pass
+
+    if game_name:
+        launchplatform_str = ""
+        if launchplatform:
+            launchplatform_str = f" ({launchplatform})"
+        print(f"\nUser is currently in-game:\t{game_name}{launchplatform_str}")
+
+
 # Main function that monitors gaming activity of the specified PSN user
 def psn_monitor_user(psn_user_id, csv_file_name):
 
@@ -827,7 +933,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     status = str(status).lower()
 
     psn_platform = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("platform")
-    psn_platform = str(psn_platform).upper()
+    psn_platform = str(psn_platform).upper() if psn_platform else ""
     lastonline = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("lastOnlineDate")
 
     lastonline_dt = convert_iso_str_to_datetime(lastonline)
@@ -835,9 +941,11 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         lastonline_ts = int(lastonline_dt.timestamp())
     else:
         lastonline_ts = 0
+
     gametitleinfolist = psn_user_presence["basicPresence"].get("gameTitleInfoList")
     game_name = ""
     launchplatform = ""
+
     if gametitleinfolist:
         game_name = gametitleinfolist[0].get("titleName")
         launchplatform = gametitleinfolist[0].get("launchPlatform")
@@ -1304,6 +1412,15 @@ def main():
         help="Send test email to verify SMTP settings"
     )
 
+    # Listing
+    listing = parser.add_argument_group("Listing")
+    listing.add_argument(
+        "-l", "--list",
+        dest="list_mode",
+        action="store_true",
+        help="Perform a single status check and display user information, then exit"
+    )
+
     # Intervals & timers
     times = parser.add_argument_group("Intervals & timers")
     times.add_argument(
@@ -1432,6 +1549,10 @@ def main():
     if not PSN_NPSSO or PSN_NPSSO == "your_psn_npsso_code":
         print("* Error: PSN_NPSSO (-n / --npsso_key) value is empty or incorrect")
         sys.exit(1)
+
+    if args.list_mode:
+        list_user_status(args.psn_user_id)
+        sys.exit(0)
 
     if args.check_interval:
         PSN_CHECK_INTERVAL = args.check_interval
