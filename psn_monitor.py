@@ -779,9 +779,212 @@ def resolve_executable(path):
     raise FileNotFoundError(f"Could not find executable '{path}'")
 
 
+# Normalizes Unicode punctuation, symbols and spacing in a string to plain ASCII
+def normalize_ascii(s):
+    if not isinstance(s, str):
+        return s
+    # punctuation & symbols to ASCII
+    s = (s.replace("\u2018", "'").replace("\u2019", "'")  # ‘ ’ -> '
+         .replace("\u201C", '"').replace("\u201D", '"')   # “ ” -> "
+         .replace("\u2013", "-")                          # – -> -
+         .replace("\u2026", "...")                        # … -> ...
+         .replace("\u00A0", " "))                         # NBSP -> space
+    # remove trademark symbols
+    for ch in ("\u00AE", "\u2122"):  # ® ™
+        s = s.replace(ch, "")
+    # collapse doubled single quotes that often appear after smart-quote normalization
+    s = s.replace("''", "'")
+    # collapse multiple spaces
+    while "  " in s:
+        s = s.replace("  ", " ")
+    return s.strip()
+
+
+# Prints the last N earned trophies across titles with game, type and earn date
+def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
+    PT = None
+    try:
+        from psnawp_api.models.trophies import PlatformType as PT  # 3.x
+    except Exception:
+        PT = None  # fallback to string platforms later
+
+    def _get(obj, *names, default=None):
+        for n in names:
+            if hasattr(obj, n):
+                v = getattr(obj, n)
+                if v is not None:
+                    return v
+        return default
+
+    def _platforms_to_try(title):
+        raw = getattr(title, "platform", None)
+        raw_val = getattr(raw, "value", raw)
+        s = (str(raw_val).lower() if raw_val else "")
+        if PT:
+            if "ps5" in s:
+                return [PT.PS5, PT.PS4]
+            if "ps4" in s:
+                return [PT.PS4, PT.PS5]
+            return [PT.PS5, PT.PS4]
+        # string fallback
+        if "ps5" in s:
+            return ["ps5", "ps4"]
+        if "ps4" in s:
+            return ["ps4", "ps5"]
+        return ["ps5", "ps4"]
+
+    def _earn_dt(tr):
+        return _get(tr, "earned_date_time", "earnedDateTime", default=None)
+
+    def _trophy_type_str(tr):
+        raw = _get(tr, "trophy_type", "trophyType", default=None)
+        if raw is None:
+            return "UNKNOWN"
+        if hasattr(raw, "name"):
+            return raw.name
+        return str(raw).upper()
+
+    # title-name resolver (cache)
+    _title_name_cache = {}
+
+    def _resolve_title_name(npcomm, platform):
+        key = (npcomm, str(platform))
+        if key in _title_name_cache:
+            return _title_name_cache[key]
+
+        def _first_name_like(obj):
+            # Try common fields first
+            for fld in ("trophy_title_name", "trophyTitleName", "title_name", "titleName", "name"):
+                if hasattr(obj, fld):
+                    val = getattr(obj, fld)
+                    if isinstance(val, str) and val.strip():
+                        return val.strip()
+            # Fallback: scan attributes that look like "*name"
+            for attr in dir(obj):
+                if attr.startswith("_"):
+                    continue
+                if "name" in attr.lower():
+                    try:
+                        val = getattr(obj, attr)
+                    except Exception:
+                        continue
+                    if isinstance(val, str) and val.strip():
+                        return val.strip()
+            return None
+
+        name = None
+
+        # A) groups often carry the title name
+        try:
+            for g in psn_user.trophy_groups(np_communication_id=npcomm, platform=platform):
+                name = _first_name_like(g)
+                if name:
+                    break
+        except Exception:
+            pass
+
+        # B) per-title summary
+        if not name:
+            try:
+                summ = psn_user.trophy_summary(np_communication_id=npcomm, platform=platform)
+                name = _first_name_like(summ)
+            except Exception:
+                pass
+
+        # C) scan titles
+        if not name:
+            try:
+                for tt in psn_user.trophy_titles(limit=title_limit):
+                    nc = getattr(tt, "np_communication_id", None) or getattr(tt, "npCommunicationId", None)
+                    if nc == npcomm:
+                        name = _first_name_like(tt)
+                        if name:
+                            break
+            except Exception:
+                pass
+
+        if not name:
+            name = npcomm  # last resort
+
+        _title_name_cache[key] = name
+        return name
+    # -------------------------------------
+
+    items = []
+
+    # 1) list titles (no special args for cross-version compat)
+    try:
+        titles_iter = psn_user.trophy_titles(limit=title_limit)
+    except Exception:
+        titles_iter = []
+
+    for tt in titles_iter:
+        npcomm = _get(tt, "np_communication_id", "npCommunicationId", default=None)
+        if not npcomm:
+            continue
+
+        for plat in _platforms_to_try(tt):
+            try:
+                it = psn_user.trophies(
+                    np_communication_id=npcomm,
+                    platform=plat,
+                    include_progress=True,
+                    trophy_group_id="all",
+                )
+            except Exception:
+                continue
+
+            got_any_for_title = False
+            for tr in it:
+                got_any_for_title = True
+                if not getattr(tr, "earned", False):
+                    continue
+                dt = _earn_dt(tr)
+                if not dt:
+                    continue
+
+                game_name = normalize_ascii(_resolve_title_name(npcomm, plat))
+                ttype = _trophy_type_str(tr)
+                tname = _get(tr, "trophy_name", "trophyName", default=None)
+                if not tname:
+                    tname = "(hidden)" if getattr(tr, "hidden", False) else "(unknown)"
+                tname = normalize_ascii(tname)
+
+                items.append((dt, game_name, ttype, tname))
+
+            if got_any_for_title:
+                break  # this platform works for this title
+
+        if len(items) >= max_items:
+            break
+
+    if not items:
+        print("- (no recent trophies found or trophy visibility is restricted)")
+        return
+
+    # 2) sort & print
+    try:
+        items.sort(key=lambda x: x[0], reverse=True)
+    except Exception:
+        def _ts(dt):
+            try:
+                return int(dt.timestamp())
+            except Exception:
+                return -1
+        items.sort(key=lambda x: _ts(x[0]), reverse=True)
+
+    for dt, game, ttype, tname in items[:max_items]:
+        try:
+            ts = int(dt.timestamp())
+            dt_fmt = get_date_from_ts(ts)
+        except Exception:
+            dt_fmt = "n/a"
+        print(f"- {dt_fmt} | {game} | {ttype} | {tname}")
+
+
 # Does a single poll and displays user status (for -l/--list mode)
 def list_user_status(psn_user_id):
-    print(f"* Getting detailed info for the user with Playstation ID '{psn_user_id}' ... (be patient, it might take time)\n")
+    print(f"* Fetching details for PlayStation user '{psn_user_id}'... this may take a moment\n")
 
     try:
         psnawp = PSNAWP(PSN_NPSSO)
@@ -908,6 +1111,20 @@ def list_user_status(psn_user_id):
     except Exception:
         pass
 
+    if status == "offline" and status_ts_old > 0:
+        last_status_dt_str = get_date_from_ts(status_ts_old)
+        print(f"\n* Last time user was available:\t{last_status_dt_str}")
+        print(f"* User is OFFLINE for:\t\t{calculate_timespan(now_local(), int(status_ts_old), show_seconds=False)}")
+    elif status != "offline":
+        if os.path.isfile(psn_last_status_file):
+            try:
+                with open(psn_last_status_file, 'r', encoding="utf-8") as f:
+                    last_status_read = json.load(f)
+                if last_status_read and last_status_read[1] == status:
+                    print(f"* User is {str(status).upper()} for:\t\t{calculate_timespan(now_local(), int(last_status_read[0]), show_seconds=False)}")
+            except Exception:
+                pass
+
     try:
         print(f"\n* Getting trophy summary ...")
         ts = psn_user.trophy_summary()
@@ -922,19 +1139,13 @@ def list_user_status(psn_user_id):
     except Exception:
         pass
 
-    if status == "offline" and status_ts_old > 0:
-        last_status_dt_str = get_date_from_ts(status_ts_old)
-        print(f"\n* Last time user was available:\t{last_status_dt_str}")
-        print(f"* User is OFFLINE for:\t\t{calculate_timespan(now_local(), int(status_ts_old), show_seconds=False)}")
-    elif status != "offline":
-        if os.path.isfile(psn_last_status_file):
-            try:
-                with open(psn_last_status_file, 'r', encoding="utf-8") as f:
-                    last_status_read = json.load(f)
-                if last_status_read and last_status_read[1] == status:
-                    print(f"* User is {str(status).upper()} for:\t\t{calculate_timespan(now_local(), int(last_status_read[0]), show_seconds=False)}")
-            except Exception:
-                pass
+    # Show the latest earned trophies
+    num_trophies = 5
+    try:
+        print(f"\n* Getting list of last {num_trophies} earned trophies ...\n")
+        print_last_earned_trophies(psn_user, max_items=num_trophies, title_limit=15)
+    except Exception:
+        pass
 
     try:
         # Helper function to compact duration format, convert "X day(s), HH:MM:SS" to "Xd HH:MM:SS"
