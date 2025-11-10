@@ -1070,10 +1070,16 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
         available_str = "Yes" if availability == "availableToPlay" else "No"
         print(f"Available to play:\t\t{available_str}")
 
+    psn_platform_displayed = False
     if psn_platform:
-        print(f"Platform:\t\t\t{psn_platform}")
+        print(f"\nPlatform:\t\t\t{psn_platform}")
+        psn_platform_displayed = True
+
+    if not psn_platform_displayed:
+        print()
     print(f"PS+ user:\t\t\t{isplus}")
 
+    # an official account belonging to a recognised developer, publisher, community manager or another official role
     if is_verified is not None:
         print(f"Verified:\t\t\t{is_verified}")
 
@@ -1403,10 +1409,16 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         available_str = "Yes" if availability == "availableToPlay" else "No"
         print(f"Available to play:\t\t{available_str}")
 
+    psn_platform_displayed = False
     if psn_platform:
-        print(f"Platform:\t\t\t{psn_platform}")
+        print(f"\nPlatform:\t\t\t{psn_platform}")
+        psn_platform_displayed = True
+
+    if not psn_platform_displayed:
+        print()
     print(f"PS+ user:\t\t\t{isplus}")
 
+    # an official account belonging to a recognised developer, publisher, community manager or another official role
     if is_verified is not None:
         print(f"Verified:\t\t\t{is_verified}")
 
