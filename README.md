@@ -10,6 +10,7 @@ psn_monitor is a tool for real-time monitoring of Sony PlayStation (PSN) players
 - Email notifications for various events (player gets online/offline, starts/finishes/changes a game, errors)
 - Saving all user activities with timestamps to a CSV file
 - Possibility to control the running copy of the script via signals
+- Functional, procedural Python (minimal OOP)
 
 <p align="center">
    <img src="https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/assets/psn_monitor.png" alt="psn_monitor_screenshot" width="85%"/>
@@ -22,6 +23,7 @@ psn_monitor is a tool for real-time monitoring of Sony PlayStation (PSN) players
 2. [Installation](#installation)
    * [Install from PyPI](#install-from-pypi)
    * [Manual Installation](#manual-installation)
+   * [Upgrading](#upgrading)
 3. [Quick Start](#quick-start)
 4. [Configuration](#configuration)
    * [Configuration File](#configuration-file)
@@ -48,8 +50,8 @@ psn_monitor is a tool for real-time monitoring of Sony PlayStation (PSN) players
 
 Tested on:
 
-* **macOS**: Ventura, Sonoma, Sequoia
-* **Linux**: Raspberry Pi OS (Bullseye, Bookworm), Ubuntu 24, Rocky Linux 8.x/9.x, Kali Linux 2024/2025
+* **macOS**: Ventura, Sonoma, Sequoia, Tahoe
+* **Linux**: Raspberry Pi OS (Bullseye, Bookworm, Trixie), Ubuntu 24/25, Rocky Linux 8.x/9.x, Kali Linux 2024/2025
 * **Windows**: 10, 11
 
 It should work on other versions of macOS, Linux, Unix and Windows as well.
@@ -80,6 +82,17 @@ Alternatively, from the downloaded *[requirements.txt](https://raw.githubusercon
 ```sh
 pip install -r requirements.txt
 ```
+
+<a id="upgrading"></a>
+### Upgrading
+
+To upgrade to the latest version when installed from PyPI:
+
+```sh
+pip install psn_monitor -U
+```
+
+If you installed manually, download the newest *[psn_monitor.py](https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/psn_monitor.py)* file to replace your existing installation.
 
 <a id="quick-start"></a>
 ## Quick Start
