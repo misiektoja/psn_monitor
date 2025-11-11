@@ -6,8 +6,8 @@ psn_monitor is a tool for real-time monitoring of Sony PlayStation (PSN) players
 ## Features
 
 - Real-time tracking of PlayStation users' gaming activity (including detection when a user gets online/offline or plays games)
-- Detailed user information display mode providing comprehensive PlayStation profile insights
 - Basic statistics for user activity (duration in different states, time spent playing a game, overall time and number of games played in a session etc.)
+- Detailed user information display mode providing comprehensive PlayStation profile insights
 - Email notifications for various events (player gets online/offline, starts/finishes/changes a game, errors)
 - Saving all user activities with timestamps to a CSV file
 - Possibility to control the running copy of the script via signals
