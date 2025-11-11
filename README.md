@@ -6,6 +6,7 @@ psn_monitor is a tool for real-time monitoring of Sony PlayStation (PSN) players
 ## Features
 
 - Real-time tracking of PlayStation users' gaming activity (including detection when a user gets online/offline or plays games)
+- Detailed user information display mode providing comprehensive PlayStation profile insights
 - Basic statistics for user activity (duration in different states, time spent playing a game, overall time and number of games played in a session etc.)
 - Email notifications for various events (player gets online/offline, starts/finishes/changes a game, errors)
 - Saving all user activities with timestamps to a CSV file
@@ -13,7 +14,7 @@ psn_monitor is a tool for real-time monitoring of Sony PlayStation (PSN) players
 - Functional, procedural Python (minimal OOP)
 
 <p align="center">
-   <img src="https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/assets/psn_monitor.png" alt="psn_monitor_screenshot" width="85%"/>
+   <img src="https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/assets/psn_monitor.png" alt="psn_monitor_screenshot" width="90%"/>
 </p>
 
 <a id="table-of-contents"></a>
@@ -33,6 +34,7 @@ psn_monitor is a tool for real-time monitoring of Sony PlayStation (PSN) players
    * [SMTP Settings](#smtp-settings)
    * [Storing Secrets](#storing-secrets)
 5. [Usage](#usage)
+   * [User Information Display Mode](#user-information-display-mode)
    * [Monitoring Mode](#monitoring-mode)
    * [Email Notifications](#email-notifications)
    * [CSV Export](#csv-export)
@@ -227,6 +229,51 @@ As a fallback, you can also store secrets in the configuration file or source co
 
 <a id="usage"></a>
 ## Usage
+
+<a id="user-information-display-mode"></a>
+### User Information Display Mode
+
+The tool provides a detailed user information display mode that shows comprehensive PlayStation profile insights. This mode displays information once and then exits (it does not run continuous monitoring).
+
+To get detailed user information, use the `-i` or `--info` flag:
+
+```sh
+psn_monitor <psn_user_id> -i
+```
+
+This displays:
+- PlayStation/PSN IDs
+- Online status and availability to play
+- Platform information
+- PS+ subscription status
+- Verification status
+- About me section
+- Languages
+- Friendship relation and mutual friends count
+- Profile URL
+- Recently played games with last played date and total play time
+
+To also display trophy summary and list of most recently earned trophies, add the `--trophies` flag:
+
+```sh
+psn_monitor <psn_user_id> -i --trophies
+```
+
+To disable fetching the recently played games list (faster execution), use the `--no-recent-games` flag:
+
+```sh
+psn_monitor <psn_user_id> -i --no-recent-games
+```
+
+You can combine both flags:
+
+```sh
+psn_monitor <psn_user_id> -i --trophies --no-recent-games
+```
+
+<p align="center">
+   <img src="https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/assets/psn_monitor_info.png" alt="psn_monitor_info" width="90%"/>
+</p>
 
 <a id="monitoring-mode"></a>
 ### Monitoring Mode
