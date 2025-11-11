@@ -6,8 +6,8 @@ This is a high-level summary of the most important changes.
 
 **Features and Improvements**:
 
-- **NEW:** Added detailed user information display mode (**-i** / **--info** flag), providing comprehensive PlayStation profile insights including PlayStation/PSN IDs, PS+ status, platform, about me, online status, availability to play, verification status, languages, friendship relation, profile URL, trophy summary and recently played games (name, last played, overall time)
-- **NEW:** Added display of last earned trophies in user information display mode (`--trophies` flag, only works with `-i`/`--info`)
+- **NEW:** Added detailed user information display mode (`-i` / `--info` flag), providing comprehensive PlayStation profile insights including PlayStation/PSN IDs, PS+ status, platform, about me, online status, availability to play, verification status, languages, friendship relation, profile URL and recently played games (name, last played, overall time)
+- **NEW:** Added display of trophy summary and last earned trophies in user information display mode (`--trophies` flag, only works with `-i`/`--info`)
 - **IMPROVE:** Enhanced user information display in monitoring mode to include availability to play, verification status, languages, friendship relation and profile URL
 - **IMPROVE:** Added possibility to disable fetching of recently played games list (`--no-recent-games` flag, only works with `-i`/`--info`)
 
