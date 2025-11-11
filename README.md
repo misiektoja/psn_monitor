@@ -235,10 +235,16 @@ As a fallback, you can also store secrets in the configuration file or source co
 
 The tool provides a detailed user information display mode that shows comprehensive PlayStation profile insights. This mode displays information once and then exits (it does not run continuous monitoring).
 
-To get detailed user information, use the `-i` or `--info` flag:
+To get detailed user information for PlayStation (PSN) user's id (`psn_user_id` in the example below), use the `-i` or `--info` flag:
 
 ```sh
 psn_monitor <psn_user_id> -i
+```
+
+If you have not set `PSN_NPSSO` secret, you can use `-n` flag:
+
+```sh
+psn_monitor <psn_user_id> -i -n "your_psn_npsso_code"
 ```
 
 This displays:
