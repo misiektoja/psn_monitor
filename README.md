@@ -1,6 +1,6 @@
 # psn_monitor
 
-psn_monitor is a tool for real-time monitoring of Sony PlayStation (PSN) players' activities.
+psn_monitor is a tool for real-time monitoring of **Sony PlayStation (PSN) players' activities**.
 
 <a id="features"></a>
 ## Features
