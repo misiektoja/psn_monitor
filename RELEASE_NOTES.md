@@ -2,6 +2,20 @@
 
 This is a high-level summary of the most important changes. 
 
+# Changes in 1.6 (11 Nov 2025)
+
+**Features and Improvements**:
+
+- **NEW:** Added detailed user information display mode (**-i** / **--info** flag), providing comprehensive PlayStation profile insights including PlayStation/PSN IDs, PS+ status, platform, about me, online status, availability to play, verification status, languages, friendship relation, profile URL, trophy summary and recently played games (name, last played, overall time)
+- **NEW:** Added display of last earned trophies in user information display mode (`--trophies` flag, only works with `-i`/`--info`)
+- **IMPROVE:** Enhanced user information display in monitoring mode to include availability to play, verification status, languages, friendship relation and profile URL
+- **IMPROVE:** Added possibility to disable fetching of recently played games list (`--no-recent-games` flag, only works with `-i`/`--info`)
+
+**Bug fixes**:
+
+- **BUGFIX:** Enhanced connection error handling and notification for NPSSO token expiry
+- **BUGFIX:** Added error streak detection to identify silent NPSSO token expiry during monitoring runs
+
 # Changes in 1.5.1 (13 Jun 2025)
 
 **Bug fixes**:
