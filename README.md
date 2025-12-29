@@ -7,9 +7,12 @@ psn_monitor is a tool for real-time monitoring of **Sony PlayStation (PSN) playe
 
 - **Real-time tracking** of PlayStation users' gaming activity (including detection when a user gets online/offline or plays games)
 - **Basic statistics for user activity** (duration in different states, time spent playing a game, overall time and number of games played in a session etc.)
-- **Detailed user information** display mode providing comprehensive PlayStation profile insights
+- **Detailed user information** display mode providing comprehensive PlayStation profile insights, including **PlayStation/PSN IDs**, **online status** and **availability to play**, **platform information**, **PS+ subscription status**, **verification status**, **about me section**, **languages**, **friendship relation** and **mutual friends count**, **profile URL**, **recently played games** with **last played date** and **total play time**, and optionally **trophy summary** and **last earned trophies**
 - **Email notifications** for various events (player gets online/offline, starts/finishes/changes a game, errors)
 - **Saving all user activities** with timestamps to a **CSV file**
+- **Status persistence** - automatically saves last status to JSON file to resume monitoring after restart
+- **Smart session continuity** - handles short offline interruptions and preserves session statistics
+- **Flexible configuration** - support for config files, dotenv files, environment variables and command-line arguments
 - Possibility to **control the running copy** of the script via signals
 - **Functional, procedural Python** (minimal OOP)
 
@@ -182,7 +185,7 @@ python3 -c "import pytz; print('\n'.join(pytz.all_timezones))"
 <a id="smtp-settings"></a>
 ### SMTP Settings
 
-If you want to use email notifications functionality, configure SMTP settings in the `psn_monitor.conf` file. 
+If you want to use email notifications functionality, configure SMTP settings in the `psn_monitor.conf` file.
 
 Verify your SMTP settings by using `--send-test-email` flag (the tool will try to send a test email notification):
 
@@ -211,7 +214,7 @@ PSN_NPSSO="your_psn_npsso_code"
 SMTP_PASSWORD="your_smtp_password"
 ```
 
-By default the tool will auto-search for dotenv file named `.env` in current directory and then upward from it. 
+By default the tool will auto-search for dotenv file named `.env` in current directory and then upward from it.
 
 You can specify a custom file with `DOTENV_FILE` or `--env-file` flag:
 
@@ -297,9 +300,9 @@ psn_monitor <psn_user_id> -n "your_psn_npsso_code"
 ```
 
 By default, the tool looks for a configuration file named `psn_monitor.conf` in:
- - current directory 
+ - current directory
  - home directory (`~`)
- - script directory 
+ - script directory
 
  If you generated a configuration file as described in [Configuration](#configuration), but saved it under a different name or in a different directory, you can specify its location using the `--config-file` flag:
 
