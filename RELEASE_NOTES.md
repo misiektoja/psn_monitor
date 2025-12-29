@@ -1,6 +1,12 @@
 # psn_monitor release notes
 
-This is a high-level summary of the most important changes. 
+This is a high-level summary of the most important changes.
+
+# Changes in 1.7 (29 Dec 2025)
+
+**Features and Improvements**:
+
+- **IMPROVE:** Enhanced PSNAWP session management with better error handling and cooldown logic
 
 # Changes in 1.6 (11 Nov 2025)
 
