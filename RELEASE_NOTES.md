@@ -2,6 +2,12 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 1.7.1 (04 Jan 2026)
+
+**Features and Improvements**:
+
+- **IMPROVE:** Suppressed transient connection error messages (first 2 occurrences are hidden) to reduce log clutter
+
 # Changes in 1.7 (29 Dec 2025)
 
 **Features and Improvements**:
