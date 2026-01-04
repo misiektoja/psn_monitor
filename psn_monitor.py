@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.7.1
+v1.8
 
 Tool implementing real-time tracking of Sony PlayStation (PSN) players activities:
 https://github.com/misiektoja/psn_monitor/
@@ -16,7 +16,7 @@ tzlocal (optional)
 python-dotenv (optional)
 """
 
-VERSION = "1.7.1"
+VERSION = "1.8"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -984,11 +984,28 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
 
 # Gets detailed user information and displays it (for -i/--info mode)
 def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
-    print(f"* Fetching details for PlayStation user '{psn_user_id}'... this may take a moment\n")
+    # Helper to print step message
+    def print_step(msg):
+        sys.stdout.write(f"- {msg}".ljust(32))
+        sys.stdout.flush()
 
+    # Helper to print OK
+    def print_ok():
+        print("OK")
+
+    print(f"* Fetching details for PlayStation user '{psn_user_id}'...\n")
+
+    print_step("Authenticating with PSN...")
     try:
         psnawp = PSNAWP(PSN_NPSSO)
         psn_user = psnawp.user(online_id=psn_user_id)
+    except Exception as e:
+        print(f"\n* Error: {e}")
+        sys.exit(1)
+    print_ok()
+
+    print_step("Fetching profile info...")
+    try:
         accountid = psn_user.account_id
         profile = psn_user.profile()
         aboutme = profile.get("aboutMe")
@@ -998,43 +1015,53 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
         fs = psn_user.friendship()
         share = psn_user.get_shareable_profile_link()
     except Exception as e:
-        print(f"* Error: {e}")
+        print(f"\n* Error: {e}")
         sys.exit(1)
+    print_ok()
 
+    print_step("Fetching presence info...")
     try:
         psn_user_presence = psn_user.get_presence()
     except Exception as e:
-        print(f"* Error: Cannot get presence for user {psn_user_id}: {e}")
+        print(f"\n* Error: Cannot get presence for user {psn_user_id}: {e}")
         sys.exit(1)
+    print_ok()
 
-    status = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
+    print_step("Fetching game title info...")
+    try:
+        status = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
 
-    if not status:
-        print(f"* Error: Cannot get status for user {psn_user_id}")
+        if not status:
+            print(f"\n* Error: Cannot get status for user {psn_user_id}")
+            sys.exit(1)
+
+        status = str(status).lower()
+
+        psn_platform = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("platform")
+        psn_platform = str(psn_platform).upper() if psn_platform else ""
+        lastonline = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("lastOnlineDate")
+        availability = psn_user_presence["basicPresence"].get("availability")
+
+        lastonline_dt = convert_iso_str_to_datetime(lastonline)
+        if lastonline_dt:
+            lastonline_ts = int(lastonline_dt.timestamp())
+        else:
+            lastonline_ts = 0
+
+        gametitleinfolist = psn_user_presence["basicPresence"].get("gameTitleInfoList")
+        game_name = ""
+        launchplatform = ""
+
+        if gametitleinfolist:
+            game_name_raw = gametitleinfolist[0].get("titleName")
+            game_name = normalize_ascii(game_name_raw) if game_name_raw else ""
+            launchplatform = gametitleinfolist[0].get("launchPlatform")
+            launchplatform = str(launchplatform).upper()
+    except Exception as e:
+        print(f"\n* Error: {e}")
         sys.exit(1)
-
-    status = str(status).lower()
-
-    psn_platform = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("platform")
-    psn_platform = str(psn_platform).upper() if psn_platform else ""
-    lastonline = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("lastOnlineDate")
-    availability = psn_user_presence["basicPresence"].get("availability")
-
-    lastonline_dt = convert_iso_str_to_datetime(lastonline)
-    if lastonline_dt:
-        lastonline_ts = int(lastonline_dt.timestamp())
-    else:
-        lastonline_ts = 0
-
-    gametitleinfolist = psn_user_presence["basicPresence"].get("gameTitleInfoList")
-    game_name = ""
-    launchplatform = ""
-
-    if gametitleinfolist:
-        game_name_raw = gametitleinfolist[0].get("titleName")
-        game_name = normalize_ascii(game_name_raw) if game_name_raw else ""
-        launchplatform = gametitleinfolist[0].get("launchPlatform")
-        launchplatform = str(launchplatform).upper()
+    print_ok()
+    print()
 
     psn_last_status_file = f"psn_{psn_user_id}_last_status.json"
     status_ts_old = int(time.time())
