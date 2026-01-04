@@ -1291,11 +1291,28 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     except Exception as e:
         print(f"* Error: {e}")
 
-    print("Sneaking into PlayStation like a ninja ... (be patient, secrets take time)\n")
+    print("Sneaking into PlayStation like a ninja ...\n")
 
+    # Helper to print step message
+    def print_step(msg):
+        sys.stdout.write(f"- {msg}".ljust(32))
+        sys.stdout.flush()
+
+    # Helper to print OK
+    def print_ok():
+        print("OK")
+
+    print_step("Authenticating with PSN...")
     try:
         psnawp = PSNAWP(PSN_NPSSO)
         psn_user = psnawp.user(online_id=psn_user_id)
+    except Exception as e:
+        print(f"\n* Error: {e}")
+        sys.exit(1)
+    print_ok()
+
+    print_step("Fetching profile info...")
+    try:
         accountid = psn_user.account_id
         profile = psn_user.profile()
         aboutme = profile.get("aboutMe")
@@ -1305,43 +1322,54 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         fs = psn_user.friendship()
         share = psn_user.get_shareable_profile_link()
     except Exception as e:
-        print("* Error:", e)
+        print(f"\n* Error: {e}")
         sys.exit(1)
+    print_ok()
 
+    print_step("Fetching presence info...")
     try:
         psn_user_presence = psn_user.get_presence()
     except Exception as e:
-        print(f"* Error: Cannot get presence for user {psn_user_id}: {e}")
+        print(f"\n* Error: Cannot get presence for user {psn_user_id}: {e}")
         sys.exit(1)
+    print_ok()
 
-    status = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
+    print_step("Fetching game title info...")
+    try:
+        status = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
 
-    if not status:
-        print(f"* Error: Cannot get status for user {psn_user_id}")
+        if not status:
+            print(f"\n* Error: Cannot get status for user {psn_user_id}")
+            sys.exit(1)
+
+        status = str(status).lower()
+
+        psn_platform = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("platform")
+        psn_platform = str(psn_platform).upper() if psn_platform else ""
+        lastonline = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("lastOnlineDate")
+        availability = psn_user_presence["basicPresence"].get("availability")
+
+        lastonline_dt = convert_iso_str_to_datetime(lastonline)
+        if lastonline_dt:
+            lastonline_ts = int(lastonline_dt.timestamp())
+        else:
+            lastonline_ts = 0
+
+        gametitleinfolist = psn_user_presence["basicPresence"].get("gameTitleInfoList")
+        game_name = ""
+        launchplatform = ""
+
+        if gametitleinfolist:
+            game_name_raw = gametitleinfolist[0].get("titleName")
+            game_name = normalize_ascii(game_name_raw) if game_name_raw else ""
+            launchplatform = gametitleinfolist[0].get("launchPlatform")
+            launchplatform = str(launchplatform).upper()
+    except Exception as e:
+        print(f"\n* Error: {e}")
         sys.exit(1)
+    print_ok()
 
-    status = str(status).lower()
-
-    psn_platform = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("platform")
-    psn_platform = str(psn_platform).upper() if psn_platform else ""
-    lastonline = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("lastOnlineDate")
-    availability = psn_user_presence["basicPresence"].get("availability")
-
-    lastonline_dt = convert_iso_str_to_datetime(lastonline)
-    if lastonline_dt:
-        lastonline_ts = int(lastonline_dt.timestamp())
-    else:
-        lastonline_ts = 0
-
-    gametitleinfolist = psn_user_presence["basicPresence"].get("gameTitleInfoList")
-    game_name = ""
-    launchplatform = ""
-
-    if gametitleinfolist:
-        game_name_raw = gametitleinfolist[0].get("titleName")
-        game_name = normalize_ascii(game_name_raw) if game_name_raw else ""
-        launchplatform = gametitleinfolist[0].get("launchPlatform")
-        launchplatform = str(launchplatform).upper()
+    print()
 
     status_ts_old = int(time.time())
     status_ts_old_bck = status_ts_old
