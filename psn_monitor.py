@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.7
+v1.7.1
 
 Tool implementing real-time tracking of Sony PlayStation (PSN) players activities:
 https://github.com/misiektoja/psn_monitor/
@@ -16,7 +16,7 @@ tzlocal (optional)
 python-dotenv (optional)
 """
 
-VERSION = "1.7"
+VERSION = "1.7.1"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -1720,8 +1720,10 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                     send_email(m_subject, m_body, "", SMTP_SSL)
                     email_sent = True
 
-                print(f"* Error (connection), retrying in {display_time(retry_delay)}: {e}")
-                print_cur_ts("Timestamp:\t\t\t")
+                if error_streak >= 3:
+                    print(f"* Error (connection), retrying in {display_time(retry_delay)}: {e}")
+                    print_cur_ts("Timestamp:\t\t\t")
+
                 time.sleep(retry_delay)
                 continue
 
