@@ -6,8 +6,8 @@ This is a high-level summary of the most important changes.
 
 **Features and Improvements**:
 
-- **IMPROVE:** Suppressed transient connection error messages (first 2 occurrences are hidden) to reduce log clutter
-- **IMPROVE:** Enhanced startup process and user information display mode with interactive step-by-step progress updates
+- **IMPROVE:** Suppressed **transient connection error messages** (first 2 occurrences are hidden) to reduce log clutter
+- **IMPROVE:** Enhanced startup process and user information display mode with **interactive step-by-step progress updates**
 
 # Changes in 1.7 (29 Dec 2025)
 
