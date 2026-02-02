@@ -1,6 +1,25 @@
 # psn_monitor
 
-psn_monitor is a tool for real-time monitoring of **Sony PlayStation (PSN) players' activities**.
+<p align="left">
+  <img src="https://img.shields.io/github/v/release/misiektoja/psn_monitor?style=flat-square&color=blue" alt="GitHub Release" />
+  <img src="https://img.shields.io/pypi/v/psn_monitor?style=flat-square&color=orange" alt="PyPI Version" />
+  <img src="https://img.shields.io/github/stars/misiektoja/psn_monitor?style=flat-square&color=yellow" alt="GitHub Stars" />
+  <img src="https://img.shields.io/github/last-commit/misiektoja/psn_monitor?style=flat-square&color=green" alt="Last Commit" />
+  <img src="https://img.shields.io/github/license/misiektoja/psn_monitor?style=flat-square&color=blue" alt="License" />
+  <img src="https://img.shields.io/pypi/pyversions/psn_monitor?style=flat-square&color=blueviolet" alt="Python Versions" />
+  <img src="https://img.shields.io/badge/maintenance-active-brightgreen?style=flat-square" alt="Maintenance" />
+</p>
+
+**psn_monitor** is a tool for real-time monitoring of **Sony PlayStation (PSN) players' activities**.
+
+### 🚀 Quick Install
+```sh
+pip install psn_monitor
+```
+
+<p align="center">
+   <img src="https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/assets/psn_monitor.png" alt="psn_monitor_screenshot" width="90%"/>
+</p>
 
 <a id="features"></a>
 ## Features
@@ -15,10 +34,6 @@ psn_monitor is a tool for real-time monitoring of **Sony PlayStation (PSN) playe
 - **Flexible configuration** - support for config files, dotenv files, environment variables and command-line arguments
 - Possibility to **control the running copy** of the script via signals
 - **Functional, procedural Python** (minimal OOP)
-
-<p align="center">
-   <img src="https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/assets/psn_monitor.png" alt="psn_monitor_screenshot" width="90%"/>
-</p>
 
 <a id="table-of-contents"></a>
 ## Table of Contents
