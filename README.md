@@ -2,15 +2,15 @@
 
 <p align="left">
   <img src="https://img.shields.io/github/v/release/misiektoja/psn_monitor?style=flat-square&color=blue" alt="GitHub Release" />
-  <img src="https://img.shields.io/pypi/v/psn_monitor?style=flat-square&color=orange" alt="PyPI Version" />
-  <img src="https://img.shields.io/github/stars/misiektoja/psn_monitor?style=flat-square&color=yellow" alt="GitHub Stars" />
-  <img src="https://img.shields.io/github/last-commit/misiektoja/psn_monitor?style=flat-square&color=green" alt="Last Commit" />
+  <img src="https://img.shields.io/pypi/v/psn_monitor?style=flat-square&color=teal" alt="PyPI Version" />
+  <img src="https://img.shields.io/github/stars/misiektoja/psn_monitor?style=flat-square&color=magenta" alt="GitHub Stars" />
+  <img src="https://img.shields.io/badge/python-3.10+-blueviolet?style=flat-square" alt="Python Versions" />
   <img src="https://img.shields.io/github/license/misiektoja/psn_monitor?style=flat-square&color=blue" alt="License" />
-  <img src="https://img.shields.io/pypi/pyversions/psn_monitor?style=flat-square&color=blueviolet" alt="Python Versions" />
+  <img src="https://img.shields.io/github/last-commit/misiektoja/psn_monitor?style=flat-square&color=green" alt="Last Commit" />
   <img src="https://img.shields.io/badge/maintenance-active-brightgreen?style=flat-square" alt="Maintenance" />
 </p>
 
-**psn_monitor** is a tool for real-time monitoring of **Sony PlayStation (PSN) players' activities**.
+Powerful tool for real-time monitoring of **Sony PlayStation (PSN) players' activities**.
 
 ### 🚀 Quick Install
 ```sh
