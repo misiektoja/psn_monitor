@@ -16,7 +16,7 @@ tzlocal (optional)
 python-dotenv (optional)
 """
 
-VERSION = "1.8"
+VERSION = "1.8.1"
 
 # ---------------------------
 # CONFIGURATION SECTION START
