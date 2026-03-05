@@ -2,6 +2,12 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 1.8.1 (06 Mar 2026)
+
+**Bug fixes**:
+
+- **BUGFIX:** Fixed `timeout not implemented` crashes caused by a broken upstream `PSNAWP` 3.0.2 release by pinning the dependency to exclude it (fixes [#2](https://github.com/misiektoja/psn_monitor/issues/2))
+
 # Changes in 1.8 (04 Jan 2026)
 
 **Features and Improvements**:
