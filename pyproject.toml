@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "psn_monitor"
-version = "1.8"
+version = "1.8.1"
 description = "Tool implementing real-time tracking of Sony PlayStation (PSN) players activities"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -12,7 +12,7 @@ license-files = ["LICEN[CS]E*"]
 authors = [{ name = "Michal Szymanski", email = "misiektoja-pypi@rm-rf.ninja" }]
 requires-python = ">=3.10"
 dependencies = [
-  "PSNAWP>=2.0.0",
+  "PSNAWP>=2.0.0,!=3.0.2",
   "requests>=2.0",
   "python-dateutil>=2.8",
   "pytz>=2020.1",
