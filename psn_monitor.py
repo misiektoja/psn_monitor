@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.8
+v1.8.1
 
 Tool implementing real-time tracking of Sony PlayStation (PSN) players activities:
 https://github.com/misiektoja/psn_monitor/
