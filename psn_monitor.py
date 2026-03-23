@@ -224,6 +224,80 @@ import shutil
 from pathlib import Path
 
 
+# Probes the PSN OAuth endpoint with the given npsso and returns a specific error hint if the redirect carries a recognizable error such as ToSUA re-acceptance, otherwise None
+def probe_npsso_auth_error(npsso):
+    try:
+        import uuid
+        from urllib.parse import urlparse, parse_qs
+        from psnawp_api.core.authenticator import Authenticator
+        from psnawp_api.utils.endpoints import BASE_PATH, API_PATH
+    except Exception:
+        return None
+    try:
+        md = Authenticator.AUTH_METADATA
+        cid = str(uuid.UUID(int=uuid.getnode()))
+        headers = {
+            "Cookie": f"npsso={npsso}",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-Requested-With": "com.scee.psxandroid",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "same-site",
+            "Sec-Fetch-User": "?1",
+        }
+        params = {
+            "access_type": "offline",
+            "cid": cid,
+            "client_id": md["CLIENT_ID"],
+            "device_base_font_size": "10",
+            "device_profile": "mobile",
+            "elements_visibility": "no_aclink",
+            "enable_scheme_error_code": "true",
+            "no_captcha": "true",
+            "PlatformPrivacyWs1": "minimal",
+            "redirect_uri": md["REDIRECT_URI"],
+            "response_type": "code",
+            "scope": md["SCOPE"],
+            "service_entity": "urn:service-entity:psn",
+            "service_logo": "ps",
+            "smcid": "psapp:signin",
+            "support_scheme": "sneiprls",
+            "turnOnTrustedBrowser": "true",
+            "ui": "pr",
+        }
+        resp = req.get(f"{BASE_PATH['base_uri']}{API_PATH['oauth_code']}", headers=headers, params=params, allow_redirects=False, timeout=15)
+        loc = resp.headers.get("location", "")
+        if not loc:
+            return None
+        q = parse_qs(urlparse(loc).query)
+        err = (q.get("error") or [""])[0]
+        err_code = (q.get("error_code") or [""])[0]
+        err_desc = (q.get("error_description") or [""])[0]
+        if not err and not err_code:
+            return None
+        desc_l = err_desc.lower()
+        if err_code == "103" or "tosua" in desc_l or "terms of service" in desc_l or "terms of use" in desc_l:
+            return ("PSN Terms of Service / User Agreement must be re-accepted. Log into your account at https://my.account.sony.com or in the PlayStation App to accept the updated Terms of Service then generate a new npsso and try again.")
+        return f"PSN auth rejected (error={err or 'n/a'} error_code={err_code or 'n/a'} error_description={err_desc or 'n/a'})"
+    except Exception:
+        return None
+
+
+# Validates that a PSN presence response has the expected dict shape, raising ValueError tagged "malformed presence response" if not
+def validate_presence_shape(pres):
+    if not isinstance(pres, dict):
+        raise ValueError(f"malformed presence response: top-level is {type(pres).__name__}")
+    basic = pres.get("basicPresence")
+    if not isinstance(basic, dict):
+        raise ValueError(f"malformed presence response: basicPresence is {type(basic).__name__}")
+    primary = basic.get("primaryPlatformInfo")
+    if not isinstance(primary, dict):
+        raise ValueError(f"malformed presence response: primaryPlatformInfo is {type(primary).__name__}")
+    gtil = basic.get("gameTitleInfoList")
+    if gtil is not None and not (isinstance(gtil, list) and (not gtil or isinstance(gtil[0], dict))):
+        raise ValueError(f"malformed presence response: gameTitleInfoList is {type(gtil).__name__}")
+
+
 # Logger class to output messages to stdout and log file
 class Logger(object):
     def __init__(self, filename):
@@ -1000,7 +1074,11 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
         psnawp = PSNAWP(PSN_NPSSO)
         psn_user = psnawp.user(online_id=psn_user_id)
     except Exception as e:
-        print(f"\n* Error: {e}")
+        hint = probe_npsso_auth_error(PSN_NPSSO) if "something went wrong while authenticating" in str(e).lower() else None
+        if hint:
+            print(f"\n* Error: {hint}")
+        else:
+            print(f"\n* Error: {e}")
         sys.exit(1)
     print_ok()
 
@@ -1022,6 +1100,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
     print_step("Fetching presence info...")
     try:
         psn_user_presence = psn_user.get_presence()
+        validate_presence_shape(psn_user_presence)
     except Exception as e:
         print(f"\n* Error: Cannot get presence for user {psn_user_id}: {e}")
         sys.exit(1)
@@ -1334,7 +1413,11 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         psnawp = PSNAWP(PSN_NPSSO)
         psn_user = psnawp.user(online_id=psn_user_id)
     except Exception as e:
-        print(f"\n* Error: {e}")
+        hint = probe_npsso_auth_error(PSN_NPSSO) if "something went wrong while authenticating" in str(e).lower() else None
+        if hint:
+            print(f"\n* Error: {hint}")
+        else:
+            print(f"\n* Error: {e}")
         sys.exit(1)
     print_ok()
 
@@ -1356,6 +1439,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     print_step("Fetching presence info...")
     try:
         psn_user_presence = psn_user.get_presence()
+        validate_presence_shape(psn_user_presence)
     except Exception as e:
         print(f"\n* Error: Cannot get presence for user {psn_user_id}: {e}")
         sys.exit(1)
@@ -1571,7 +1655,11 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
     def _looks_like_auth_error(ex):
         msg = str(ex).lower()
-        return (("your npsso code has expired or is incorrect" in msg) or ("invalid_grant" in msg) or "invalid npsso" in msg or "npsso" in msg and ("expired" in msg or "invalid" in msg) or ("oauth/token" in msg and ("401" in msg or "403" in msg or "unauthorized" in msg or "forbidden" in msg)) or ("authz" in msg and ("401" in msg or "403" in msg)))
+        return (("your npsso code has expired or is incorrect" in msg) or ("something went wrong while authenticating" in msg) or ("invalid_grant" in msg) or "invalid npsso" in msg or "npsso" in msg and ("expired" in msg or "invalid" in msg) or ("oauth/token" in msg and ("401" in msg or "403" in msg or "unauthorized" in msg or "forbidden" in msg)) or ("authz" in msg and ("401" in msg or "403" in msg)))
+
+    def _looks_like_malformed_response(ex):
+        msg = str(ex).lower()
+        return ("malformed presence response" in msg or "'str' object has no attribute 'get'" in msg or "'nonetype' object has no attribute 'get'" in msg or "'int' object has no attribute 'get'" in msg or "'list' object has no attribute 'get'" in msg)
 
     def _looks_like_transient_connection_error(ex):
         msg = str(ex).lower()
@@ -1635,6 +1723,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             signal.alarm(FUNCTION_TIMEOUT)
         try:
             psn_user_presence = psn_user.get_presence()
+            validate_presence_shape(psn_user_presence)
             status = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
             gametitleinfolist = psn_user_presence["basicPresence"].get("gameTitleInfoList")
             game_name = ""
@@ -1664,10 +1753,15 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
             # We retry periodically, recreating the PSNAWP client to force re-auth
             sleep_interval = max(60, get_sleep_interval())
-            print(f"* PSN NPSSO key is expired/invalid: {auth_err}")
+            hint = probe_npsso_auth_error(PSN_NPSSO) if "something went wrong while authenticating" in str(auth_err).lower() else None
+            if hint:
+                print(f"* PSN auth failed: {hint}")
+            else:
+                print(f"* PSN NPSSO key is expired/invalid: {auth_err}")
             if ERROR_NOTIFICATION and not email_sent:
                 m_subject = f"psn_monitor: PSN NPSSO key error! (user: {psn_user_id})"
-                m_body = f"PSN NPSSO key is expired/invalid: {auth_err}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                body_reason = hint if hint else f"PSN NPSSO key is expired/invalid: {auth_err}"
+                m_body = f"{body_reason}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                 print(f"Sending email notification to {RECEIVER_EMAIL}")
                 send_email(m_subject, m_body, "", SMTP_SSL)
                 email_sent = True
@@ -1720,11 +1814,16 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             if _looks_like_auth_error(e):
                 error_streak += 1
                 sleep_interval = max(60, get_sleep_interval())
-                print(f"* PSN authentication seems to have failed (NPSSO may be expired/invalid): {e}")
-                print("* Hint: update PSN_NPSSO in your .env and send SIGHUP to this process (or restart).")
+                hint = probe_npsso_auth_error(PSN_NPSSO) if "something went wrong while authenticating" in str(e).lower() else None
+                if hint:
+                    print(f"* PSN auth failed: {hint}")
+                else:
+                    print(f"* PSN authentication seems to have failed (NPSSO may be expired/invalid): {e}")
+                    print("* Hint: update PSN_NPSSO in your .env and send SIGHUP to this process (or restart).")
                 if ERROR_NOTIFICATION and not email_sent and error_streak >= 2:
                     m_subject = f"psn_monitor: PSN NPSSO key might not be valid anymore! (user: {psn_user_id})"
-                    m_body = f"PSN authentication seems to have failed (NPSSO may be expired/invalid): {e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                    body_reason = hint if hint else f"PSN authentication seems to have failed (NPSSO may be expired/invalid): {e}"
+                    m_body = f"{body_reason}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                     print(f"Sending email notification to {RECEIVER_EMAIL}")
                     send_email(m_subject, m_body, "", SMTP_SSL)
                     email_sent = True
@@ -1743,6 +1842,42 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                         last_recreate_ts = now_ts
                     except Exception:
                         pass
+                time.sleep(sleep_interval)
+                continue
+
+            # Malformed/unexpected PSN response (e.g. str where dict expected): likely silent auth failure or upstream glitch, recreate session
+            if _looks_like_malformed_response(e):
+                error_streak += 1
+                sleep_interval = max(60, get_sleep_interval())
+                hint = probe_npsso_auth_error(PSN_NPSSO)
+                if hint:
+                    print(f"* PSN returned a malformed response and auth probe reports: {hint}")
+                else:
+                    print(f"* PSN returned an unexpected response shape, will recreate session: {e}")
+
+                now_ts = int(time.time())
+                if (now_ts - last_recreate_ts) >= recreate_cooldown:
+                    try:
+                        _close_psnawp_sessions(psnawp)
+                    except Exception:
+                        pass
+                    try:
+                        psnawp = PSNAWP(PSN_NPSSO)
+                        psn_user = psnawp.user(online_id=psn_user_id)
+                        last_recreate_ts = now_ts
+                        print(f"* Recreated PSNAWP session after malformed response")
+                    except Exception as rec_e:
+                        print(f"* Failed to recreate PSNAWP session: {rec_e}")
+
+                if ERROR_NOTIFICATION and not email_sent and error_streak >= 3:
+                    m_subject = f"psn_monitor: PSN returned malformed responses (user: {psn_user_id})"
+                    body_reason = hint if hint else f"PSN returned unexpected response shape ({error_streak} in a row). Last error: {e}"
+                    m_body = f"{body_reason}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                    print(f"Sending email notification to {RECEIVER_EMAIL}")
+                    send_email(m_subject, m_body, "", SMTP_SSL)
+                    email_sent = True
+
+                print_cur_ts("Timestamp:\t\t\t")
                 time.sleep(sleep_interval)
                 continue
 
