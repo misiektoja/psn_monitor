@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.8.1
+v1.8.2
 
 Tool implementing real-time tracking of Sony PlayStation (PSN) players activities:
 https://github.com/misiektoja/psn_monitor/
@@ -16,7 +16,7 @@ tzlocal (optional)
 python-dotenv (optional)
 """
 
-VERSION = "1.8.1"
+VERSION = "1.8.2"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -217,7 +217,6 @@ import re
 import ipaddress
 try:
     from psnawp_api import PSNAWP
-    from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
 except ModuleNotFoundError:
     raise SystemExit("Error: Couldn't find the PSNAWP library !\n\nTo install it, run:\n    pip3 install PSNAWP\n\nOnce installed, re-run this tool. For more help, visit:\nhttps://github.com/isFakeAccount/psnawp")
 import shutil
@@ -277,25 +276,96 @@ def probe_npsso_auth_error(npsso):
             return None
         desc_l = err_desc.lower()
         if err_code == "103" or "tosua" in desc_l or "terms of service" in desc_l or "terms of use" in desc_l:
-            return ("PSN Terms of Service / User Agreement must be re-accepted. Log into your account at https://my.account.sony.com or in the PlayStation App to accept the updated Terms of Service then generate a new npsso and try again.")
+            return ("PSN Terms of Service / User Agreement must be re-accepted. Log into your account at https://my.account.sony.com or in the PlayStation App to accept the updated Terms of Service and try again.")
         return f"PSN auth rejected (error={err or 'n/a'} error_code={err_code or 'n/a'} error_description={err_desc or 'n/a'})"
     except Exception:
         return None
 
 
-# Validates that a PSN presence response has the expected dict shape, raising ValueError tagged "malformed presence response" if not
-def validate_presence_shape(pres):
+# Tagged exception raised when a PSN API response does not match the expected shape
+class PsnMalformedResponse(ValueError):
+    pass
+
+
+# Yields the exception and each cause/context up to max_depth to walk an exception chain
+def iter_exc_chain(ex, max_depth=8):
+    cur = ex
+    for _ in range(max_depth):
+        if cur is None:
+            return
+        yield cur
+        cur = getattr(cur, "__cause__", None) or getattr(cur, "__context__", None)
+
+
+# Returns True if any exception in the chain indicates too many open files (errno 24)
+def is_too_many_open_files(ex):
+    for cur in iter_exc_chain(ex):
+        if isinstance(cur, OSError) and getattr(cur, "errno", None) == 24:
+            return True
+        msg = str(cur).lower()
+        if "too many open files" in msg or "oserror(24" in msg or "errno 24" in msg:
+            return True
+    return False
+
+
+# Classifies a PSN polling exception into one of: auth transient malformed exhausted unknown
+def classify_psn_exception(ex):
+    if is_too_many_open_files(ex):
+        return "exhausted"
+    try:
+        from requests.exceptions import ConnectionError as _ReqConnErr, Timeout as _ReqTimeout, SSLError as _ReqSSL, ChunkedEncodingError as _ReqChunked
+        transient_types = (_ReqConnErr, _ReqTimeout, _ReqSSL, _ReqChunked, ConnectionError, TimeoutError)
+    except Exception:
+        transient_types = (ConnectionError, TimeoutError)
+    try:
+        from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError as _PsnAuthErr
+    except Exception:
+        _PsnAuthErr = None
+    for cur in iter_exc_chain(ex):
+        if isinstance(cur, PsnMalformedResponse):
+            return "malformed"
+        if _PsnAuthErr is not None and isinstance(cur, _PsnAuthErr):
+            return "auth"
+        if isinstance(cur, transient_types):
+            return "transient"
+    msg = str(ex).lower()
+    if ("your npsso code has expired" in msg or "something went wrong while authenticating" in msg or "invalid_grant" in msg or "invalid npsso" in msg or (("oauth/token" in msg or "authz" in msg) and ("401" in msg or "403" in msg or "unauthorized" in msg or "forbidden" in msg))):
+        return "auth"
+    if ("remote end closed connection" in msg or "connection reset by peer" in msg or "connection aborted" in msg or "read timed out" in msg or "timeout" in msg or "temporarily unavailable" in msg):
+        return "transient"
+    for cur in iter_exc_chain(ex):
+        if isinstance(cur, (AttributeError, TypeError)):
+            return "malformed"
+    return "unknown"
+
+
+# Parses a PSN presence response into normalized fields raising PsnMalformedResponse for any unexpected shape
+def parse_presence(pres):
     if not isinstance(pres, dict):
-        raise ValueError(f"malformed presence response: top-level is {type(pres).__name__}")
+        raise PsnMalformedResponse(f"malformed presence response: top-level is {type(pres).__name__}")
     basic = pres.get("basicPresence")
     if not isinstance(basic, dict):
-        raise ValueError(f"malformed presence response: basicPresence is {type(basic).__name__}")
+        raise PsnMalformedResponse(f"malformed presence response: basicPresence is {type(basic).__name__}")
     primary = basic.get("primaryPlatformInfo")
     if not isinstance(primary, dict):
-        raise ValueError(f"malformed presence response: primaryPlatformInfo is {type(primary).__name__}")
+        raise PsnMalformedResponse(f"malformed presence response: primaryPlatformInfo is {type(primary).__name__}")
     gtil = basic.get("gameTitleInfoList")
-    if gtil is not None and not (isinstance(gtil, list) and (not gtil or isinstance(gtil[0], dict))):
-        raise ValueError(f"malformed presence response: gameTitleInfoList is {type(gtil).__name__}")
+    if gtil is not None and not isinstance(gtil, list):
+        raise PsnMalformedResponse(f"malformed presence response: gameTitleInfoList is {type(gtil).__name__}")
+    game_entry = None
+    if gtil:
+        first = gtil[0]
+        if not isinstance(first, dict):
+            raise PsnMalformedResponse(f"malformed presence response: gameTitleInfoList[0] is {type(first).__name__}")
+        game_entry = first
+    return {
+        "status": primary.get("onlineStatus"),
+        "platform": primary.get("platform"),
+        "last_online": primary.get("lastOnlineDate"),
+        "availability": basic.get("availability"),
+        "game_name": (game_entry.get("titleName") if game_entry else None),
+        "launch_platform": (game_entry.get("launchPlatform") if game_entry else None),
+    }
 
 
 # Logger class to output messages to stdout and log file
@@ -1100,7 +1170,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
     print_step("Fetching presence info...")
     try:
         psn_user_presence = psn_user.get_presence()
-        validate_presence_shape(psn_user_presence)
+        parse_presence(psn_user_presence)
     except Exception as e:
         print(f"\n* Error: Cannot get presence for user {psn_user_id}: {e}")
         sys.exit(1)
@@ -1439,7 +1509,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     print_step("Fetching presence info...")
     try:
         psn_user_presence = psn_user.get_presence()
-        validate_presence_shape(psn_user_presence)
+        parse_presence(psn_user_presence)
     except Exception as e:
         print(f"\n* Error: Cannot get presence for user {psn_user_id}: {e}")
         sys.exit(1)
@@ -1636,35 +1706,6 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     recreate_cooldown = 300  # avoid recreating PSNAWP session too frequently
     last_npsso_seen = PSN_NPSSO
 
-    def _iter_exc_chain(ex, max_depth=8):
-        cur = ex
-        for _ in range(max_depth):
-            if cur is None:
-                return
-            yield cur
-            cur = getattr(cur, "__cause__", None) or getattr(cur, "__context__", None)
-
-    def _is_too_many_open_files(ex):
-        for cur in _iter_exc_chain(ex):
-            if isinstance(cur, OSError) and getattr(cur, "errno", None) == 24:
-                return True
-            msg = str(cur).lower()
-            if "too many open files" in msg or "oserror(24" in msg or "errno 24" in msg:
-                return True
-        return False
-
-    def _looks_like_auth_error(ex):
-        msg = str(ex).lower()
-        return (("your npsso code has expired or is incorrect" in msg) or ("something went wrong while authenticating" in msg) or ("invalid_grant" in msg) or "invalid npsso" in msg or "npsso" in msg and ("expired" in msg or "invalid" in msg) or ("oauth/token" in msg and ("401" in msg or "403" in msg or "unauthorized" in msg or "forbidden" in msg)) or ("authz" in msg and ("401" in msg or "403" in msg)))
-
-    def _looks_like_malformed_response(ex):
-        msg = str(ex).lower()
-        return ("malformed presence response" in msg or "'str' object has no attribute 'get'" in msg or "'nonetype' object has no attribute 'get'" in msg or "'int' object has no attribute 'get'" in msg or "'list' object has no attribute 'get'" in msg)
-
-    def _looks_like_transient_connection_error(ex):
-        msg = str(ex).lower()
-        return ("remote end closed connection" in msg or "connection reset by peer" in msg or "connection aborted" in msg or "read timed out" in msg or "timeout" in msg or "temporarily unavailable" in msg)
-
     def _close_psnawp_sessions(obj):
         try:
             if obj and hasattr(obj, "close"):
@@ -1684,6 +1725,23 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
     def get_sleep_interval():
         return PSN_ACTIVE_CHECK_INTERVAL if status and status != "offline" else PSN_CHECK_INTERVAL
+
+    def _recreate_session_rate_limited():
+        nonlocal psnawp, psn_user, last_recreate_ts
+        now = int(time.time())
+        if (now - last_recreate_ts) < recreate_cooldown:
+            return False
+        try:
+            _close_psnawp_sessions(psnawp)
+        except Exception:
+            pass
+        try:
+            psnawp = PSNAWP(PSN_NPSSO)
+            psn_user = psnawp.user(online_id=psn_user_id)
+            last_recreate_ts = now
+            return True
+        except Exception:
+            return False
 
     sleep_interval = get_sleep_interval()
 
@@ -1723,20 +1781,16 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             signal.alarm(FUNCTION_TIMEOUT)
         try:
             psn_user_presence = psn_user.get_presence()
-            validate_presence_shape(psn_user_presence)
-            status = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
-            gametitleinfolist = psn_user_presence["basicPresence"].get("gameTitleInfoList")
-            game_name = ""
-            launchplatform = ""
-            if gametitleinfolist:
-                game_name_raw = gametitleinfolist[0].get("titleName")
-                game_name = normalize_ascii(game_name_raw) if game_name_raw else ""
-                launchplatform = gametitleinfolist[0].get("launchPlatform")
-                launchplatform = str(launchplatform).upper()
+            parsed = parse_presence(psn_user_presence)
+            status = parsed["status"]
+            game_name_raw = parsed["game_name"]
+            game_name = normalize_ascii(game_name_raw) if game_name_raw else ""
+            launch_platform_raw = parsed["launch_platform"]
+            launchplatform = str(launch_platform_raw).upper() if launch_platform_raw else ""
             if platform.system() != 'Windows':
                 signal.alarm(0)
             if not status:
-                raise ValueError('PSN user status is empty')
+                raise PsnMalformedResponse('onlineStatus is empty')
             else:
                 status = str(status).lower()
         except TimeoutException:
@@ -1747,60 +1801,24 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             time.sleep(FUNCTION_TIMEOUT)
             continue
 
-        except PSNAWPAuthenticationError as auth_err:
-            if platform.system() != 'Windows':
-                signal.alarm(0)
-
-            # We retry periodically, recreating the PSNAWP client to force re-auth
-            sleep_interval = max(60, get_sleep_interval())
-            hint = probe_npsso_auth_error(PSN_NPSSO) if "something went wrong while authenticating" in str(auth_err).lower() else None
-            if hint:
-                print(f"* PSN auth failed: {hint}")
-            else:
-                print(f"* PSN NPSSO key is expired/invalid: {auth_err}")
-            if ERROR_NOTIFICATION and not email_sent:
-                m_subject = f"psn_monitor: PSN NPSSO key error! (user: {psn_user_id})"
-                body_reason = hint if hint else f"PSN NPSSO key is expired/invalid: {auth_err}"
-                m_body = f"{body_reason}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                print(f"Sending email notification to {RECEIVER_EMAIL}")
-                send_email(m_subject, m_body, "", SMTP_SSL)
-                email_sent = True
-            print_cur_ts("Timestamp:\t\t\t")
-
-            # Recreate session (rate-limited) to force auth with possibly-updated NPSSO
-            now_ts = int(time.time())
-            if (now_ts - last_recreate_ts) >= recreate_cooldown:
-                try:
-                    _close_psnawp_sessions(psnawp)
-                except Exception:
-                    pass
-                try:
-                    psnawp = PSNAWP(PSN_NPSSO)
-                    psn_user = psnawp.user(online_id=psn_user_id)
-                    last_recreate_ts = now_ts
-                except Exception:
-                    pass
-            time.sleep(sleep_interval)
-            continue
-
         except Exception as e:
             if platform.system() != 'Windows':
                 signal.alarm(0)
 
-            # Hard stop: local resource exhaustion (file descriptors), this often masquerades as SSL/connection errors
-            if _is_too_many_open_files(e):
-                # fd exhaustion can be triggered by repeated reconnect/auth-refresh attempts (e.g. expired NPSSO)
+            kind = classify_psn_exception(e)
+
+            # Fatal local fd exhaustion — cannot recover in-process
+            if kind == "exhausted":
                 hint = ""
                 msg_l = str(e).lower()
                 if "oauth/token" in msg_l or "authz" in msg_l or "npsso" in msg_l:
-                    hint = "\n* Note: this can be a secondary effect of repeated PSN auth refresh attempts (e.g. expired NPSSO). After fixing NOFILE, verify your NPSSO."
+                    hint = "\n* Note: this can be a secondary effect of repeated PSN auth refresh attempts (e.g. expired NPSSO). After fixing NOFILE verify your NPSSO."
                 msg = (f"* Fatal: Too many open files (errno 24). "
-                       f"This is a local limit/file-descriptor exhaustion problem, not an NPSSO expiry.\n"
+                       f"This is a local limit/file-descriptor exhaustion problem not an NPSSO expiry.\n"
                        f"* Last error: {e}\n"
-                       f"* Fix: increase your process NOFILE/ulimit (e.g. `ulimit -n 4096`), "
+                       f"* Fix: increase your process NOFILE/ulimit (e.g. `ulimit -n 4096`) "
                        f"and if running under systemd set `LimitNOFILE=`. Then restart the tool.{hint}")
                 print(msg)
-
                 if ERROR_NOTIFICATION and not email_sent:
                     m_subject = f"psn_monitor: fatal error - too many open files (user: {psn_user_id})"
                     m_body = f"{msg}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
@@ -1810,65 +1828,37 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 print_cur_ts("Timestamp:\t\t\t")
                 sys.exit(2)
 
-            # Authentication-like failures that sometimes don't surface as PSNAWPAuthenticationError
-            if _looks_like_auth_error(e):
-                error_streak += 1
+            error_streak += 1
+
+            if kind == "auth":
                 sleep_interval = max(60, get_sleep_interval())
                 hint = probe_npsso_auth_error(PSN_NPSSO) if "something went wrong while authenticating" in str(e).lower() else None
                 if hint:
                     print(f"* PSN auth failed: {hint}")
                 else:
-                    print(f"* PSN authentication seems to have failed (NPSSO may be expired/invalid): {e}")
+                    print(f"* PSN authentication failed (NPSSO may be expired/invalid): {e}")
                     print("* Hint: update PSN_NPSSO in your .env and send SIGHUP to this process (or restart).")
-                if ERROR_NOTIFICATION and not email_sent and error_streak >= 2:
-                    m_subject = f"psn_monitor: PSN NPSSO key might not be valid anymore! (user: {psn_user_id})"
-                    body_reason = hint if hint else f"PSN authentication seems to have failed (NPSSO may be expired/invalid): {e}"
+                if ERROR_NOTIFICATION and not email_sent:
+                    m_subject = f"psn_monitor: PSN NPSSO key error! (user: {psn_user_id})"
+                    body_reason = hint if hint else f"PSN authentication failed (NPSSO may be expired/invalid): {e}"
                     m_body = f"{body_reason}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                     print(f"Sending email notification to {RECEIVER_EMAIL}")
                     send_email(m_subject, m_body, "", SMTP_SSL)
                     email_sent = True
                 print_cur_ts("Timestamp:\t\t\t")
-
-                # Recreate session (rate-limited) to force auth with possibly-updated NPSSO
-                now_ts = int(time.time())
-                if error_streak >= 2 and (now_ts - last_recreate_ts) >= recreate_cooldown:
-                    try:
-                        _close_psnawp_sessions(psnawp)
-                    except Exception:
-                        pass
-                    try:
-                        psnawp = PSNAWP(PSN_NPSSO)
-                        psn_user = psnawp.user(online_id=psn_user_id)
-                        last_recreate_ts = now_ts
-                    except Exception:
-                        pass
+                _recreate_session_rate_limited()
                 time.sleep(sleep_interval)
                 continue
 
-            # Malformed/unexpected PSN response (e.g. str where dict expected): likely silent auth failure or upstream glitch, recreate session
-            if _looks_like_malformed_response(e):
-                error_streak += 1
+            if kind == "malformed":
                 sleep_interval = max(60, get_sleep_interval())
                 hint = probe_npsso_auth_error(PSN_NPSSO)
                 if hint:
                     print(f"* PSN returned a malformed response and auth probe reports: {hint}")
                 else:
-                    print(f"* PSN returned an unexpected response shape, will recreate session: {e}")
-
-                now_ts = int(time.time())
-                if (now_ts - last_recreate_ts) >= recreate_cooldown:
-                    try:
-                        _close_psnawp_sessions(psnawp)
-                    except Exception:
-                        pass
-                    try:
-                        psnawp = PSNAWP(PSN_NPSSO)
-                        psn_user = psnawp.user(online_id=psn_user_id)
-                        last_recreate_ts = now_ts
-                        print(f"* Recreated PSNAWP session after malformed response")
-                    except Exception as rec_e:
-                        print(f"* Failed to recreate PSNAWP session: {rec_e}")
-
+                    print(f"* PSN returned an unexpected response shape will recreate session: {e}")
+                if _recreate_session_rate_limited():
+                    print("* Recreated PSNAWP session after malformed response")
                 if ERROR_NOTIFICATION and not email_sent and error_streak >= 3:
                     m_subject = f"psn_monitor: PSN returned malformed responses (user: {psn_user_id})"
                     body_reason = hint if hint else f"PSN returned unexpected response shape ({error_streak} in a row). Last error: {e}"
@@ -1876,61 +1866,46 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                     print(f"Sending email notification to {RECEIVER_EMAIL}")
                     send_email(m_subject, m_body, "", SMTP_SSL)
                     email_sent = True
-
                 print_cur_ts("Timestamp:\t\t\t")
                 time.sleep(sleep_interval)
                 continue
 
-            # Transient connection errors: retry quickly, but only recreate the PSNAWP client with cooldown
-            if _looks_like_transient_connection_error(e):
-                error_streak += 1
+            if kind == "transient":
                 retry_delay = FUNCTION_TIMEOUT
-
-                now_ts = int(time.time())
-
-                # Recreate PSNAWP only if we've been failing for a bit and we haven't recreated recently
-                if error_streak >= 3 and (now_ts - last_recreate_ts) >= recreate_cooldown:
-                    try:
-                        _close_psnawp_sessions(psnawp)
-                    except Exception:
-                        pass
-                    try:
-                        psnawp = PSNAWP(PSN_NPSSO)
-                        psn_user = psnawp.user(online_id=psn_user_id)
-                        last_recreate_ts = now_ts
+                if error_streak >= 3:
+                    if _recreate_session_rate_limited():
                         print(f"* Recreated PSNAWP session after {error_streak} consecutive connection errors")
-                    except Exception:
-                        pass
-
-                # Don't claim NPSSO expiry for generic connection resets, it's usually network/transient
                 if ERROR_NOTIFICATION and not email_sent and error_streak >= 20:
                     m_subject = f"psn_monitor: persistent connection errors (user: {psn_user_id})"
                     m_body = f"Persistent connection errors detected ({error_streak} in a row). Last error: {e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                     print(f"Sending email notification to {RECEIVER_EMAIL}")
                     send_email(m_subject, m_body, "", SMTP_SSL)
                     email_sent = True
-
                 if error_streak >= 3:
-                    print(f"* Error (connection), retrying in {display_time(retry_delay)}: {e}")
+                    print(f"* Error (connection) retrying in {display_time(retry_delay)}: {e}")
                     print_cur_ts("Timestamp:\t\t\t")
-
                 time.sleep(retry_delay)
                 continue
 
-            error_streak += 1
-            msg = str(e).lower()
-
-            # Check for authentication errors (excluding connection errors which we already handled)
-            likely_auth = ('401' in msg) or ('expired' in msg) or ('invalid' in msg)
-            if likely_auth and ERROR_NOTIFICATION and not email_sent and error_streak >= 5:
-                m_subject = f"psn_monitor: PSN NPSSO key error! (user: {psn_user_id})"
-                m_body = f"PSN NPSSO key might not be valid anymore: {e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+            # kind == "unknown": safety net. After a few streaks we probe auth and recreate session so a novel error shape cannot silently loop forever
+            sleep_interval = get_sleep_interval()
+            hint = None
+            if error_streak >= 3:
+                hint = probe_npsso_auth_error(PSN_NPSSO)
+                if hint:
+                    print(f"* Error (unknown {error_streak} in a row) auth probe reports: {hint}")
+                else:
+                    print(f"* Error (unknown {error_streak} in a row) will recreate session: {e}")
+                _recreate_session_rate_limited()
+            else:
+                print(f"* Error retrying in {display_time(sleep_interval)}: {e}")
+            if ERROR_NOTIFICATION and not email_sent and error_streak >= 5:
+                m_subject = f"psn_monitor: persistent unexpected errors (user: {psn_user_id})"
+                body_reason = hint if hint else f"Persistent unexpected errors ({error_streak} in a row). Last error: {e}"
+                m_body = f"{body_reason}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                 print(f"Sending email notification to {RECEIVER_EMAIL}")
                 send_email(m_subject, m_body, "", SMTP_SSL)
                 email_sent = True
-
-            sleep_interval = get_sleep_interval()
-            print(f"* Error, retrying in {display_time(sleep_interval)}: {e}")
             print_cur_ts("Timestamp:\t\t\t")
             time.sleep(sleep_interval)
             continue
