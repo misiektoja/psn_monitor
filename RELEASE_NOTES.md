@@ -2,6 +2,15 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 1.8.2 (27 Apr 2026)
+
+**Features and Improvements**:
+
+- **NEW:** PSN platform codes are now mapped to human-readable labels in both monitoring mode and user info mode (e.g. `MOBILE_APP` -> `PlayStation App (mobile)`)
+- **IMPROVE:** Added detection of PSN Terms of Service/User Agreement re-acceptance errors - when authentication fails due to a pending ToSUA, a specific actionable hint is displayed (and included in email notifications) instead of a generic auth error
+- **IMPROVE:** Malformed or unexpected PSN presence responses are now detected and handled gracefully by recreating the PSNAWP session instead of crashing
+- **IMPROVE:** Improved the error message when timezone auto-detection fails to hint about the missing optional `tzlocal` library and how to install it
+
 # Changes in 1.8.1 (06 Mar 2026)
 
 **Bug fixes**:
