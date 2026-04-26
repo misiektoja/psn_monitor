@@ -180,6 +180,16 @@ CLI_CONFIG_PATH = None
 # to solve the issue: 'SyntaxError: f-string expression part cannot include a backslash'
 nl_ch = "\n"
 
+PLATFORM_DISPLAY_NAMES = {
+    "PS5": "PlayStation 5",
+    "PS4": "PlayStation 4",
+    "PS3": "PlayStation 3",
+    "PSVITA": "PlayStation Vita",
+    "PS_VITA": "PlayStation Vita",
+    "PSPC": "PlayStation PC",
+    "MOBILE_APP": "PlayStation App (mobile)",
+}
+
 
 import sys
 
@@ -366,6 +376,14 @@ def parse_presence(pres):
         "game_name": (game_entry.get("titleName") if game_entry else None),
         "launch_platform": (game_entry.get("launchPlatform") if game_entry else None),
     }
+
+
+# Converts a PSN platform code into a readable label while preserving unknown values
+def format_platform_display(platform_value):
+    if not platform_value:
+        return ""
+    platform_key = str(platform_value).strip().upper()
+    return PLATFORM_DISPLAY_NAMES.get(platform_key, platform_key.replace("_", " "))
 
 
 # Logger class to output messages to stdout and log file
@@ -1186,8 +1204,8 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
 
         status = str(status).lower()
 
-        psn_platform = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("platform")
-        psn_platform = str(psn_platform).upper() if psn_platform else ""
+        psn_platform_raw = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("platform")
+        psn_platform = format_platform_display(psn_platform_raw)
         lastonline = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("lastOnlineDate")
         availability = psn_user_presence["basicPresence"].get("availability")
 
@@ -1525,8 +1543,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
         status = str(status).lower()
 
-        psn_platform = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("platform")
-        psn_platform = str(psn_platform).upper() if psn_platform else ""
+        psn_platform_raw = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("platform")
+        psn_platform = format_platform_display(psn_platform_raw)
         lastonline = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("lastOnlineDate")
         availability = psn_user_presence["basicPresence"].get("availability")
 
