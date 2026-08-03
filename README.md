@@ -146,9 +146,16 @@ Most settings can be configured via command-line arguments.
 If you want to have it stored persistently, generate a default config template and save it to a file named `psn_monitor.conf`:
 
 ```sh
+# On macOS, Linux or Windows Command Prompt (cmd.exe)
 psn_monitor --generate-config > psn_monitor.conf
 
+# On Windows PowerShell (recommended to avoid encoding issues)
+psn_monitor --generate-config psn_monitor.conf
 ```
+
+> **IMPORTANT**: In Windows PowerShell, do not use `>` for this command. Some PowerShell versions write redirected text as UTF-16, which makes PSN Monitor report a "null bytes" error. Pass the filename to `--generate-config` so PSN Monitor writes a UTF-8 file itself.
+
+When you include the filename, PSN Monitor writes the template directly as UTF-8. This avoids PowerShell changing the file encoding during redirection.
 
 Edit the `psn_monitor.conf` file and change any desired configuration options (detailed comments are provided for each).
 
