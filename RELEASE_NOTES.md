@@ -2,6 +2,15 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 1.8.3 (TBD)
+
+Version **1.8.3** improves log alignment and makes configuration generation reliable in Windows PowerShell.
+
+**Features and Improvements**:
+
+- **IMPROVE:** Expanded tabs to spaces in output log files to ensure **consistent alignment across different viewers**
+- **IMPROVE:** Enhanced `--generate-config` to write directly to a specified file as UTF-8 and documented the recommended Windows PowerShell usage to avoid UTF-16 redirection issues
+
 # Changes in 1.8.2 (27 Apr 2026)
 
 **Features and Improvements**:
