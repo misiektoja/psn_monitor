@@ -2,6 +2,16 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 1.8.3 (04 Aug 2026)
+
+Version **1.8.3** makes saved logs easier to read consistently across platforms and prevents Windows PowerShell from creating incompatible configuration files.
+
+**Features and Improvements**:
+
+- **IMPROVE:** **Consistent log alignment** - Tabs are expanded to spaces when saved to log files so columns stay aligned in viewers that render tabs differently. Terminal output is unchanged
+- **IMPROVE:** **Portable log separators** - The new `ASCII_LOG_SEPARATORS` setting controls whether separator-only lines saved to log files use ASCII hyphens. `"Auto"` enables them on Windows by default, `"On"` enables them on every operating system and `"Off"` preserves Unicode separators. Terminal separators stay Unicode. Log files and all other logged text remain UTF-8.
+- **IMPROVE:** **UTF-8 configuration generation** - `psn_monitor --generate-config FILENAME` now writes the template directly to the specified file as UTF-8. In Windows PowerShell, it should be used instead of output redirection to avoid UTF-16 files and `null bytes` errors
+
 # Changes in 1.8.2 (27 Apr 2026)
 
 **Features and Improvements**:

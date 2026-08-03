@@ -146,9 +146,16 @@ Most settings can be configured via command-line arguments.
 If you want to have it stored persistently, generate a default config template and save it to a file named `psn_monitor.conf`:
 
 ```sh
+# On macOS, Linux or Windows Command Prompt (cmd.exe)
 psn_monitor --generate-config > psn_monitor.conf
 
+# On Windows PowerShell (recommended to avoid encoding issues)
+psn_monitor --generate-config psn_monitor.conf
 ```
+
+> **IMPORTANT**: In Windows PowerShell, do not use `>` for this command. Some PowerShell versions write redirected text as UTF-16, which makes PSN Monitor report a "null bytes" error. Pass the filename to `--generate-config` so PSN Monitor writes a UTF-8 file itself.
+
+When you include the filename, PSN Monitor writes the template directly as UTF-8. This avoids PowerShell changing the file encoding during redirection.
 
 Edit the `psn_monitor.conf` file and change any desired configuration options (detailed comments are provided for each).
 
@@ -331,6 +338,8 @@ The tool runs until interrupted (`Ctrl+C`). Use `tmux` or `screen` for persisten
 You can monitor multiple PSN players by running multiple instances of the script.
 
 The tool automatically saves its output to `psn_monitor_<psn_user_id>.log` file. It can be changed in the settings via `PSN_LOGFILE` configuration option or disabled completely via `DISABLE_LOGGING` / `-d` flag.
+
+Set `ASCII_LOG_SEPARATORS` to `"Auto"` (default) to use ASCII separator-only lines on Windows, `"On"` to use them on every operating system or `"Off"` to preserve Unicode separators in logs everywhere. Terminal separators stay Unicode. Log files and all other logged text remain UTF-8.
 
 The tool also saves the timestamp and last status (after every change) to `psn_<psn_user_id>_last_status.json` file, so the last status is available after the restart of the tool.
 
