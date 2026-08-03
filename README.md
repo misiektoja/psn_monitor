@@ -339,6 +339,8 @@ You can monitor multiple PSN players by running multiple instances of the script
 
 The tool automatically saves its output to `psn_monitor_<psn_user_id>.log` file. It can be changed in the settings via `PSN_LOGFILE` configuration option or disabled completely via `DISABLE_LOGGING` / `-d` flag.
 
+Set `ASCII_LOG_SEPARATORS` to `"Auto"` (default) to use ASCII separator-only lines on Windows, `"On"` to use them on every operating system or `"Off"` to preserve Unicode separators in logs everywhere. Terminal separators stay Unicode. Log files and all other logged text remain UTF-8.
+
 The tool also saves the timestamp and last status (after every change) to `psn_<psn_user_id>_last_status.json` file, so the last status is available after the restart of the tool.
 
 <a id="email-notifications"></a>
