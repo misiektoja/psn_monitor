@@ -2,6 +2,12 @@
 
 This is a high-level summary of the most important changes.
 
+# Changes in 1.8.4 (04 Aug 2026)
+
+**Bug fixes**:
+
+- **BUGFIX:** Fixed indentation of ASCII log separators in summary screen
+
 # Changes in 1.8.3 (04 Aug 2026)
 
 Version **1.8.3** makes saved logs easier to read consistently across platforms and prevents Windows PowerShell from creating incompatible configuration files.
