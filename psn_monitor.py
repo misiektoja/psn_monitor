@@ -2801,8 +2801,6 @@ def doctor_check_environment(version_info=None, spec_finder=None):
             advice = missing_dependency_advice(package_name, effect, alternative)
             checks.append(make_doctor_check("Environment", "WARN", f"Optional dependency {package_name} is not installed", f"{effect}. Monitoring is unaffected", advice))
 
-    # Stated as the raw key, because setup guidance and support reports use these values as identifiers
-    checks.append(make_doctor_check("Environment", "PASS", f"Install method: {detect_install_method()}", f"Commands in this report are written for a {install_method_display_name()}"))
     return checks
 
 
@@ -2990,9 +2988,11 @@ def render_doctor_notice():
     print("Running preflight checks. No files will be written. Interactive email tests run only after separate approval.\n")
 
 
-# Renders the heading and every non-empty section, with a fix line on the rows that are not a pass
-def render_doctor_sections(report):
-    lines = ["Doctor"]
+# Renders the whole report, with a fix line on the rows that are not a pass
+def render_doctor_report(report):
+    # The install method is context rather than a check: it cannot fail, so it is stated once here
+    # instead of occupying a result row that no marker describes. The raw key is what support reports use
+    lines = ["Doctor", f"Detected install method: {detect_install_method()}"]
     for section in DOCTOR_SECTIONS:
         section_checks = [check for check in report.checks if check.section == section]
         if not section_checks:
@@ -3004,7 +3004,7 @@ def render_doctor_sections(report):
                 lines.append(f"  {check.detail}")
             if check.advice is not None and check.status in ("FAIL", "WARN"):
                 lines.append(f"To fix: {check.advice.fix}")
-    return sanitize_error_text("\n".join(lines))
+    return sanitize_error_text("\n".join(lines) + render_doctor_summary(report.checks))
 
 
 # Renders the one sentence that says whether the setup is usable, and where to read more
@@ -3017,7 +3017,7 @@ def render_doctor_summary(checks):
         sentence = f"  All critical checks passed with {warnings} warning(s). Review the warnings above."
     else:
         sentence = "  All checks passed. You are good to go!"
-    return "\n".join(("", "Summary", sentence, "", f"Guide: {DOCTOR_GUIDE_URL}"))
+    return "\n".join(("", "", "Summary", sentence, "", f"Guide: {DOCTOR_GUIDE_URL}"))
 
 
 # Asks one yes or no question, treating a closed or interrupted input as no
@@ -3061,9 +3061,8 @@ def run_doctor(psn_user_id=None, config_path=None, env_path=None, config_advice=
         report = build_doctor_report(psn_user_id, config_path, env_path, config_advice, timezone_advice, progress)
     finally:
         doctor_progress_clear()
-    print(render_doctor_sections(report))
+    print(render_doctor_report(report))
     delivery_checks = offer_doctor_delivery_tests(report)
-    print(render_doctor_summary([*report.checks, *delivery_checks]))
     return 1 if any(check.status == "FAIL" for check in (*report.checks, *delivery_checks)) else 0
 
 

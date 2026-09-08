@@ -422,9 +422,9 @@ psn_monitor <psn_user_id> --doctor
 
 It writes no files, and it exits `1` if any check failed so you can run it from a script.
 
-Five sections are reported, each row marked `[PASS]`, `[WARN]`, `[FAIL]` or `[SKIP]`:
+The report opens with the detected install method, then five sections, each row marked `[PASS]`, `[WARN]`, `[FAIL]` or `[SKIP]`:
 
-* **Environment**: the Python version, the required libraries, the optional ones and what stops working without each, and how the tool was installed
+* **Environment**: the Python version, the required libraries, and the optional ones with what stops working without each
 * **Configuration**: the configuration and dotenv files in use, which secrets are loaded and where each came from, the time zone, the check intervals and the files the tool would write
 * **Authentication**: whether PlayStation Network accepts your NPSSO code, and which account it signed in as
 * **Target**: whether the monitored PlayStation ID exists and shares its presence with your account

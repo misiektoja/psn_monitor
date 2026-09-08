@@ -86,7 +86,7 @@ def test_the_report_is_printed_in_the_documented_order(pm_module, psn_session, d
     notice = raw.index("Running preflight checks.")
     progress = raw.index("* Checking environment ...")
     # The heading is written straight after the progress line is erased, so there is no newline before it
-    heading = raw.index("Doctor\n\nEnvironment")
+    heading = raw.index("Doctor\nDetected install method:")
     assert notice < progress < heading
 
 
@@ -170,6 +170,19 @@ def test_the_report_ends_with_one_summary_sentence_and_the_guide(pm_module, psn_
     assert tail[3] == f"Guide: {pm_module.DOCTOR_GUIDE_URL}"
 
 
+# Verifies the delivery tests are offered after the report is complete, matching the sibling monitors
+def test_delivery_tests_are_offered_after_the_report(pm_module, psn_session, monkeypatch, doctor_run, sent_emails):
+    monkeypatch.setattr(pm_module, "GAME_CHANGE_NOTIFICATION", True)
+    monkeypatch.setattr(pm_module, "ask_yes_no", lambda question, default=False: False)
+    psn_session([presence_payload(status="online")])
+
+    _, raw = doctor_run(psn_user_id=USER_ID)
+    displayed = as_displayed(raw)
+
+    assert displayed.index("Summary") < displayed.index("Optional delivery tests")
+    assert displayed.index(f"Guide: {pm_module.DOCTOR_GUIDE_URL}") < displayed.index("Optional delivery tests")
+
+
 @pytest.mark.parametrize("failures, warnings, sentence", [
     (0, 0, "  All checks passed. You are good to go!"),
     (0, 2, "  All critical checks passed with 2 warning(s). Review the warnings above."),
@@ -231,13 +244,15 @@ def test_a_missing_optional_dependency_warns_and_says_what_breaks(pm_module):
     assert "-m pip install wcwidth" in missing.advice.fix
 
 
-# Verifies the install method is reported as the raw key that support reports and setup guidance use
-def test_the_install_method_is_reported_as_the_stable_key(pm_module, monkeypatch):
+# Verifies the install method is stated under the heading as context, using the raw key support reports use
+def test_the_install_method_is_stated_under_the_heading(pm_module, monkeypatch):
     monkeypatch.setattr(pm_module.sys, "argv", ["/usr/local/bin/psn_monitor"])
 
-    labels = [check.label for check in pm_module.doctor_check_environment()]
+    rendered = pm_module.render_doctor_report(pm_module.DoctorReport()).split("\n")
 
-    assert "Install method: pip" in labels
+    assert rendered[:2] == ["Doctor", "Detected install method: pip"]
+    # It cannot fail, so it never takes a result row that no marker describes
+    assert not any(line.startswith("[") and "Install method" in line for line in rendered)
 
 
 # Verifies the configuration and dotenv files in use are named, since that is what a stale setting looks like
