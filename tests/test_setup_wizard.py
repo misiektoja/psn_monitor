@@ -339,7 +339,7 @@ def test_the_webhook_url_is_never_displayed(capsys):
     output = capsys.readouterr().out
     assert WEBHOOK_URL not in output
     assert "Webhook:" in output
-    assert "Webhook notifications:" in output
+    assert "Webhook alerts:" in output
 
 
 # Verifies an ntfy topic name is expanded before it is written, so the saved value is a complete URL

@@ -273,3 +273,14 @@ def test_the_real_logger_splits_the_summary(pm_module, monkeypatch, tmp_path, su
     # The log file stays plain text, whichever writer put the line there
     assert "\x1b" not in saved
     assert "\t" not in saved
+
+
+# The rows shared with the sibling monitors, in the order every one of them prints
+SHARED_ROW_ORDER = ("Target", "Polling intervals", "Notifications (email)", "Notifications (webhook)", "Output", "Output logging", "Config", "Dotenv", "Liveness output", "CSV output", "Terminal truncation", "Local timezone", "Install method", "Secrets from dotenv", "Secrets from environment", "Secrets from config file", "TLS verification", "ASCII log separators", "Coloured output", "Verbose mode", "Debug mode", "More details")
+
+
+# Verifies the shared rows keep the order and the label column width every sibling monitor prints
+def test_the_shared_summary_rows_match_the_sibling_tools(summary_rows):
+    assert [row.label for row in summary_rows if row.label in SHARED_ROW_ORDER] == list(SHARED_ROW_ORDER)
+    # The renderer pads "<label>:" into a 30-character column, so a longer label swallows the separating space
+    assert max(len(row.label) for row in summary_rows) <= 28

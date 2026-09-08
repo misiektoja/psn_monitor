@@ -4408,26 +4408,29 @@ def build_startup_summary(psn_user_id=None, config_path=None, env_path=None, log
     supplied = doctor_secret_sources()
     from_dotenv = sorted(supplied.get("dotenv file", ()))
     from_environment = sorted(supplied.get("environment", ()))
+    from_config = sorted(name for source, names in supplied.items() if source not in ("dotenv file", "environment") for name in names)
     output_state = str(log_path) if log_path else "Terminal only (logging disabled)"
     return [
+        StartupSummaryRow("Target", str(psn_user_id) if psn_user_id else "None", concise=True),
         StartupSummaryRow("Polling intervals", f"[offline: {display_time(PSN_CHECK_INTERVAL)}] [online: {display_time(PSN_ACTIVE_CHECK_INTERVAL)}]", concise=True),
-        StartupSummaryRow("TLS verification", "On" if VERIFY_SSL else "Off, server certificates are not checked", concise=not VERIFY_SSL),
         StartupSummaryRow("Notifications (email)", startup_notification_state(), concise=True),
         StartupSummaryRow("Notifications (webhook)", startup_webhook_notification_state(), concise=True),
         StartupSummaryRow("Output", output_state, concise=True, full=False, log=False),
         StartupSummaryRow("Output logging", str(log_path) if log_path else "Disabled"),
-        StartupSummaryRow("ASCII log separators", f"{ascii_log_separators_enabled()} (mode: {ASCII_LOG_SEPARATORS})"),
-        StartupSummaryRow("Status file", resolve_status_file(psn_user_id) if psn_user_id else "None"),
         StartupSummaryRow("Config", str(config_path) if config_path else "None", concise=True),
         StartupSummaryRow("Dotenv", str(env_path) if env_path else "None", concise=True),
-        StartupSummaryRow("Install method", install_method_display_name()),
-        StartupSummaryRow("Secrets from dotenv", ", ".join(from_dotenv) if from_dotenv else "None"),
-        StartupSummaryRow("Secrets from environment", ", ".join(from_environment) if from_environment else "None"),
-        StartupSummaryRow("Local timezone", LOCAL_TIMEZONE),
+        StartupSummaryRow("Status file", resolve_status_file(psn_user_id) if psn_user_id else "None"),
         # Each optional feature earns a concise row only once it is actually switched on
         StartupSummaryRow("Liveness output", display_time(LIVENESS_CHECK_INTERVAL) if LIVENESS_CHECK_INTERVAL else "Disabled", concise=bool(LIVENESS_CHECK_INTERVAL)),
         StartupSummaryRow("CSV output", CSV_FILE or "Disabled", concise=bool(CSV_FILE)),
         StartupSummaryRow("Terminal truncation", f"{TRUNCATE_CHARS} chars" if TRUNCATE_CHARS else "Disabled", concise=bool(TRUNCATE_CHARS)),
+        StartupSummaryRow("Local timezone", LOCAL_TIMEZONE),
+        StartupSummaryRow("Install method", install_method_display_name()),
+        StartupSummaryRow("Secrets from dotenv", ", ".join(from_dotenv) if from_dotenv else "None"),
+        StartupSummaryRow("Secrets from environment", ", ".join(from_environment) if from_environment else "None"),
+        StartupSummaryRow("Secrets from config file", ", ".join(from_config) if from_config else "None"),
+        StartupSummaryRow("TLS verification", "On" if VERIFY_SSL else "Off, server certificates are not checked", concise=not VERIFY_SSL),
+        StartupSummaryRow("ASCII log separators", f"{ascii_log_separators_enabled()} (mode: {ASCII_LOG_SEPARATORS})"),
         # The resolved state, not the setting: colour also switches itself off when the output is not a terminal
         StartupSummaryRow("Coloured output", f"{COLOR_ENABLED} (setting: {COLORED_OUTPUT})"),
         StartupSummaryRow("Verbose mode", str(VERBOSE_MODE), concise=bool(VERBOSE_MODE)),
@@ -4953,14 +4956,14 @@ def _wizard_print_setup_summary(state):
     npsso_set = "PSN_NPSSO" in state.secret_updates or secret_is_set(state.config_values.get("PSN_NPSSO"))
     rows = [
         ("Target", state.target or "not set"),
-        ("Save target in config", "yes" if state.persist_target else "no"),
+        ("Persist target", "yes" if state.persist_target else "no"),
         ("Polling interval while offline", _wizard_format_duration(int(state.config_values.get("PSN_CHECK_INTERVAL") or 0))),
         ("Polling interval while online", _wizard_format_duration(int(state.config_values.get("PSN_ACTIVE_CHECK_INTERVAL") or 0))),
         ("Authentication status", "complete" if npsso_set else "incomplete"),
         ("Email", "enabled" if enabled_email else "disabled"),
         ("Email notifications", ", ".join(enabled_email) if enabled_email else "none"),
         ("Webhook", f"enabled ({webhook_provider_display_name(state.config_values.get('WEBHOOK_PROVIDER'))})" if state.config_values.get("WEBHOOK_ENABLED") else "disabled"),
-        ("Webhook notifications", ", ".join(enabled_webhook) if enabled_webhook else "none"),
+        ("Webhook alerts", ", ".join(enabled_webhook) if enabled_webhook else "none"),
         ("Output log", "disabled" if state.config_values.get("DISABLE_LOGGING") else "enabled"),
         ("CSV output", state.config_values.get("CSV_FILE") or "disabled"),
         ("Status file", state.config_values.get("PSN_STATUS_FILE") or "default"),

@@ -90,6 +90,7 @@ The status file is written through a temporary file in the same directory, so an
 Monitoring mode prints the settings that are actually in effect before the first check:
 
 ```
+* Target:                       misiektoja
 * Polling intervals:            [offline: 3 minutes] [online: 1 minute]
 * Notifications (email):        On (status changes, game changes, errors)
 * Notifications (webhook):      On (status changes, errors) through Discord
@@ -101,7 +102,9 @@ Monitoring mode prints the settings that are actually in effect before the first
 
 Optional features appear once you switch them on, and `TLS verification` appears here whenever certificate checking is off.
 
-`--verbose` or `--debug` replaces this with the complete list: the log file, the status file, the CSV file, the install method, which secrets came from the dotenv file and which from the environment, the resolved time zone, the liveness interval, the truncation width, whether colour is actually in use and the two flags themselves.
+`--verbose` or `--debug` replaces this with the complete list: the log file, the status file, the CSV file, the install method, which secrets came from the dotenv file, the environment or the configuration file, the resolved time zone, the liveness interval, the truncation width, whether colour is actually in use and the two flags themselves.
+
+The sibling monitors print the same rows in the same order, so a setting sits in the same place whichever of them you are reading.
 
 The log file always receives the complete list, whichever view the terminal was shown, so a log attached to a bug report carries every effective setting.
 
