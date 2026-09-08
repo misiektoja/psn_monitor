@@ -300,6 +300,19 @@ def test_longer_network_outage_recreates_the_session(pm_module, psn_session, fak
     assert "could not be reached (retrying in" in output
 
 
+# Verifies rebuilding the session closes the HTTP session of the replaced client instead of leaking its connection pool
+def test_session_recreation_closes_the_previous_session(pm_module, psn_session, fake_clock):
+    broken = presence_payload(status="offline")
+    broken["basicPresence"]["primaryPlatformInfo"] = None
+    psn_session([presence_payload(status="offline"), broken, presence_payload(status="offline")])
+
+    run_monitor(pm_module)
+
+    replaced, current = psn_session.instances
+    assert replaced.authenticator.request_builder.session.closed is True
+    assert current.authenticator.request_builder.session.closed is False
+
+
 # Verifies local file descriptor exhaustion stops the tool with an actionable message rather than looping
 def test_descriptor_exhaustion_stops_the_tool(pm_module, psn_session, fake_clock, monkeypatch, sent_emails, capsys):
     monkeypatch.setattr(pm_module, "ERROR_NOTIFICATION", True)
@@ -328,6 +341,7 @@ def test_rotated_npsso_rebuilds_the_session(pm_module, psn_session, fake_clock, 
 
     assert "PSN_NPSSO updated - recreated PSNAWP session" in capsys.readouterr().out
     assert [client.npsso for client in psn_session.instances] == ["npsso-test-value", "rotated-npsso-value"]
+    assert psn_session.instances[0].authenticator.request_builder.session.closed is True
 
 
 # Verifies the liveness line is printed while an offline user produces no other output

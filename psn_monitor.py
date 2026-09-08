@@ -3618,20 +3618,31 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     recreate_cooldown = 300  # avoid recreating PSNAWP session too frequently
     last_npsso_seen = PSN_NPSSO
 
+    # Releases the connection pool of a PSNAWP client before it is replaced, so repeated recreations do not leak sockets
     def _close_psnawp_sessions(obj):
+        if obj is None:
+            return
+        already_closed = set()
+
+        def _close(target, label):
+            if target is None or not hasattr(target, "close") or id(target) in already_closed:
+                return
+            already_closed.add(id(target))
+            try:
+                target.close()
+                debug_print(f"Closed the PSNAWP {label}")
+            except Exception as diag_exc:
+                debug_print(f"Closing the PSNAWP {label} failed: {type(diag_exc).__name__}: {diag_exc}")
+
         try:
-            if obj and hasattr(obj, "close"):
-                try:
-                    obj.close()
-                except Exception as diag_exc:
-                    debug_print(f"Closing a PSNAWP object failed: {type(diag_exc).__name__}: {diag_exc}")
+            # Where psnawp keeps the requests session, the same attribute psn_client() uses to apply the TLS setting
+            authenticator = getattr(obj, "authenticator", None)
+            request_builder = getattr(authenticator, "request_builder", None)
+            _close(getattr(request_builder, "session", None), "authenticator.request_builder.session")
+            # Duck-typed fallbacks, so a psnawp release that moves or wraps the session is still cleaned up
+            _close(obj, "client")
             for attr in ("session", "_session", "http", "_http", "client", "_client"):
-                s = getattr(obj, attr, None)
-                if s and hasattr(s, "close"):
-                    try:
-                        s.close()
-                    except Exception as diag_exc:
-                        debug_print(f"Closing the PSNAWP '{attr}' session failed: {type(diag_exc).__name__}: {diag_exc}")
+                _close(getattr(obj, attr, None), f"'{attr}' session")
         except Exception as diag_exc:
             debug_print(f"Closing PSNAWP sessions failed: {type(diag_exc).__name__}: {diag_exc}")
 

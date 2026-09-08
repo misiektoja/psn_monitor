@@ -98,6 +98,17 @@ class FakePsnUser:
         return self._share_link
 
 
+# Stands in for the requests session inside a PSNAWP client and records whether the tool released it
+class FakePsnHttpSession:
+    def __init__(self):
+        self.verify = True
+        self.closed = False
+
+    # Records that the tool closed the underlying HTTP session
+    def close(self):
+        self.closed = True
+
+
 # Stands in for the PSNAWP client and records every session it is asked to build
 class FakePSNAWP:
     instances: "list[FakePSNAWP]" = []
@@ -107,7 +118,7 @@ class FakePSNAWP:
         self.npsso = npsso
         self.closed = False
         # Mirrors the PSNAWP session the tool reaches for to apply the TLS verification setting
-        self.authenticator = SimpleNamespace(request_builder=SimpleNamespace(session=SimpleNamespace(verify=True)))
+        self.authenticator = SimpleNamespace(request_builder=SimpleNamespace(session=FakePsnHttpSession()))
         FakePSNAWP.instances.append(self)
 
     # Returns the signed-in account, which is what the doctor reports after authenticating
