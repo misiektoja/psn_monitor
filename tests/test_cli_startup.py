@@ -563,7 +563,7 @@ def color_capable_terminal(monkeypatch, pm_module):
 def test_the_startup_banner_is_coloured(pm_module, monkeypatch, monitor_calls, capsys, color_capable_terminal):
     assert run_main(pm_module, monkeypatch, [USER_ID]) == 0
 
-    assert "\x1b[96mPSN Monitoring Tool\x1b[0m" in capsys.readouterr().out
+    assert f"\x1b[96m{pm_module.STARTUP_BANNER.splitlines()[1]}\x1b[0m" in capsys.readouterr().out
 
 
 # Verifies a config file that switches colour off is read early enough to reach the banner. Without the early

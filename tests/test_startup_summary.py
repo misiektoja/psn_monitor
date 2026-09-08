@@ -284,3 +284,67 @@ def test_the_shared_summary_rows_match_the_sibling_tools(summary_rows):
     assert [row.label for row in summary_rows if row.label in SHARED_ROW_ORDER] == list(SHARED_ROW_ORDER)
     # The renderer pads "<label>:" into a 30-character column, so a longer label swallows the separating space
     assert max(len(row.label) for row in summary_rows) <= 28
+
+
+# Verifies the selected PlayStation banner remains exact and version independent
+def test_selected_banner_exact_content(pm_module):
+    assert pm_module.STARTUP_BANNER == r"""
+ .---------------.    ____  ____  _   _
+|       /\       |   |  _ \/ ___|| \ | |
+|      /__\      |   | |_) \___ \|  \| |
+|   []      ()   |   |  __/ ___) | |\  |
+|       ><       |   |_|   |____/|_| \_|
+ '---------------'
+                      __  __             _ _
+                     |  \/  | ___  _ __ (_) |_ ___  _ __
+                     | |\/| |/ _ \| '_ \| | __/ _ \| '__|
+                     | |  | | (_) | | | | | || (_) | |
+                     |_|  |_|\___/|_| |_|_|\__\___/|_|"""
+
+
+# Verifies the art is portable, bounded and free of trailing whitespace
+def test_banner_ascii_width_and_whitespace(pm_module):
+    pm_module.STARTUP_BANNER.encode("ascii")
+    lines = pm_module.STARTUP_BANNER.splitlines()
+    assert max(map(len, lines)) <= 90
+    assert all(line == line.rstrip() for line in lines)
+
+
+# Verifies the PSN wordmark matches the standard FIGlet rows at the shared body column
+def test_banner_psn_wordmark_rows(pm_module):
+    assert [line[21:] for line in pm_module.STARTUP_BANNER.splitlines()[1:6]] == [
+        " ____  ____  _   _",
+        "|  _ \\/ ___|| \\ | |",
+        "| |_) \\___ \\|  \\| |",
+        "|  __/ ___) | |\\  |",
+        "|_|   |____/|_| \\_|",
+    ]
+
+
+# Verifies the Monitor wordmark matches the standard FIGlet rows at the shared body column
+def test_banner_monitor_wordmark_rows(pm_module):
+    assert [line[21:] for line in pm_module.STARTUP_BANNER.splitlines()[7:12]] == [
+        " __  __             _ _",
+        "|  \\/  | ___  _ __ (_) |_ ___  _ __",
+        "| |\\/| |/ _ \\| '_ \\| | __/ _ \\| '__|",
+        "| |  | | (_) | | | | | || (_) | |",
+        "|_|  |_|\\___/|_| |_|_|\\__\\___/|_|",
+    ]
+
+
+# Verifies PSN, Monitor and the version share the same body column
+def test_banner_version_alignment(pm_module):
+    banner_lines = pm_module.STARTUP_BANNER.splitlines()
+    psn_body_column = banner_lines[2].index("|  _ \\")
+    monitor_body_indent = len(banner_lines[8]) - len(banner_lines[8].lstrip())
+    assert psn_body_column == monitor_body_indent == 21
+
+
+# Verifies the printed version stays dynamic and followed by one blank line
+def test_banner_dynamic_version_line(pm_module, monkeypatch, capsys):
+    monkeypatch.setattr(pm_module, "VERSION", "9.9-test")
+    monkeypatch.setattr(pm_module, "COLOR_ENABLED", False)
+
+    pm_module.print_startup_banner()
+
+    assert capsys.readouterr().out == pm_module.STARTUP_BANNER + "\n" + (" " * 21) + "v9.9-test\n\n"

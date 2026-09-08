@@ -159,9 +159,11 @@ def test_startup_banner_uses_only_its_own_colours(colored, capsys):
     monitor.print_startup_banner()
     printed = capsys.readouterr().out
 
-    assert f"{colored['header']}PSN Monitoring Tool{monitor.ANSI_RESET}" in printed
-    assert f"{colored['info']}v{monitor.VERSION}{monitor.ANSI_RESET}" in printed
+    assert f"{colored['info']}{'':21}v{monitor.VERSION}{monitor.ANSI_RESET}" in printed
     assert set(monitor.SGR_SEQUENCE_RE.findall(printed)) <= {colored["header"], colored["info"], monitor.ANSI_RESET}
+    for line in monitor.STARTUP_BANNER.splitlines():
+        if line:
+            assert f"{colored['header']}{line}{monitor.ANSI_RESET}" in printed
 
 
 # Verifies a second colour pass over the printed banner leaves both the text and the colours alone
@@ -170,7 +172,7 @@ def test_startup_banner_text_is_unchanged(colored, capsys):
     printed = capsys.readouterr().out
 
     assert monitor.apply_color_to_text(printed) == printed
-    assert monitor.ANSI_ESCAPE_RE.sub("", printed) == f"PSN Monitoring Tool v{monitor.VERSION}\n\n"
+    assert monitor.ANSI_ESCAPE_RE.sub("", printed) == monitor.STARTUP_BANNER + "\n" + (" " * 21) + f"v{monitor.VERSION}\n\n"
 
 
 # Verifies labelled PlayStation rows colour the value with the expected theme part
@@ -641,7 +643,7 @@ def test_a_real_terminal_run_is_coloured(tmp_path):
         process.wait(timeout=60)
 
     rendered = output.decode("utf-8", "replace")
-    assert "\x1b[96mPSN Monitoring Tool\x1b[0m" in rendered
+    assert f"\x1b[96m{monitor.STARTUP_BANNER.splitlines()[1]}\x1b[0m" in rendered
     assert "\x1b[97m" in rendered
 
 

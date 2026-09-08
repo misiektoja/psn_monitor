@@ -408,6 +408,20 @@ PLATFORM_DISPLAY_NAMES = {
 }
 
 
+STARTUP_BANNER = r"""
+ .---------------.    ____  ____  _   _
+|       /\       |   |  _ \/ ___|| \ | |
+|      /__\      |   | |_) \___ \|  \| |
+|   []      ()   |   |  __/ ___) | |\  |
+|       ><       |   |_|   |____/|_| \_|
+ '---------------'
+                      __  __             _ _
+                     |  \/  | ___  _ __ (_) |_ ___  _ __
+                     | |\/| |/ _ \| '_ \| | __/ _ \| '__|
+                     | |  | | (_) | | | | | || (_) | |
+                     |_|  |_|\___/|_| |_|_|\__\___/|_|"""
+
+
 # Held in one place so the startup gate and the doctor Environment check can never disagree
 MINIMUM_PYTHON_VERSION = (3, 10)
 MINIMUM_PYTHON_VERSION_TEXT = ".".join(str(part) for part in MINIMUM_PYTHON_VERSION)
@@ -1767,9 +1781,12 @@ def clear_screen(enabled=True):
         print("* Cannot clear the screen contents")
 
 
-# Prints the startup line, with the version coloured apart from the name so it reads as context
+# Prints the ASCII startup banner with its separately aligned version
 def print_startup_banner():
-    print(f"{colorize('header', 'PSN Monitoring Tool')} {colorize('info', 'v' + VERSION)}\n")
+    # Each line carries its own colour so the whole banner sits inside a colour span. The line rules skip
+    # text that is already coloured, which keeps the ASCII art from being read as quoted names or dates
+    print("\n".join(colorize("header", line) if line else line for line in STARTUP_BANNER.splitlines()))
+    print(colorize("info", f"{'':21}v{VERSION}") + "\n")
 
 
 # Converts absolute value of seconds to human readable format
@@ -5149,6 +5166,44 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
         return _wizard_launch_monitor(launch_arguments)
     return 0
 
+# Renders the --help examples: one heading per task, then a comment and the command it describes
+def render_help_examples(groups, guide_url):
+    blocks = []
+    for title, entries in groups:
+        block = [f"{title}:"]
+        for comment, command in entries:
+            if len(block) > 1:
+                block.append("")
+            block.extend(f"  # {line}" for line in comment.split("\n"))
+            if command:
+                block.append(f"  {command}")
+        blocks.append("\n".join(block))
+    return "Examples:\n\n" + "\n\n".join(blocks) + f"\n\nGuide: {guide_url}\n"
+
+
+# Returns the --help epilog, listing the commands worth knowing rather than every command there is
+def help_examples():
+    prefix = tool_command_prefix()
+    groups = (
+        ("Getting started", (
+            ("Guided setup, recommended for the first run", f"{prefix} --setup"),
+            ("Or save the NPSSO code through a hidden prompt", f"{prefix} --set-npsso"),
+            ("Check the setup before relying on it", f"{prefix} --doctor <psn_user_id>"),
+            ("Start monitoring", f"{prefix} <psn_user_id>"),
+        )),
+        ("Notifications", (
+            ("Email when the user goes online or offline, and on game changes", f"{prefix} <psn_user_id> -a -g"),
+            ("Send one test email", f"{prefix} --send-test-email"),
+            ("Send one test webhook", f"{prefix} --send-test-webhook"),
+        )),
+        ("Information and diagnostics", (
+            ("Show detailed profile information and exit", f"{prefix} -i <psn_user_id>"),
+            ("Trace what the tool is doing", f"{prefix} <psn_user_id> --debug"),
+        )),
+    )
+    return render_help_examples(groups, QUICK_START_GUIDE_URL)
+
+
 # Prints the commands a newcomer needs next, instead of an argparse usage error nobody can act on
 def print_welcome_screen(input_func=None, interactive=None, config_file=None, env_file=None):
     terminal_is_interactive = sys.stdin.isatty() if interactive is None else bool(interactive)
@@ -5444,7 +5499,8 @@ def main():
 
     parser = argparse.ArgumentParser(
         prog="psn_monitor",
-        description=("Monitor a PSN user's playing status and send customizable email alerts [ https://github.com/misiektoja/psn_monitor/ ]"), formatter_class=argparse.RawTextHelpFormatter
+        description=("Monitor a PSN user's playing status and send customizable email or webhook alerts [ https://github.com/misiektoja/psn_monitor/ ]"), formatter_class=argparse.RawTextHelpFormatter,
+        epilog=help_examples()
     )
 
     # Positional
@@ -5496,6 +5552,30 @@ def main():
         metavar="PATH",
         help="Path to optional dotenv file (auto-search if not set, disable with 'none')",
     )
+    conf.add_argument(
+        "--set-npsso",
+        dest="set_npsso",
+        action="store_true",
+        help="Enter an NPSSO code privately, check it against PSN and save it to the dotenv file",
+    )
+    conf.add_argument(
+        "--set-smtp-password",
+        dest="set_smtp_password",
+        action="store_true",
+        help="Enter the SMTP password privately, check it against the mail server and save it to the dotenv file",
+    )
+    conf.add_argument(
+        "--set-webhook-url",
+        dest="set_webhook_url",
+        action="store_true",
+        help="Enter the webhook URL privately, check its shape and save it to the dotenv file",
+    )
+    conf.add_argument(
+        "--doctor",
+        dest="doctor",
+        action="store_true",
+        help="Run preflight checks on this setup and exit",
+    )
 
     # API credentials
     creds = parser.add_argument_group("API credentials")
@@ -5507,15 +5587,7 @@ def main():
         help="PlayStation NPSSO key"
     )
 
-    # Notifications
-    creds.add_argument(
-        "--set-npsso",
-        dest="set_npsso",
-        action="store_true",
-        help="Enter an NPSSO code privately, check it against PSN and save it to the dotenv file"
-    )
-
-    notify = parser.add_argument_group("Notifications")
+    notify = parser.add_argument_group("Email notifications")
     notify.add_argument(
         "-a", "--notify-active-inactive",
         dest="notify_active_inactive",
@@ -5542,14 +5614,6 @@ def main():
         dest="send_test_email",
         action="store_true",
         help="Send test email to verify SMTP settings"
-    )
-
-    # Webhook notifications
-    notify.add_argument(
-        "--set-smtp-password",
-        dest="set_smtp_password",
-        action="store_true",
-        help="Enter the SMTP password privately, check it against the mail server and save it to the dotenv file"
     )
 
     webhook = parser.add_argument_group("Webhook notifications")
@@ -5616,14 +5680,24 @@ def main():
         action="store_true",
         help="Send one test webhook to verify the destination settings"
     )
-    webhook.add_argument(
-        "--set-webhook-url",
-        dest="set_webhook_url",
-        action="store_true",
-        help="Enter the webhook URL privately, check its shape and save it to the dotenv file"
+    times = parser.add_argument_group("Intervals & timers")
+    times.add_argument(
+        "-c", "--check-interval",
+        dest="check_interval",
+        metavar="SECONDS",
+        type=int,
+        help="Polling interval when user is offline"
+    )
+    times.add_argument(
+        "-k", "--active-interval",
+        dest="active_interval",
+        metavar="SECONDS",
+        type=int,
+        help="Polling interval when user is online"
     )
 
-    info = parser.add_argument_group("User information")
+    # Features & Output
+    info = parser.add_argument_group("User information & listing")
     info.add_argument(
         "-i", "--info",
         dest="info_mode",
@@ -5644,23 +5718,6 @@ def main():
     )
 
     # Intervals & timers
-    times = parser.add_argument_group("Intervals & timers")
-    times.add_argument(
-        "-c", "--check-interval",
-        dest="check_interval",
-        metavar="SECONDS",
-        type=int,
-        help="Polling interval when user is offline"
-    )
-    times.add_argument(
-        "-k", "--active-interval",
-        dest="active_interval",
-        metavar="SECONDS",
-        type=int,
-        help="Polling interval when user is online"
-    )
-
-    # Features & Output
     opts = parser.add_argument_group("Features & output")
     opts.add_argument(
         "-b", "--csv-file",
@@ -5696,12 +5753,6 @@ def main():
         action="store_true",
         default=None,
         help="Disable coloured output in the terminal"
-    )
-    opts.add_argument(
-        "--doctor",
-        dest="doctor",
-        action="store_true",
-        help="Run preflight checks on this setup and exit"
     )
     opts.add_argument(
         "--verbose",
