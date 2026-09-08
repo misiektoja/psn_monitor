@@ -235,16 +235,6 @@ def test_every_retried_category_maps_to_a_policy(pm_module):
     assert kinds - set(pm_module.RECOVERY_POLL_POLICY) == {"exhausted"}
 
 
-# Verifies every guide link points at a section that exists, so no fix sends the reader to a dead anchor
-def test_every_guide_link_points_at_a_real_section(pm_module):
-    readme = (SOURCE.parent / "README.md").read_text(encoding="utf-8")
-    urls = [value for name, value in vars(pm_module).items() if name.endswith("_GUIDE_URL") and "#" in str(value)]
-
-    assert urls
-    for url in urls:
-        assert f'<a id="{url.split("#", 1)[1]}"></a>' in readme, url
-
-
 # Every place that reports a problem without the classifier, and the reason it cannot use one
 CLASSIFIER_EXEMPTIONS = {
     "or higher required": "runs at import on an interpreter too old to load the rest of the file",

@@ -35,6 +35,7 @@ and again before anything is published to PyPI.
 | `test_config_writing.py` | Timestamped backups, atomic replacement, the guard on replacing a config and the replay of every released template |
 | `test_csv_output.py` | The CSV history file, its header, its rows and its error reporting |
 | `test_diagnostic_modes.py` | What `--verbose` and `--debug` report, and which setting wins when both a flag and the config file are present |
+| `test_documentation.py` | The documentation site: its page set, navigation, links and anchors, and the claims its pages make about the code |
 | `test_doctor.py` | The `--doctor` report: its output contract, every section it checks and the exit code it returns |
 | `test_email_notifications.py` | SMTP validation, the delivered message and failure handling |
 | `test_error_classification.py` | The recovery categories, the advice and install-aware commands each failure produces, and the NPSSO auth probe |
@@ -45,6 +46,7 @@ and again before anything is published to PyPI.
 | `test_repository_metadata.py` | Governance files, citation, funding, line endings, the declared editor style, the pinned linter and release integrity |
 | `test_startup_summary.py` | The startup summary rows, which view each one appears in, what the log file keeps and the welcome screen |
 | `test_tls_verification.py` | The `VERIFY_SSL` setting: which requests honour it, what is reported while it is off and its shipped default |
+| `test_terminal_transcripts.py` | What the doctor report, the welcome screen and the guided setup print on a real terminal |
 | `test_terminal_color.py` | The colour theme, which part colours which token, where colour must never reach and how it is switched off |
 | `test_setup_wizard.py` | The guided setup: what it asks, what it writes, when it writes nothing and the welcome screen offer |
 | `test_secret_commands.py` | The one-shot secret commands, their validation before writing and the dotenv file they update |

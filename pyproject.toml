@@ -41,6 +41,7 @@ lint = ["ruff==0.16.4"]
 
 [project.urls]
 Homepage = "https://github.com/misiektoja/psn_monitor"
+Documentation = "https://misiektoja.github.io/psn_monitor/"
 Source   = "https://github.com/misiektoja/psn_monitor"
 Changelog= "https://github.com/misiektoja/psn_monitor/blob/main/RELEASE_NOTES.md"
 

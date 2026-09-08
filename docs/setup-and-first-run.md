@@ -1,0 +1,74 @@
+# Setup & First Run
+
+## Guided Setup
+
+The quickest way to a working setup is the guided one:
+
+```sh
+psn_monitor --setup
+```
+
+It asks for the account to monitor, how often to check it, your [npsso code](#psn-npsso-code), whether to send email and webhook alerts and where the output goes, then writes a ready-to-run configuration file and a separate dotenv file for the secrets.
+
+Durations accept `120`, `2m`, `1.5h`, `1h 30m` or `1d`.
+
+Your npsso code is checked against PlayStation Network before it is saved, so you find out immediately if it was copied incompletely. Any answer setup cannot use is offered again, whether you left it empty or the service refused it. Declining keeps every answer you have already given rather than restarting: an unusable webhook URL switches webhook alerts off and an unanswered mail server setting switches email alerts off.
+
+Nothing is written until you choose **Save settings**. A final summary lists every answer and lets you go back and change one section without losing the others, and discarding asks a second time. An existing configuration file is backed up first. At the end it offers to run the [preflight checks](troubleshooting.md#doctor-preflight) and to start monitoring.
+
+The wizard needs an interactive terminal. Without one, use `--generate-config` and edit the file by hand.
+
+## Quick Start
+
+To set everything up yourself instead, grab your [npsso code](#psn-npsso-code) and track the `psn_user_id` gaming activities:
+
+```sh
+psn_monitor <psn_user_id> -n "your_psn_npsso_code"
+```
+
+Or if you installed [manually](installation.md#manual-installation):
+
+```sh
+python3 psn_monitor.py <psn_user_id> -n "your_psn_npsso_code"
+```
+
+To get the list of all supported command-line arguments and flags:
+
+```sh
+psn_monitor --help
+```
+
+Run it without arguments to see the few commands worth starting with, including the guided setup and how to check your setup before monitoring. On a terminal it also offers to start the guided setup right there.
+
+## PSN NPSSO Code
+
+Log in to your [My PlayStation](https://my.playstation.com/) account.
+
+In another tab, go to: [https://ca.account.sony.com/api/v1/ssocookie](https://ca.account.sony.com/api/v1/ssocookie)
+
+Copy the value of the `npsso` code.
+
+Provide the `PSN_NPSSO` secret using one of the following methods:
+
+ - Let the tool store it for you with `psn_monitor --set-npsso`, which keeps it out of your shell history
+ - Pass it at runtime with `-n` / `--npsso-key`
+ - Set it as an [environment variable](configuration.md#storing-secrets) (e.g. `export PSN_NPSSO=...`)
+ - Add it to a [dotenv file](configuration.md#storing-secrets) (`PSN_NPSSO=...`) for persistent use
+
+Fallback:
+
+ - Hard-code it in the code or config file
+
+Tokens expire after 2 months. The tool alerts on expiration.
+
+If you store `PSN_NPSSO` in a dotenv file you can update its value and send a `SIGHUP` signal to the process to reload the file with the new npsso value without restarting the tool. More info in [Storing Secrets](configuration.md#storing-secrets) and [Signal Controls](usage.md#signal-controls-macoslinuxunix).
+
+## User Privacy Settings
+
+In order to monitor PlayStation user activity, proper privacy settings need to be enabled on the monitored user account.
+
+The user should go to [PlayStation account management](https://www.playstation.com/acct/management).
+
+The value in **Privacy Settings → Personal Info | Messaging → Online Status and Now Playing** should be set to **Friends only** or **Anyone**.
+
+If it is set to **Friends only**, the account whose npsso code you use has to be a friend of the monitored account. `--doctor` reports whether the presence is actually visible to you.

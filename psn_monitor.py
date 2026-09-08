@@ -557,19 +557,19 @@ def is_too_many_open_files(ex):
 
 
 # Documentation the recovery advice points at, kept as README anchors so one file stays the source of truth
-GUIDE_BASE_URL = "https://github.com/misiektoja/psn_monitor/blob/main/README.md"
-INSTALLATION_GUIDE_URL = f"{GUIDE_BASE_URL}#installation"
-QUICK_START_GUIDE_URL = f"{GUIDE_BASE_URL}#quick-start"
-CONFIG_GUIDE_URL = f"{GUIDE_BASE_URL}#configuration-file"
-NPSSO_GUIDE_URL = f"{GUIDE_BASE_URL}#psn-npsso-code"
-SECRETS_GUIDE_URL = f"{GUIDE_BASE_URL}#storing-secrets"
-PRIVACY_GUIDE_URL = f"{GUIDE_BASE_URL}#user-privacy-settings"
-TIMEZONE_GUIDE_URL = f"{GUIDE_BASE_URL}#time-zone"
-SMTP_GUIDE_URL = f"{GUIDE_BASE_URL}#smtp-settings"
-TLS_GUIDE_URL = f"{GUIDE_BASE_URL}#tls-verification"
-WEBHOOK_GUIDE_URL = f"{GUIDE_BASE_URL}#webhook-notifications"
-INTERVALS_GUIDE_URL = f"{GUIDE_BASE_URL}#check-intervals"
-DIAGNOSTICS_GUIDE_URL = f"{GUIDE_BASE_URL}#verbose-and-debug-output"
+DOCS_BASE_URL = "https://misiektoja.github.io/psn_monitor"
+INSTALLATION_GUIDE_URL = f"{DOCS_BASE_URL}/installation/"
+QUICK_START_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#quick-start"
+CONFIG_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#configuration-file"
+NPSSO_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#psn-npsso-code"
+SECRETS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#storing-secrets"
+PRIVACY_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#user-privacy-settings"
+TIMEZONE_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#time-zone"
+SMTP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#smtp-settings"
+TLS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#tls-verification"
+WEBHOOK_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#webhook-settings"
+INTERVALS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#check-intervals"
+DIAGNOSTICS_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#verbose-and-debug-output"
 
 # Installs this tool can be running from. There is no container image, so no container method is detected
 INSTALL_METHODS = ("pip", "manual")
@@ -3932,7 +3932,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
 # Preflight diagnostics. Every section, marker and summary sentence is shared with the sibling monitors,
 # so a user who runs two of them reads one report format rather than two
-DOCTOR_GUIDE_URL = f"{GUIDE_BASE_URL}#doctor-preflight"
+DOCTOR_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#doctor-preflight"
 
 DOCTOR_SECTIONS = ("Environment", "Configuration", "Authentication", "Target", "Notifications")
 
@@ -4256,7 +4256,7 @@ def build_doctor_report(psn_user_id=None, config_path=None, env_path=None, confi
 
 # Prints the notice that has to be true before anything runs
 def render_doctor_notice():
-    print("Running preflight checks. No files will be written. Interactive email tests run only after separate approval.\n")
+    print("Running preflight checks. No files will be written. Interactive delivery tests run only after separate approval.\n")
 
 
 # Renders the heading and every non-empty section, with a fix line on the rows that are not a pass

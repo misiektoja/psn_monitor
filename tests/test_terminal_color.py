@@ -645,19 +645,22 @@ def test_a_real_terminal_run_is_coloured(tmp_path):
     assert "\x1b[97m" in rendered
 
 
+# Returns the documented theme table from the page that carries it
+def documented_theme_table():
+    page = (Path(monitor.__file__).parent / "docs" / "usage.md").read_text(encoding="utf-8")
+    return page.split("| Theme key | Default | What it colours |", 1)[1].split("\n\n", 1)[0]
+
+
 # Verifies the documented theme table and the shipped theme describe exactly the same keys, in both directions
 def test_the_documented_theme_table_matches_the_shipped_theme():
-    readme = (Path(monitor.__file__).parent / "README.md").read_text(encoding="utf-8")
-    table = readme.split("| Theme key | Default | What it colours |", 1)[1].split("\n\n", 1)[0]
-    documented = {row.split("|")[1].strip().strip("`") for row in table.splitlines() if row.startswith("| `")}
+    documented = {row.split("|")[1].strip().strip("`") for row in documented_theme_table().splitlines() if row.startswith("| `")}
 
     assert documented == set(monitor.DEFAULT_COLOR_THEME)
 
 
 # Verifies each documented default matches the value the theme actually ships
 def test_the_documented_theme_defaults_match_the_shipped_values():
-    readme = (Path(monitor.__file__).parent / "README.md").read_text(encoding="utf-8")
-    table = readme.split("| Theme key | Default | What it colours |", 1)[1].split("\n\n", 1)[0]
+    table = documented_theme_table()
     for row in table.splitlines():
         if not row.startswith("| `"):
             continue

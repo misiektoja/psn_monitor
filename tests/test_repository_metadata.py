@@ -59,6 +59,25 @@ def test_citation_tracks_the_newest_released_version():
     assert cited_date.group(1) == datetime.strptime(released.group(2), "%d %b %Y").strftime("%Y-%m-%d")
 
 
+# Verifies every place that states the version states the same one, since a partial bump ships a wrong number
+def test_every_declared_version_agrees():
+    source = read_asset("psn_monitor.py")
+    module_version = re.search(r'^VERSION = "([^"]+)"', source, re.M)
+    docstring_version = re.search(r"^v([\d.]+)$", source, re.M)
+    packaged_version = re.search(r'^version = "([^"]+)"', read_asset("pyproject.toml"), re.M)
+    newest_notes = re.search(r"^# Changes in ([\d.]+) ", read_asset("RELEASE_NOTES.md"), re.M)
+
+    assert module_version is not None and docstring_version is not None and packaged_version is not None and newest_notes is not None
+    declared = {
+        "VERSION": module_version.group(1),
+        "module docstring": docstring_version.group(1),
+        "pyproject.toml": packaged_version.group(1),
+        "RELEASE_NOTES.md": newest_notes.group(1),
+    }
+
+    assert len(set(declared.values())) == 1, declared
+
+
 # Verifies the sponsor button keeps a target, since an empty file hides it without failing any check
 def test_funding_configuration_declares_a_sponsor_target():
     funding = read_yaml_asset(".github/FUNDING.yml")
