@@ -57,6 +57,7 @@ pip install psn_monitor
    * [Email Notifications](#email-notifications)
    * [CSV Export](#csv-export)
    * [Check Intervals](#check-intervals)
+   * [Error Messages and Recovery](#error-messages-and-recovery)
    * [Verbose and Debug Output](#verbose-and-debug-output)
    * [Signal Controls (macOS/Linux/Unix)](#signal-controls-macoslinuxunix)
    * [Coloring Log Output with GRC](#coloring-log-output-with-grc)
@@ -408,6 +409,23 @@ psn_monitor <psn_user_id> -k 30 -c 120
 
 * `PSN_ACTIVE_CHECK_INTERVAL`, `-k`: check interval when the user is online (seconds)
 * `PSN_CHECK_INTERVAL`, `-c`: check interval when the user is offline (seconds)
+
+<a id="error-messages-and-recovery"></a>
+### Error Messages and Recovery
+
+When something goes wrong, the tool reports what happened and what to do about it:
+
+```
+* Error: PlayStation Network did not accept the NPSSO code
+To fix: Generate a fresh NPSSO code, then put it in PSN_NPSSO in your dotenv file or pass it directly: psn_monitor <psn_user_id> -n <npsso_code>
+Guide: https://github.com/misiektoja/psn_monitor/blob/main/README.md#psn-npsso-code
+```
+
+Every failure is sorted into a category, so an expired NPSSO code, a hidden profile, a rate limit, an unreachable network and a local file descriptor limit each get their own instructions instead of one generic message. Problems the tool survives, such as a missing optional library, are reported as `* Warning:` and it keeps running.
+
+Commands in the fix text match how you installed the tool: `psn_monitor ...` for a PyPI install and `python3 psn_monitor.py ...` for a downloaded script.
+
+During a long outage the fix is printed once and each retry after that is a single line, until the failure changes or a check succeeds. The raw library error is not shown by default. Add `--debug` to print it as a `Technical detail:` line, with your NPSSO code and SMTP password redacted.
 
 <a id="verbose-and-debug-output"></a>
 ### Verbose and Debug Output

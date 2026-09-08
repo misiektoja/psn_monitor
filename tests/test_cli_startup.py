@@ -200,7 +200,7 @@ def test_unwritable_csv_path_is_refused(pm_module, monkeypatch, capsys, isolated
     unreachable = isolated_working_directory / "missing-directory" / "history.csv"
 
     assert run_main(pm_module, monkeypatch, ["-b", str(unreachable), USER_ID]) == 1
-    assert "CSV file cannot be opened for writing" in capsys.readouterr().out
+    assert "cannot be opened for writing" in capsys.readouterr().out
 
 
 # Verifies the CSV path reaches the monitoring loop with the user's home directory expanded

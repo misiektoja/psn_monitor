@@ -265,7 +265,10 @@ try:
     from psnawp_api import PSNAWP
 except ModuleNotFoundError:
     raise SystemExit("Error: Couldn't find the PSNAWP library !\n\nTo install it, run:\n    pip3 install PSNAWP\n\nOnce installed, re-run this tool. For more help, visit:\nhttps://github.com/isFakeAccount/psnawp")
+import shlex
 import shutil
+import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -358,37 +361,311 @@ def is_too_many_open_files(ex):
     return False
 
 
-# Classifies a PSN polling exception into one of: auth transient malformed exhausted unknown
-def classify_psn_exception(ex):
-    if is_too_many_open_files(ex):
-        return "exhausted"
+# Documentation the recovery advice points at, kept as README anchors so one file stays the source of truth
+GUIDE_BASE_URL = "https://github.com/misiektoja/psn_monitor/blob/main/README.md"
+INSTALLATION_GUIDE_URL = f"{GUIDE_BASE_URL}#installation"
+QUICK_START_GUIDE_URL = f"{GUIDE_BASE_URL}#quick-start"
+CONFIG_GUIDE_URL = f"{GUIDE_BASE_URL}#configuration-file"
+NPSSO_GUIDE_URL = f"{GUIDE_BASE_URL}#psn-npsso-code"
+SECRETS_GUIDE_URL = f"{GUIDE_BASE_URL}#storing-secrets"
+PRIVACY_GUIDE_URL = f"{GUIDE_BASE_URL}#user-privacy-settings"
+TIMEZONE_GUIDE_URL = f"{GUIDE_BASE_URL}#time-zone"
+SMTP_GUIDE_URL = f"{GUIDE_BASE_URL}#smtp-settings"
+INTERVALS_GUIDE_URL = f"{GUIDE_BASE_URL}#check-intervals"
+DIAGNOSTICS_GUIDE_URL = f"{GUIDE_BASE_URL}#verbose-and-debug-output"
+
+# Installs this tool can be running from. There is no container image, so no container method is detected
+INSTALL_METHODS = ("pip", "manual")
+
+
+# Returns whether this process was started from the packaged entry point or from a downloaded script
+def detect_install_method():
+    return "manual" if os.path.basename(sys.argv[0] or "").endswith(".py") else "pip"
+
+
+# Returns a readable name for one install method
+def install_method_display_name(method=None):
+    return {"pip": "PyPI install", "manual": "downloaded script"}.get(method or detect_install_method(), "unknown install")
+
+
+# Renders command arguments quoted for the shell of the host operating system
+def render_command(arguments):
+    values = [str(argument) for argument in arguments]
+    return subprocess.list2cmdline(values) if platform.system() == "Windows" else shlex.join(values)
+
+
+# Returns the bare command that starts this tool on the detected install, without arguments
+def tool_command_prefix(method=None):
+    if (method or detect_install_method()) == "manual":
+        return render_command([("python" if platform.system() == "Windows" else "python3"), Path(__file__).name])
+    return "psn_monitor"
+
+
+# Returns a complete, copy-pasteable command line for this tool with every argument quoted for the host shell
+def tool_command(*arguments, method=None):
+    return " ".join([tool_command_prefix(method), *[render_command([argument]) for argument in arguments]])
+
+
+# Stable recovery categories. Every code here is produced somewhere in this file, and nothing else is accepted
+RECOVERY_CODES = frozenset({
+    "config.missing", "config.invalid", "dependency.missing", "secret.missing",
+    "auth.npsso_invalid", "auth.npsso_expired", "auth.tos_required",
+    "network.unavailable", "network.timeout",
+    "psn.malformed_response", "psn.rate_limited", "resource.exhausted",
+    "target.missing", "target.not_found", "target.not_visible",
+    "smtp.invalid", "smtp.authentication", "smtp.connection",
+    "file.unreadable", "file.unwritable", "unknown",
+})
+
+# How the monitoring loop retries each category. Anything absent falls back to the unknown policy
+RECOVERY_CODE_POLL_KINDS = {
+    "resource.exhausted": "exhausted",
+    "auth.npsso_invalid": "auth",
+    "auth.npsso_expired": "auth",
+    "auth.tos_required": "auth",
+    "psn.malformed_response": "malformed",
+    "network.timeout": "transient",
+    "network.unavailable": "transient",
+}
+
+# How long the monitoring loop waits before reporting, rebuilding the session and alerting, per retry policy
+RECOVERY_POLL_POLICY = {
+    "auth": {"report_after": 1, "recreate_after": 1, "alert_after": 1},
+    "malformed": {"report_after": 1, "recreate_after": 1, "alert_after": 3},
+    "transient": {"report_after": 3, "recreate_after": 3, "alert_after": 20},
+    "unknown": {"report_after": 1, "recreate_after": 3, "alert_after": 5},
+}
+
+# Categories where asking the PSN OAuth endpoint what it thinks can sharpen a vague library error
+PROBE_WORTHY_RECOVERY_CODES = frozenset({"auth.npsso_invalid", "auth.npsso_expired", "psn.malformed_response", "unknown"})
+
+
+# Carries one recovery category together with guidance that is safe to print
+@dataclass(frozen=True)
+class RecoveryAdvice:
+    code: str
+    summary: str
+    fix: str
+    retryable: bool
+    detail: str = ""
+
+
+# Carries recovery advice across an exception boundary with the original cause attached
+class RecoveryError(Exception):
+    # Stores the advice and links the original cause so a traceback still points at the real failure
+    def __init__(self, advice, cause=None):
+        self.advice = advice
+        self.cause = cause
+        if cause is not None:
+            self.__cause__ = cause
+        super().__init__(advice.summary)
+
+
+# Builds one piece of advice, rejecting any code outside the taxonomy and redacting every field
+def make_recovery_advice(code, summary, fix, retryable, detail=""):
+    if code not in RECOVERY_CODES:
+        raise ValueError(f"Unsupported recovery code: {code}")
+    return RecoveryAdvice(code, sanitize_error_text(summary), sanitize_error_text(fix), retryable, sanitize_error_text(detail))
+
+
+# Appends the documentation link that matches the fix, on its own line
+def recovery_fix_with_guide(fix, guide_url):
+    return f"{fix}\nGuide: {guide_url}"
+
+
+# Returns the command that installs one optional library into the interpreter running this tool
+def pip_install_command(requirement):
+    return render_command([sys.executable or "python3", "-m", "pip", "install", requirement])
+
+
+# Returns advice for an optional library that is missing, naming the exact install command for this interpreter
+def missing_dependency_advice(package, effect, alternative=""):
+    fix = f"Install it with: {pip_install_command(package)}"
+    if alternative:
+        fix = f"{fix}. {alternative}"
+    return make_recovery_advice("dependency.missing", f"{effect} because the optional '{package}' library is missing", recovery_fix_with_guide(fix, INSTALLATION_GUIDE_URL), False)
+
+
+# Returns install-aware guidance for replacing the NPSSO code, which differs once monitoring has started
+def npsso_recovery_fix(monitoring=False):
+    command = f"{tool_command_prefix()} <psn_user_id> -n <npsso_code>"
+    if monitoring:
+        return f"Generate a fresh NPSSO code, put it in PSN_NPSSO in your dotenv file then send SIGHUP to this process. To restart instead, run: {command}"
+    return f"Generate a fresh NPSSO code, then put it in PSN_NPSSO in your dotenv file or pass it directly: {command}"
+
+
+# Returns the optional requests and PSNAWP exception types, so a missing library only reduces precision
+def recovery_exception_types():
+    types = {"timeout": [TimeoutError, TimeoutException], "unavailable": [ConnectionError], "auth": [], "not_found": [], "forbidden": [], "rate_limited": []}
     try:
-        from requests.exceptions import ConnectionError as _ReqConnErr, Timeout as _ReqTimeout, SSLError as _ReqSSL, ChunkedEncodingError as _ReqChunked
-        transient_types = (_ReqConnErr, _ReqTimeout, _ReqSSL, _ReqChunked, ConnectionError, TimeoutError)
+        from requests.exceptions import ConnectionError as RequestsConnectionError, Timeout as RequestsTimeout, SSLError as RequestsSSLError, ChunkedEncodingError as RequestsChunkedEncodingError
+        types["timeout"].append(RequestsTimeout)
+        types["unavailable"].extend((RequestsConnectionError, RequestsSSLError, RequestsChunkedEncodingError))
     except Exception as diag_exc:
         debug_print(f"requests exception types unavailable, transient error detection is reduced: {type(diag_exc).__name__}: {diag_exc}")
-        transient_types = (ConnectionError, TimeoutError)
     try:
-        from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError as _PsnAuthErr
+        from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError, PSNAWPForbiddenError, PSNAWPInvalidTokenError, PSNAWPNotFoundError, PSNAWPTooManyRequestsError, PSNAWPUnauthorizedError
+        types["auth"].extend((PSNAWPAuthenticationError, PSNAWPUnauthorizedError, PSNAWPInvalidTokenError))
+        types["not_found"].append(PSNAWPNotFoundError)
+        types["forbidden"].append(PSNAWPForbiddenError)
+        types["rate_limited"].append(PSNAWPTooManyRequestsError)
     except Exception as diag_exc:
-        debug_print(f"PSNAWP authentication exception type unavailable, auth errors fall back to text matching: {type(diag_exc).__name__}: {diag_exc}")
-        _PsnAuthErr = None
-    for cur in iter_exc_chain(ex):
-        if isinstance(cur, PsnMalformedResponse):
-            return "malformed"
-        if _PsnAuthErr is not None and isinstance(cur, _PsnAuthErr):
-            return "auth"
-        if isinstance(cur, transient_types):
-            return "transient"
-    msg = str(ex).lower()
-    if ("your npsso code has expired" in msg or "something went wrong while authenticating" in msg or "invalid_grant" in msg or "invalid npsso" in msg or (("oauth/token" in msg or "authz" in msg) and ("401" in msg or "403" in msg or "unauthorized" in msg or "forbidden" in msg))):
-        return "auth"
-    if ("remote end closed connection" in msg or "connection reset by peer" in msg or "connection aborted" in msg or "read timed out" in msg or "timeout" in msg or "temporarily unavailable" in msg):
-        return "transient"
-    for cur in iter_exc_chain(ex):
-        if isinstance(cur, (AttributeError, TypeError)):
-            return "malformed"
-    return "unknown"
+        debug_print(f"PSNAWP exception types unavailable, PSN errors fall back to text matching: {type(diag_exc).__name__}: {diag_exc}")
+    return {name: tuple(values) for name, values in types.items()}
+
+
+# Classifies a failure by exception type, then by message, without contacting PSN
+def classify_recovery_error_offline(error=None, context="runtime", detail=""):
+    safe_detail = sanitize_error_text(detail or error or "")
+    message = str(detail or error or "").lower()
+    monitoring = context == "monitor"
+
+    if error is not None and is_too_many_open_files(error):
+        # Repeated auth refreshes against an expired NPSSO are a common way to reach the limit, so say so
+        npsso_note = " This can also be a side effect of repeated PSN auth refreshes, so check your NPSSO code once the limit is raised." if ("oauth/token" in message or "authz" in message or "npsso" in message) else ""
+        return make_recovery_advice("resource.exhausted", "This process ran out of file descriptors, which is a local limit and not a PlayStation Network problem", recovery_fix_with_guide(f"Raise the file descriptor limit, for example with 'ulimit -n 4096', or set LimitNOFILE= if you run under systemd, then restart the tool.{npsso_note}", DIAGNOSTICS_GUIDE_URL), False, safe_detail)
+
+    if context == "config.missing":
+        return make_recovery_advice("config.missing", safe_detail or "The configuration file was not found", recovery_fix_with_guide(f"Check the --config-file path, or create one with: {tool_command('--generate-config', 'psn_monitor.conf')}", CONFIG_GUIDE_URL), False, safe_detail)
+
+    if context == "config.invalid":
+        return make_recovery_advice("config.invalid", safe_detail or "The configuration file could not be loaded", recovery_fix_with_guide(f"Config files are read as data. Only documented SETTING = value lines with plain literal values are accepted. Correct the reported line, or generate a fresh file with: {tool_command('--generate-config', 'psn_monitor.conf')}", CONFIG_GUIDE_URL), False, safe_detail)
+
+    if context == "secret.missing":
+        return make_recovery_advice("secret.missing", safe_detail or "A required credential is missing", recovery_fix_with_guide(npsso_recovery_fix(), SECRETS_GUIDE_URL), False, safe_detail)
+
+    if context == "target.missing":
+        return make_recovery_advice("target.missing", safe_detail or "No PlayStation ID was given", recovery_fix_with_guide(f"Pass the PlayStation ID of the account to watch: {tool_command_prefix()} <psn_user_id>", QUICK_START_GUIDE_URL), False, safe_detail)
+
+    if context == "smtp.settings":
+        return make_recovery_advice("smtp.invalid", f"The SMTP settings are incorrect: {safe_detail}" if safe_detail else "The SMTP settings are incorrect", recovery_fix_with_guide(f"Check SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SENDER_EMAIL and RECEIVER_EMAIL then run: {tool_command('--send-test-email')}", SMTP_GUIDE_URL), False, safe_detail)
+
+    if context == "file.unreadable":
+        return make_recovery_advice("file.unreadable", safe_detail or "A file the tool needs could not be read", recovery_fix_with_guide("Check that the path exists and that this user can read it, then retry", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+
+    if context == "file.unwritable":
+        return make_recovery_advice("file.unwritable", safe_detail or "A file the tool needs could not be written", recovery_fix_with_guide("Check that the directory exists, that this user can write to it and that there is free space, then retry", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+
+    types = recovery_exception_types()
+
+    if context.startswith("smtp"):
+        for current in iter_exc_chain(error):
+            if isinstance(current, smtplib.SMTPAuthenticationError):
+                return make_recovery_advice("smtp.authentication", "The SMTP server rejected the login", recovery_fix_with_guide(f"Check SMTP_USER and SMTP_PASSWORD. Providers such as Gmail need an app password rather than the account password. Then run: {tool_command('--send-test-email')}", SMTP_GUIDE_URL), False, safe_detail)
+            if isinstance(current, smtplib.SMTPException) or isinstance(current, types["timeout"]) or isinstance(current, types["unavailable"]) or isinstance(current, (ssl.SSLError, OSError)):
+                return make_recovery_advice("smtp.connection", "The SMTP server could not be reached", recovery_fix_with_guide(f"Check SMTP_HOST, SMTP_PORT and SMTP_SSL, and that the port is not blocked. Then run: {tool_command('--send-test-email')}", SMTP_GUIDE_URL), True, safe_detail)
+
+    for current in iter_exc_chain(error):
+        if isinstance(current, PsnMalformedResponse):
+            return make_recovery_advice("psn.malformed_response", "PlayStation Network returned a presence response in an unexpected shape", recovery_fix_with_guide("Nothing to do in most cases, the tool rebuilds its session and retries. If it continues, upgrade PSNAWP and rerun with --debug", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+        if types["rate_limited"] and isinstance(current, types["rate_limited"]):
+            return make_recovery_advice("psn.rate_limited", "PlayStation Network is rate limiting this account", recovery_fix_with_guide("Raise PSN_CHECK_INTERVAL and PSN_ACTIVE_CHECK_INTERVAL, or run fewer instances against the same account, then restart", INTERVALS_GUIDE_URL), True, safe_detail)
+        if types["not_found"] and isinstance(current, types["not_found"]):
+            return make_recovery_advice("target.not_found", "PlayStation Network does not know that PlayStation ID", recovery_fix_with_guide("Check the spelling of the PlayStation ID. It is the online ID, not the account e-mail or the real name", QUICK_START_GUIDE_URL), False, safe_detail)
+        if types["forbidden"] and isinstance(current, types["forbidden"]):
+            return make_recovery_advice("target.not_visible", "That PlayStation profile does not share its activity with this account", recovery_fix_with_guide("Ask the monitored user to set Privacy Settings, Personal Info | Messaging, Online Status and Now Playing to 'Friends only' or 'Anyone', and add this account as a friend if they chose 'Friends only'", PRIVACY_GUIDE_URL), False, safe_detail)
+        if types["auth"] and isinstance(current, types["auth"]):
+            return make_recovery_advice("auth.npsso_expired" if monitoring else "auth.npsso_invalid", "PlayStation Network rejected the NPSSO code" if monitoring else "PlayStation Network did not accept the NPSSO code", recovery_fix_with_guide(npsso_recovery_fix(monitoring), NPSSO_GUIDE_URL), False, safe_detail)
+        if isinstance(current, types["timeout"]):
+            return make_recovery_advice("network.timeout", "PlayStation Network took too long to answer", recovery_fix_with_guide("Nothing to do in most cases, the tool retries on its own. If it continues, check your connection and any proxy", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+        if isinstance(current, types["unavailable"]):
+            return make_recovery_advice("network.unavailable", "PlayStation Network could not be reached", recovery_fix_with_guide("Nothing to do in most cases, the tool retries on its own. If it continues, check your internet connection, DNS and firewall", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+
+    if "too many requests" in message or "rate limit" in message or "429" in message:
+        return make_recovery_advice("psn.rate_limited", "PlayStation Network is rate limiting this account", recovery_fix_with_guide("Raise PSN_CHECK_INTERVAL and PSN_ACTIVE_CHECK_INTERVAL, or run fewer instances against the same account, then restart", INTERVALS_GUIDE_URL), True, safe_detail)
+
+    if ("your npsso code has expired" in message or "something went wrong while authenticating" in message or "invalid_grant" in message or "invalid npsso" in message or (("oauth/token" in message or "authz" in message) and ("401" in message or "403" in message or "unauthorized" in message or "forbidden" in message))):
+        return make_recovery_advice("auth.npsso_expired" if monitoring else "auth.npsso_invalid", "PlayStation Network rejected the NPSSO code" if monitoring else "PlayStation Network did not accept the NPSSO code", recovery_fix_with_guide(npsso_recovery_fix(monitoring), NPSSO_GUIDE_URL), False, safe_detail)
+
+    if "read timed out" in message or "timeout" in message or "timed out" in message:
+        return make_recovery_advice("network.timeout", "PlayStation Network took too long to answer", recovery_fix_with_guide("Nothing to do in most cases, the tool retries on its own. If it continues, check your connection and any proxy", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+
+    if "remote end closed connection" in message or "connection reset by peer" in message or "connection aborted" in message or "temporarily unavailable" in message:
+        return make_recovery_advice("network.unavailable", "PlayStation Network could not be reached", recovery_fix_with_guide("Nothing to do in most cases, the tool retries on its own. If it continues, check your internet connection, DNS and firewall", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+
+    for current in iter_exc_chain(error):
+        if isinstance(current, (AttributeError, TypeError)):
+            return make_recovery_advice("psn.malformed_response", "PlayStation Network returned a presence response in an unexpected shape", recovery_fix_with_guide("Nothing to do in most cases, the tool rebuilds its session and retries. If it continues, upgrade PSNAWP and rerun with --debug", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+
+    return make_recovery_advice("unknown", "Something unexpected went wrong", recovery_fix_with_guide("Rerun with --debug and check the technical detail it prints. If the problem continues, open an issue with that output", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+
+
+# Classifies any failure into one stable recovery category, optionally asking PSN to explain a vague error
+def classify_recovery_error(error=None, context="runtime", detail="", probe_auth=False):
+    if isinstance(error, RecoveryError):
+        return error.advice
+
+    advice = classify_recovery_error_offline(error, context, detail)
+    if not probe_auth or advice.code not in PROBE_WORTHY_RECOVERY_CODES:
+        return advice
+
+    hint = probe_npsso_auth_error(PSN_NPSSO)
+    if not hint:
+        return advice
+    if "terms of service" in hint.lower() or "terms of use" in hint.lower():
+        return make_recovery_advice("auth.tos_required", "PlayStation Network needs its Terms of Service accepted again", recovery_fix_with_guide("Sign in at https://my.account.sony.com or in the PlayStation App, accept the updated Terms of Service then retry", NPSSO_GUIDE_URL), False, hint)
+    monitoring = context == "monitor"
+    return make_recovery_advice("auth.npsso_expired" if monitoring else "auth.npsso_invalid", "PlayStation Network rejected the NPSSO code", recovery_fix_with_guide(npsso_recovery_fix(monitoring), NPSSO_GUIDE_URL), False, hint)
+
+
+# Returns the retry policy the monitoring loop applies to one piece of advice
+def recovery_poll_kind(advice):
+    return RECOVERY_CODE_POLL_KINDS.get(advice.code, "unknown")
+
+
+# Renders one piece of advice, adding the fix paragraph and the technical detail only where they help
+def render_recovery_advice(advice, debug=None, retry_note="", with_fix=True, label="Error"):
+    lines = [f"* {label}: {advice.summary}" + (f" ({retry_note})" if retry_note else "")]
+    if with_fix:
+        lines.append(f"To fix: {advice.fix}")
+        if (DEBUG_MODE if debug is None else debug) and advice.detail:
+            lines.append(f"Technical detail: {sanitize_error_text(advice.detail)}")
+    return "\n".join(lines)
+
+
+# Prints advice in full the first time its category appears and as one line while the same category persists
+def print_recovery_advice(advice, tracker=None, retry_note="", debug=None, label="Error"):
+    print(render_recovery_advice(advice, debug, retry_note, tracker is None or tracker.should_render(advice), label))
+
+
+# Classifies a failure, prints the advice and returns it so the caller can reuse the same wording
+def report_recovery_error(error=None, context="runtime", detail="", probe_auth=False, tracker=None, retry_note="", debug=None, label="Error"):
+    advice = classify_recovery_error(error, context, detail, probe_auth)
+    print_recovery_advice(advice, tracker, retry_note, debug, label)
+    return advice
+
+
+# Builds the subject line for one recovery notification
+def recovery_email_subject(advice, psn_user_id):
+    return f"psn_monitor: {advice.summary} (user: {psn_user_id})"
+
+
+# Builds the body for one recovery notification, repeating the fix the operator sees on screen
+def recovery_email_body(advice, error_streak=0):
+    lines = [advice.summary, "", f"To fix: {advice.fix}"]
+    if error_streak > 1:
+        lines.extend(["", f"Failed checks in a row: {error_streak}"])
+    if advice.detail:
+        lines.extend(["", f"Technical detail: {advice.detail}"])
+    return "\n".join(lines) + get_cur_ts("\n\nTimestamp: ")
+
+
+# Suppresses a repeated fix paragraph until the failure category changes or a check succeeds
+class RecoveryHintTracker:
+    # Starts with no category recorded, so the first failure is always reported in full
+    def __init__(self):
+        self.last_code = None
+
+    # Reports whether this category is new and therefore worth printing the fix for again
+    def should_render(self, advice):
+        if advice.code == self.last_code:
+            return False
+        self.last_code = advice.code
+        return True
+
+    # Clears the suppression after a successful check
+    def reset(self):
+        self.last_code = None
 
 
 # Parses a PSN presence response into normalized fields raising PsnMalformedResponse for any unexpected shape
@@ -564,7 +841,8 @@ def resolve_truncate_chars(cli_value, configured_value, logging_disabled):
         try:
             import wcwidth  # noqa: F401
         except ImportError:
-            print("* Warning: screen truncation is disabled because the optional 'wcwidth' library is missing\n")
+            print_recovery_advice(missing_dependency_advice("wcwidth", "Screen truncation is disabled"), label="Warning")
+            print()
             return 0
     # Truncation shortens the terminal copy only, so without a log file the trimmed text would be lost for good
     if logging_disabled:
@@ -668,7 +946,7 @@ def check_internet(url=CHECK_INTERNET_URL, timeout=CHECK_INTERNET_TIMEOUT):
         return True
     except req.RequestException as e:
         debug_print(f"HTTP GET {url} failed: {type(e).__name__}: {e}")
-        print(f"* No connectivity, please check your network:\n\n{sanitize_error_text(e)}")
+        report_recovery_error(e, context="startup", detail=f"The connectivity check to {url} failed: {e}")
         return False
 
 
@@ -809,7 +1087,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         ipaddress.ip_address(str(SMTP_HOST))
     except ValueError:
         if not fqdn_re.search(str(SMTP_HOST)):
-            print("Error sending email - SMTP settings are incorrect (invalid IP address/FQDN in SMTP_HOST)")
+            report_recovery_error(context="smtp.settings", detail="SMTP_HOST is not a valid IP address or hostname")
             return 1
 
     try:
@@ -817,23 +1095,23 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         if not (1 <= port <= 65535):
             raise ValueError
     except ValueError:
-        print("Error sending email - SMTP settings are incorrect (invalid port number in SMTP_PORT)")
+        report_recovery_error(context="smtp.settings", detail="SMTP_PORT is not a port number between 1 and 65535")
         return 1
 
     if not email_re.search(str(SENDER_EMAIL)) or not email_re.search(str(RECEIVER_EMAIL)):
-        print("Error sending email - SMTP settings are incorrect (invalid email in SENDER_EMAIL or RECEIVER_EMAIL)")
+        report_recovery_error(context="smtp.settings", detail="SENDER_EMAIL or RECEIVER_EMAIL is not an email address")
         return 1
 
     if not SMTP_USER or not isinstance(SMTP_USER, str) or SMTP_USER == "your_smtp_user" or not SMTP_PASSWORD or not isinstance(SMTP_PASSWORD, str) or SMTP_PASSWORD == "your_smtp_password":
-        print("Error sending email - SMTP settings are incorrect (check SMTP_USER & SMTP_PASSWORD variables)")
+        report_recovery_error(context="smtp.settings", detail="SMTP_USER or SMTP_PASSWORD is empty or still set to its placeholder")
         return 1
 
     if not subject or not isinstance(subject, str):
-        print("Error sending email - SMTP settings are incorrect (subject is not a string or is empty)")
+        report_recovery_error(context="smtp.settings", detail="the message subject is empty")
         return 1
 
     if not body and not body_html:
-        print("Error sending email - SMTP settings are incorrect (body and body_html cannot be empty at the same time)")
+        report_recovery_error(context="smtp.settings", detail="the message body is empty")
         return 1
 
     # Game and profile names taken from PSN reach the message, so control sequences are removed before a mail
@@ -868,7 +1146,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         smtpObj.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, email_msg.as_string())
         smtpObj.quit()
     except Exception as e:
-        print(f"Error sending email: {sanitize_error_text(e)}")
+        report_recovery_error(e, context="smtp", detail=f"Sending the notification to {RECEIVER_EMAIL} failed: {e}")
         return 1
     # Reported separately from the "Sending email notification" line, which only records the attempt
     verbose_print(f"Email delivered to {RECEIVER_EMAIL}: {subject}")
@@ -1153,7 +1431,7 @@ def reload_secrets_signal_handler(sig, frame):
                 print("* No .env file found, skipping env-var reload")
         except ImportError:
             env_path = None
-            print("* python-dotenv not installed, skipping env-var reload")
+            print_recovery_advice(missing_dependency_advice("python-dotenv", "The env-var reload was skipped"), label="Warning")
 
     if env_path:
         for secret in SECRET_KEYS:
@@ -1277,8 +1555,7 @@ def load_config_file(config_path, namespace=None, report_errors=True):
         detail = f"Config file '{config_path}' failed with {type(exc).__name__}: {exc}"
     debug_print(f"Config file '{config_path}' rejected: {detail}")
     if report_errors:
-        print(f"* Error: {detail}")
-        print("* Config files are read as data. Only documented SETTING = value lines with plain literal values are accepted.")
+        report_recovery_error(context="config.invalid", detail=detail)
     return False
 
 
@@ -1525,11 +1802,8 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
         psnawp = PSNAWP(PSN_NPSSO)
         psn_user = psnawp.user(online_id=psn_user_id)
     except Exception as e:
-        hint = probe_npsso_auth_error(PSN_NPSSO) if "something went wrong while authenticating" in str(e).lower() else None
-        if hint:
-            print(f"\n* Error: {hint}")
-        else:
-            print(f"\n* Error: {sanitize_error_text(e)}")
+        print()
+        report_recovery_error(e, context="startup", probe_auth=True)
         sys.exit(1)
     print_ok()
 
@@ -1545,7 +1819,8 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
         fs = psn_user.friendship()
         share = psn_user.get_shareable_profile_link()
     except Exception as e:
-        print(f"\n* Error: {sanitize_error_text(e)}")
+        print()
+        report_recovery_error(e, context="startup", detail=f"Reading the PSN profile of '{psn_user_id}' failed: {e}", probe_auth=True)
         sys.exit(1)
     print_ok()
 
@@ -1555,7 +1830,8 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
         psn_user_presence = psn_user.get_presence()
         parse_presence(psn_user_presence)
     except Exception as e:
-        print(f"\n* Error: Cannot get presence for user {psn_user_id}: {sanitize_error_text(e)}")
+        print()
+        report_recovery_error(e, context="startup", detail=f"Cannot get presence for user '{psn_user_id}': {e}", probe_auth=True)
         sys.exit(1)
     print_ok()
 
@@ -1564,7 +1840,8 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
         status = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
 
         if not status:
-            print(f"\n* Error: Cannot get status for user {psn_user_id}")
+            print()
+            report_recovery_error(PsnMalformedResponse(f"Cannot get status for user '{psn_user_id}': the presence payload carries no onlineStatus"), context="startup")
             sys.exit(1)
 
         status = str(status).lower()
@@ -1590,7 +1867,8 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
             launchplatform = gametitleinfolist[0].get("launchPlatform")
             launchplatform = str(launchplatform).upper()
     except Exception as e:
-        print(f"\n* Error: {sanitize_error_text(e)}")
+        print()
+        report_recovery_error(e, context="startup", detail=f"Reading the game title info of '{psn_user_id}' failed: {e}")
         sys.exit(1)
     print_ok()
     print()
@@ -1854,7 +2132,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         if csv_file_name:
             init_csv_file(csv_file_name)
     except Exception as e:
-        print(f"* Error: {sanitize_error_text(e)}")
+        report_recovery_error(e, context="file.unwritable", detail=f"Cannot prepare the CSV file '{csv_file_name}': {e}")
 
     print("Sneaking into PlayStation like a ninja ...\n")
 
@@ -1873,11 +2151,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         psnawp = PSNAWP(PSN_NPSSO)
         psn_user = psnawp.user(online_id=psn_user_id)
     except Exception as e:
-        hint = probe_npsso_auth_error(PSN_NPSSO) if "something went wrong while authenticating" in str(e).lower() else None
-        if hint:
-            print(f"\n* Error: {hint}")
-        else:
-            print(f"\n* Error: {sanitize_error_text(e)}")
+        print()
+        report_recovery_error(e, context="startup", probe_auth=True)
         sys.exit(1)
     print_ok()
 
@@ -1893,7 +2168,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         fs = psn_user.friendship()
         share = psn_user.get_shareable_profile_link()
     except Exception as e:
-        print(f"\n* Error: {sanitize_error_text(e)}")
+        print()
+        report_recovery_error(e, context="startup", detail=f"Reading the PSN profile of '{psn_user_id}' failed: {e}", probe_auth=True)
         sys.exit(1)
     print_ok()
 
@@ -1903,7 +2179,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         psn_user_presence = psn_user.get_presence()
         parse_presence(psn_user_presence)
     except Exception as e:
-        print(f"\n* Error: Cannot get presence for user {psn_user_id}: {sanitize_error_text(e)}")
+        print()
+        report_recovery_error(e, context="startup", detail=f"Cannot get presence for user '{psn_user_id}': {e}", probe_auth=True)
         sys.exit(1)
     print_ok()
 
@@ -1912,7 +2189,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         status = psn_user_presence["basicPresence"]["primaryPlatformInfo"].get("onlineStatus")
 
         if not status:
-            print(f"\n* Error: Cannot get status for user {psn_user_id}")
+            print()
+            report_recovery_error(PsnMalformedResponse(f"Cannot get status for user '{psn_user_id}': the presence payload carries no onlineStatus"), context="startup")
             sys.exit(1)
 
         status = str(status).lower()
@@ -1938,7 +2216,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             launchplatform = gametitleinfolist[0].get("launchPlatform")
             launchplatform = str(launchplatform).upper()
     except Exception as e:
-        print(f"\n* Error: {sanitize_error_text(e)}")
+        print()
+        report_recovery_error(e, context="startup", detail=f"Reading the game title info of '{psn_user_id}' failed: {e}")
         sys.exit(1)
     print_ok()
 
@@ -1962,7 +2241,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 last_status_read = json.load(f)
             debug_print(f"Saved status read from '{psn_last_status_file}'")
         except Exception as e:
-            print(f"* Cannot load last status from '{psn_last_status_file}' file: {sanitize_error_text(e)}")
+            report_recovery_error(e, context="file.unreadable", detail=f"Cannot load the last saved status from '{psn_last_status_file}': {e}")
         if last_status_read:
             last_status_ts = last_status_read[0]
             last_status = last_status_read[1]
@@ -1996,13 +2275,13 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 json.dump(last_status_to_save, f, indent=2)
             debug_print(f"Saved status written to '{psn_last_status_file}': {last_status_to_save[1]}")
         except Exception as e:
-            print(f"* Cannot save last status to '{psn_last_status_file}' file: {sanitize_error_text(e)}")
+            report_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{psn_last_status_file}': {e}")
 
     try:
         if csv_file_name and (status != last_status):
             write_csv_entry(csv_file_name, now_local_naive(), status, game_name)
     except Exception as e:
-        print(f"* Error: {sanitize_error_text(e)}")
+        report_recovery_error(e, context="file.unwritable", detail=f"Cannot write to the CSV file '{csv_file_name}': {e}")
 
     print(f"\nPlayStation ID:\t\t\t{psn_user_id}")
     print(f"PSN account ID:\t\t\t{accountid}")
@@ -2079,7 +2358,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 json.dump(last_status_to_save, f, indent=2)
             debug_print(f"Saved status written to '{psn_last_status_file}': {last_status_to_save[1]}")
         except Exception as e:
-            print(f"* Cannot save last status to '{psn_last_status_file}' file: {sanitize_error_text(e)}")
+            report_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{psn_last_status_file}': {e}")
 
     if status_ts_old != status_ts_old_bck:
         if status == "offline":
@@ -2147,6 +2426,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     time.sleep(sleep_interval)
 
     check_number = 0
+    recovery_hints = RecoveryHintTracker()
 
     # Main loop
     while True:
@@ -2165,12 +2445,10 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 print("* PSN_NPSSO updated - recreated PSNAWP session")
                 print_cur_ts("Timestamp:\t\t\t")
             except Exception as e:
-                print(f"* Warning: failed to recreate PSNAWP session after PSN_NPSSO update: {sanitize_error_text(e)}")
+                advice = report_recovery_error(e, context="monitor", detail=f"Rebuilding the PSNAWP session after the PSN_NPSSO change failed: {e}", probe_auth=True)
                 if ERROR_NOTIFICATION and not email_sent:
-                    m_subject = f"psn_monitor: failed to recreate PSNAWP session (user: {psn_user_id})"
-                    m_body = f"Failed to recreate PSNAWP session after PSN_NPSSO update: {e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                     print(f"Sending email notification to {RECEIVER_EMAIL}")
-                    send_email(m_subject, m_body, "", SMTP_SSL)
+                    send_email(recovery_email_subject(advice, psn_user_id), recovery_email_body(advice), "", SMTP_SSL)
                     email_sent = True
                 print_cur_ts("Timestamp:\t\t\t")
             last_npsso_seen = PSN_NPSSO
@@ -2197,10 +2475,10 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 raise PsnMalformedResponse('onlineStatus is empty')
             else:
                 status = str(status).lower()
-        except TimeoutException:
+        except TimeoutException as e:
             if platform.system() != 'Windows':
                 signal.alarm(0)
-            print(f"psn_user.get_presence() timeout, retrying in {display_time(FUNCTION_TIMEOUT)}")
+            report_recovery_error(e, context="monitor", detail=f"psn_user.get_presence() did not answer within {display_time(FUNCTION_TIMEOUT)}", tracker=recovery_hints, retry_note=f"retrying in {display_time(FUNCTION_TIMEOUT)}")
             print_cur_ts("Timestamp:\t\t\t")
             debug_print(f"Sleeping {display_time(FUNCTION_TIMEOUT)} after check #{check_number} timed out")
             time.sleep(FUNCTION_TIMEOUT)
@@ -2210,119 +2488,47 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             if platform.system() != 'Windows':
                 signal.alarm(0)
 
-            kind = classify_psn_exception(e)
-            debug_print(f"Check #{check_number} failed, classified as '{kind}': {type(e).__name__}: {e}")
+            advice = classify_recovery_error(e, context="monitor", probe_auth=True)
+            kind = recovery_poll_kind(advice)
+            debug_print(f"Check #{check_number} failed, classified as '{advice.code}' under the {kind} retry policy: {type(e).__name__}: {e}")
 
-            # Fatal local fd exhaustion — cannot recover in-process
+            # Local file descriptor exhaustion cannot be recovered inside this process
             if kind == "exhausted":
-                hint = ""
-                msg_l = str(e).lower()
-                if "oauth/token" in msg_l or "authz" in msg_l or "npsso" in msg_l:
-                    hint = "\n* Note: this can be a secondary effect of repeated PSN auth refresh attempts (e.g. expired NPSSO). After fixing NOFILE verify your NPSSO."
-                msg = (f"* Fatal: Too many open files (errno 24). "
-                       f"This is a local limit/file-descriptor exhaustion problem not an NPSSO expiry.\n"
-                       f"* Last error: {e}\n"
-                       f"* Fix: increase your process NOFILE/ulimit (e.g. `ulimit -n 4096`) "
-                       f"and if running under systemd set `LimitNOFILE=`. Then restart the tool.{hint}")
-                print(msg)
+                print_recovery_advice(advice)
                 if ERROR_NOTIFICATION and not email_sent:
-                    m_subject = f"psn_monitor: fatal error - too many open files (user: {psn_user_id})"
-                    m_body = f"{msg}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
                     print(f"Sending email notification to {RECEIVER_EMAIL}")
-                    send_email(m_subject, m_body, "", SMTP_SSL)
+                    send_email(recovery_email_subject(advice, psn_user_id), recovery_email_body(advice), "", SMTP_SSL)
                     email_sent = True
                 print_cur_ts("Timestamp:\t\t\t")
                 sys.exit(2)
 
             error_streak += 1
+            policy = RECOVERY_POLL_POLICY[kind]
+            sleep_interval = FUNCTION_TIMEOUT if kind == "transient" else (get_sleep_interval() if kind == "unknown" else max(60, get_sleep_interval()))
+            # A failure nothing here can retry away is worth reporting at once rather than after a streak
+            alert_after = policy["alert_after"] if advice.retryable else 1
 
-            if kind == "auth":
-                sleep_interval = max(60, get_sleep_interval())
-                hint = probe_npsso_auth_error(PSN_NPSSO) if "something went wrong while authenticating" in str(e).lower() else None
-                if hint:
-                    print(f"* PSN auth failed: {hint}")
-                else:
-                    print(f"* PSN authentication failed (NPSSO may be expired/invalid): {sanitize_error_text(e)}")
-                    print("* Hint: update PSN_NPSSO in your .env and send SIGHUP to this process (or restart).")
-                if ERROR_NOTIFICATION and not email_sent:
-                    m_subject = f"psn_monitor: PSN NPSSO key error! (user: {psn_user_id})"
-                    body_reason = hint if hint else f"PSN authentication failed (NPSSO may be expired/invalid): {e}"
-                    m_body = f"{body_reason}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                    print(f"Sending email notification to {RECEIVER_EMAIL}")
-                    send_email(m_subject, m_body, "", SMTP_SSL)
-                    email_sent = True
-                print_cur_ts("Timestamp:\t\t\t")
-                _recreate_session_rate_limited()
-                debug_print(f"Sleeping {display_time(sleep_interval)} after an auth error (streak: {error_streak})")
-                time.sleep(sleep_interval)
-                continue
+            if error_streak >= policy["report_after"]:
+                print_recovery_advice(advice, recovery_hints, f"retrying in {display_time(sleep_interval)}")
 
-            if kind == "malformed":
-                sleep_interval = max(60, get_sleep_interval())
-                hint = probe_npsso_auth_error(PSN_NPSSO)
-                if hint:
-                    print(f"* PSN returned a malformed response and auth probe reports: {hint}")
-                else:
-                    print(f"* PSN returned an unexpected response shape will recreate session: {sanitize_error_text(e)}")
-                if _recreate_session_rate_limited():
-                    print("* Recreated PSNAWP session after malformed response")
-                if ERROR_NOTIFICATION and not email_sent and error_streak >= 3:
-                    m_subject = f"psn_monitor: PSN returned malformed responses (user: {psn_user_id})"
-                    body_reason = hint if hint else f"PSN returned unexpected response shape ({error_streak} in a row). Last error: {e}"
-                    m_body = f"{body_reason}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                    print(f"Sending email notification to {RECEIVER_EMAIL}")
-                    send_email(m_subject, m_body, "", SMTP_SSL)
-                    email_sent = True
-                print_cur_ts("Timestamp:\t\t\t")
-                debug_print(f"Sleeping {display_time(sleep_interval)} after a malformed response (streak: {error_streak})")
-                time.sleep(sleep_interval)
-                continue
+            if error_streak >= policy["recreate_after"] and _recreate_session_rate_limited():
+                print(f"* Rebuilt the PSNAWP session after {error_streak} failed {'check' if error_streak == 1 else 'checks'} in a row")
 
-            if kind == "transient":
-                retry_delay = FUNCTION_TIMEOUT
-                if error_streak >= 3:
-                    if _recreate_session_rate_limited():
-                        print(f"* Recreated PSNAWP session after {error_streak} consecutive connection errors")
-                if ERROR_NOTIFICATION and not email_sent and error_streak >= 20:
-                    m_subject = f"psn_monitor: persistent connection errors (user: {psn_user_id})"
-                    m_body = f"Persistent connection errors detected ({error_streak} in a row). Last error: {e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
-                    print(f"Sending email notification to {RECEIVER_EMAIL}")
-                    send_email(m_subject, m_body, "", SMTP_SSL)
-                    email_sent = True
-                if error_streak >= 3:
-                    print(f"* Error (connection) retrying in {display_time(retry_delay)}: {sanitize_error_text(e)}")
-                    print_cur_ts("Timestamp:\t\t\t")
-                debug_print(f"Sleeping {display_time(retry_delay)} after a connection error (streak: {error_streak})")
-                time.sleep(retry_delay)
-                continue
-
-            # kind == "unknown": safety net. After a few streaks we probe auth and recreate session so a novel error shape cannot silently loop forever
-            sleep_interval = get_sleep_interval()
-            hint = None
-            if error_streak >= 3:
-                hint = probe_npsso_auth_error(PSN_NPSSO)
-                if hint:
-                    print(f"* Error (unknown {error_streak} in a row) auth probe reports: {hint}")
-                else:
-                    print(f"* Error (unknown {error_streak} in a row) will recreate session: {sanitize_error_text(e)}")
-                _recreate_session_rate_limited()
-            else:
-                print(f"* Error retrying in {display_time(sleep_interval)}: {sanitize_error_text(e)}")
-            if ERROR_NOTIFICATION and not email_sent and error_streak >= 5:
-                m_subject = f"psn_monitor: persistent unexpected errors (user: {psn_user_id})"
-                body_reason = hint if hint else f"Persistent unexpected errors ({error_streak} in a row). Last error: {e}"
-                m_body = f"{body_reason}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+            if ERROR_NOTIFICATION and not email_sent and error_streak >= alert_after:
                 print(f"Sending email notification to {RECEIVER_EMAIL}")
-                send_email(m_subject, m_body, "", SMTP_SSL)
+                send_email(recovery_email_subject(advice, psn_user_id), recovery_email_body(advice, error_streak), "", SMTP_SSL)
                 email_sent = True
-            print_cur_ts("Timestamp:\t\t\t")
-            debug_print(f"Sleeping {display_time(sleep_interval)} after an unknown error (streak: {error_streak})")
+
+            if error_streak >= policy["report_after"]:
+                print_cur_ts("Timestamp:\t\t\t")
+            debug_print(f"Sleeping {display_time(sleep_interval)} after a {kind} failure (streak: {error_streak})")
             time.sleep(sleep_interval)
             continue
 
         else:
             if error_streak:
                 verbose_print(f"Recovered after {error_streak} failed checks in a row")
+            recovery_hints.reset()
             email_sent = False
             error_streak = 0
 
@@ -2347,7 +2553,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                     json.dump(last_status_to_save, f, indent=2)
                 debug_print(f"Saved status written to '{psn_last_status_file}': {last_status_to_save[1]}")
             except Exception as e:
-                print(f"* Cannot save last status to '{psn_last_status_file}' file: {sanitize_error_text(e)}")
+                report_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{psn_last_status_file}': {e}")
 
             print(f"PSN user {psn_user_id} changed status from {status_old} to {status}")
             print(f"User was {status_old} for {calculate_timespan(int(status_ts), int(status_ts_old))} ({get_range_of_dates_from_tss(int(status_ts_old), int(status_ts), short=True)})")
@@ -2464,7 +2670,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 if csv_file_name:
                     write_csv_entry(csv_file_name, now_local_naive(), status, game_name)
             except Exception as e:
-                print(f"* Error: {sanitize_error_text(e)}")
+                report_recovery_error(e, context="file.unwritable", detail=f"Cannot write to the CSV file '{csv_file_name}': {e}")
                 print_cur_ts("Timestamp:\t\t\t")
 
         status_old = status
@@ -2691,7 +2897,7 @@ def main():
     cfg_path = find_config_file(CLI_CONFIG_PATH)
 
     if not cfg_path and CLI_CONFIG_PATH:
-        print(f"* Error: Config file '{CLI_CONFIG_PATH}' does not exist")
+        report_recovery_error(context="config.missing", detail=f"Config file '{CLI_CONFIG_PATH}' does not exist")
         sys.exit(1)
 
     if cfg_path:
@@ -2737,7 +2943,8 @@ def main():
         except ImportError:
             env_path = DOTENV_FILE if DOTENV_FILE else None
             if env_path:
-                print(f"* Warning: Cannot load dotenv file '{env_path}' because 'python-dotenv' is not installed\n\nTo install it, run:\n    pip3 install python-dotenv\n\nOnce installed, re-run this tool\n")
+                print_recovery_advice(missing_dependency_advice("python-dotenv", f"The dotenv file '{env_path}' was not loaded"), label="Warning")
+                print()
 
     # Environment variables are a documented alternative to a dotenv file, so they apply even when no file was loaded
     for secret in SECRET_KEYS:
@@ -2761,13 +2968,11 @@ def main():
         if local_tz:
             LOCAL_TIMEZONE = str(local_tz)
         else:
-            print("* Error: Cannot detect local timezone.")
-            print("* Hint: This can happen if the optional 'tzlocal' library is missing. Install it with: pip install tzlocal")
-            print("* Or set LOCAL_TIMEZONE to your local timezone manually.")
+            print_recovery_advice(missing_dependency_advice("tzlocal", "The local timezone could not be detected", f"Or set LOCAL_TIMEZONE to a pytz timezone name such as 'Europe/Warsaw'. See {TIMEZONE_GUIDE_URL}"))
             sys.exit(1)
     else:
         if not is_valid_timezone(LOCAL_TIMEZONE):
-            print(f"* Error: Configured LOCAL_TIMEZONE '{LOCAL_TIMEZONE}' is not valid. Please use a valid pytz timezone name.")
+            report_recovery_error(context="config.invalid", detail=f"Configured LOCAL_TIMEZONE '{LOCAL_TIMEZONE}' is not valid")
             sys.exit(1)
 
     verbose_print(f"Local timezone resolved to {LOCAL_TIMEZONE}")
@@ -2784,7 +2989,7 @@ def main():
         sys.exit(0)
 
     if not args.psn_user_id:
-        print("* Error: PSN_USER_ID needs to be defined !")
+        report_recovery_error(context="target.missing", detail="PSN_USER_ID needs to be defined")
         sys.exit(1)
 
     if args.npsso_key:
@@ -2793,7 +2998,7 @@ def main():
         debug_print(f"PSN_NPSSO taken from the command line ({secret_fingerprint(PSN_NPSSO)})")
 
     if not PSN_NPSSO or PSN_NPSSO == "your_psn_npsso_code":
-        print("* Error: PSN_NPSSO (-n / --npsso_key) value is empty or incorrect")
+        report_recovery_error(context="secret.missing", detail="PSN_NPSSO (-n / --npsso_key) value is empty or incorrect")
         sys.exit(1)
 
     if args.info_mode:
@@ -2820,13 +3025,13 @@ def main():
             with open(CSV_FILE, 'a', newline='', buffering=1, encoding="utf-8") as _:
                 pass
         except Exception as e:
-            print(f"* Error, CSV file cannot be opened for writing: {sanitize_error_text(e)}")
+            report_recovery_error(e, context="file.unwritable", detail=f"CSV file '{CSV_FILE}' cannot be opened for writing: {e}")
             sys.exit(1)
 
     try:
         ascii_log_separators_enabled()
     except ValueError as e:
-        print(f"* Error: {sanitize_error_text(e)}")
+        report_recovery_error(context="config.invalid", detail=str(e))
         sys.exit(1)
 
     if args.disable_logging is True:

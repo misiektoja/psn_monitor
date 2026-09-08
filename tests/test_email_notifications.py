@@ -129,7 +129,7 @@ def test_smtp_failures_are_reported_not_raised(pm_module, monkeypatch, capsys):
     monkeypatch.setattr(pm_module.smtplib, "SMTP", refuse)
 
     assert pm_module.send_email("subject", "body", "", True) == 1
-    assert "Error sending email" in capsys.readouterr().out
+    assert "The SMTP server could not be reached" in capsys.readouterr().out
 
 
 # Verifies the configured timeout reaches the SMTP client, so a hung relay cannot stall the poll loop
@@ -153,6 +153,8 @@ def test_control_sequences_are_removed_from_the_delivered_message(pm_module, smt
 # Verifies a server that echoes the credential back cannot get it printed to the screen or the log
 def test_delivery_errors_do_not_leak_the_smtp_password(pm_module, monkeypatch, capsys):
     monkeypatch.setattr(pm_module, "SMTP_PASSWORD", "aVeryLongSmtpPassword123")
+    # Debug mode is the only setting that puts the raw server error on screen, so it is where the leak would show
+    monkeypatch.setattr(pm_module, "DEBUG_MODE", True)
 
     # Rejects the login the way a relay quoting the offending credential would
     def reject(*args, **kwargs):

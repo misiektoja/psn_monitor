@@ -219,10 +219,10 @@ def test_expired_npsso_is_reported_and_alerted_once(pm_module, psn_session, fake
     run_monitor(pm_module)
 
     output = capsys.readouterr().out
-    assert "PSN authentication failed" in output
+    assert "rejected the NPSSO code" in output
     assert "send SIGHUP to this process" in output
     assert len(sent_emails) == 1
-    assert "NPSSO key error" in sent_emails[0]["subject"]
+    assert "rejected the NPSSO code" in sent_emails[0]["subject"]
 
 
 # Verifies the Terms of Service hint replaces the raw library error when the probe recognizes it
@@ -246,8 +246,8 @@ def test_malformed_response_recreates_the_session(pm_module, psn_session, fake_c
     run_monitor(pm_module)
 
     output = capsys.readouterr().out
-    assert "unexpected response shape" in output
-    assert "Recreated PSNAWP session after malformed response" in output
+    assert "unexpected shape" in output
+    assert "Rebuilt the PSNAWP session after 1 failed check in a row" in output
 
 
 # Verifies repeated malformed responses raise an alert only once the problem is clearly persistent
@@ -260,7 +260,7 @@ def test_persistent_malformed_responses_alert_once(pm_module, psn_session, fake_
     run_monitor(pm_module)
 
     assert len(sent_emails) == 1
-    assert "malformed responses" in sent_emails[0]["subject"]
+    assert "unexpected shape" in sent_emails[0]["subject"]
 
 
 # Verifies an empty status is treated as a malformed response instead of an offline user
@@ -269,7 +269,7 @@ def test_empty_status_is_treated_as_malformed(pm_module, psn_session, fake_clock
 
     run_monitor(pm_module)
 
-    assert "unexpected response shape" in capsys.readouterr().out
+    assert "unexpected shape" in capsys.readouterr().out
 
 
 # Verifies short network outages are retried quietly without alerting the operator
@@ -296,8 +296,8 @@ def test_longer_network_outage_recreates_the_session(pm_module, psn_session, fak
     run_monitor(pm_module)
 
     output = capsys.readouterr().out
-    assert "Recreated PSNAWP session after 3 consecutive connection errors" in output
-    assert "Error (connection) retrying in" in output
+    assert "Rebuilt the PSNAWP session after 3 failed checks in a row" in output
+    assert "could not be reached (retrying in" in output
 
 
 # Verifies local file descriptor exhaustion stops the tool with an actionable message rather than looping
@@ -310,9 +310,9 @@ def test_descriptor_exhaustion_stops_the_tool(pm_module, psn_session, fake_clock
 
     assert raised.value.code == 2
     output = capsys.readouterr().out
-    assert "Too many open files (errno 24)" in output
+    assert "ran out of file descriptors" in output
     assert "ulimit -n 4096" in output
-    assert "too many open files" in sent_emails[0]["subject"]
+    assert "ran out of file descriptors" in sent_emails[0]["subject"]
 
 
 # Verifies a rotated NPSSO is picked up on the next poll without a restart
@@ -353,10 +353,10 @@ def test_polling_interval_follows_the_user_status(pm_module, psn_session, fake_c
 
 # Verifies a profile that cannot be reached at startup stops the tool instead of monitoring nothing
 def test_unreachable_profile_stops_startup(pm_module, psn_session, fake_clock, capsys):
-    psn_session([Exception("User not found")])
+    psn_session([psnawp_exceptions.PSNAWPNotFoundError("User not found")])
 
     with pytest.raises(SystemExit) as raised:
         pm_module.psn_monitor_user(USER_ID, "")
 
     assert raised.value.code == 1
-    assert "Cannot get presence for user" in capsys.readouterr().out
+    assert "does not know that PlayStation ID" in capsys.readouterr().out

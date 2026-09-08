@@ -19,6 +19,12 @@ def isolated_working_directory(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+# Keeps the auth probe offline, since the startup error paths call it before deciding what to report
+def offline_auth_probe(monkeypatch, pm_module):
+    monkeypatch.setattr(pm_module, "probe_npsso_auth_error", lambda npsso: None)
+
+
+@pytest.fixture(autouse=True)
 # Keeps a fixed terminal width so the recently played table renders identically everywhere
 def fixed_terminal_width(monkeypatch, pm_module):
     monkeypatch.setattr(pm_module.shutil, "get_terminal_size", lambda fallback=(100, 24): SimpleNamespace(columns=100, lines=24))
@@ -275,7 +281,9 @@ def test_unreadable_presence_stops_the_report(pm_module, info_user, capsys):
         pm_module.get_user_info(USER_ID)
 
     assert raised.value.code == 1
-    assert "Cannot get presence for user" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "unexpected shape" in output
+    assert "To fix:" in output
 
 
 # Verifies a rejected NPSSO stops the report instead of printing an empty profile
@@ -290,4 +298,6 @@ def test_rejected_npsso_stops_the_report(pm_module, monkeypatch, capsys):
         pm_module.get_user_info(USER_ID)
 
     assert raised.value.code == 1
-    assert "npsso code has expired" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "did not accept the NPSSO code" in output
+    assert "Generate a fresh NPSSO code" in output

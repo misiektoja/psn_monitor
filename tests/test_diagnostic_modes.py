@@ -98,7 +98,7 @@ def test_debug_reports_the_presence_call_and_its_failure(pm_module, psn_session,
     output = capsys.readouterr().out
     assert f"PSNAWP session init for PSN user '{USER_ID}'" in output
     assert f"Starting check #1 for '{USER_ID}', PSN API get_presence()" in output
-    assert "classified as 'transient': ConnectionError: connection reset by peer" in output
+    assert "classified as 'network.unavailable' under the transient retry policy: ConnectionError: connection reset by peer" in output
 
 
 # Verifies an exception the tool swallows on purpose still leaves a trace under debug
@@ -113,7 +113,11 @@ def test_a_degraded_feature_is_reported_without_debug_mode(pm_module, monkeypatc
     monkeypatch.setitem(sys.modules, "wcwidth", None)
 
     assert pm_module.resolve_truncate_chars(120, 0, False) == 0
-    assert "screen truncation is disabled because the optional 'wcwidth' library is missing" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "Screen truncation is disabled because the optional 'wcwidth' library is missing" in output
+    # Reported as a warning, since the tool keeps running without it
+    assert output.startswith("* Warning:")
+    assert "-m pip install wcwidth" in output
 
 
 # Verifies both outcomes of writing the status file are visible, not only the failure
@@ -150,7 +154,7 @@ def test_debug_reports_each_sleep_with_its_interval_and_reason(pm_module, psn_se
 
     output = capsys.readouterr().out
     assert "Sleeping 3 minutes before the first check (status: offline)" in output
-    assert "Sleeping 15 seconds after a connection error (streak: 1)" in output
+    assert "Sleeping 15 seconds after a transient failure (streak: 1)" in output
     assert f"Check #2 done for '{USER_ID}'" in output
     assert "next check in 3 minutes" in output
 
