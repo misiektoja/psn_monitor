@@ -13,10 +13,10 @@ It writes no files, and it exits `1` if any check failed so you can run it from 
 The report opens with the detected install method, then five sections, each row marked `[PASS]`, `[WARN]`, `[FAIL]` or `[SKIP]`:
 
 * **Environment**: the Python version, the required libraries, and the optional ones with what stops working without each
-* **Configuration**: the configuration and dotenv files in use, which secrets are loaded and where each came from, the time zone, the check intervals, whether TLS verification is on and the files the tool would write
+* **Configuration**: the configuration and dotenv files in use, which secrets are loaded and where each came from, the local time zone including whether an `Auto` setting can be detected, the check intervals, whether TLS verification is on and the files the tool would write
 * **Authentication**: whether PlayStation Network accepts your npsso code, and which account it signed in as
 * **Target**: whether the monitored PlayStation ID exists and shares its presence with your account
-* **Notifications**: whether email and webhook alerts can fire, and whether the settings each would use are valid
+* **Notifications**: whether email and webhook alerts can fire. The email row signs in to the configured SMTP server without sending a message, the webhook row checks the destination and headers without contacting the service, and each ready row lists the alert categories that channel would deliver
 
 Rows that are not a pass carry the same `To fix:` and `Guide:` lines described in [Error Messages and Recovery](#error-messages-and-recovery). Secrets are reported by name and never by value, which makes the whole report safe to paste into a bug report.
 

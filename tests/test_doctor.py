@@ -5,10 +5,22 @@ them, so the contract tests drive the whole run and read the transcript a user s
 """
 
 import re
+import smtplib
 
 import pytest
 
 from conftest import presence_payload
+
+
+# Fails the test if Doctor tries to sign in on a path that must never reach the network
+def _unreachable_smtp(*args, **kwargs):
+    raise AssertionError("Doctor must not open an SMTP connection when the sign-in cannot be attempted")
+
+
+# Lets the passive sign-in succeed without contacting a server, for the tests that need a ready email channel
+@pytest.fixture
+def smtp_sign_in_ok(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "smtp_sign_in", lambda password, timeout=15: pm_module.SMTP_USER)
 
 
 USER_ID = "misiektoja"
@@ -172,7 +184,7 @@ def test_the_report_ends_with_one_summary_sentence_and_the_guide(pm_module, psn_
 
 
 # Verifies the delivery tests are offered after the check rows but before the summary that counts them
-def test_delivery_tests_are_offered_before_the_summary(pm_module, psn_session, monkeypatch, doctor_run, sent_emails):
+def test_delivery_tests_are_offered_before_the_summary(pm_module, psn_session, monkeypatch, doctor_run, sent_emails, smtp_sign_in_ok):
     monkeypatch.setattr(pm_module, "GAME_CHANGE_NOTIFICATION", True)
     monkeypatch.setattr(pm_module, "ask_yes_no", lambda question, default=False: False)
     psn_session([presence_payload(status="online")])
@@ -451,17 +463,59 @@ def test_enabled_alerts_with_broken_settings_warn(pm_module, monkeypatch):
     assert report.email_ready is False
 
 
-# Verifies a usable channel names the destination and the alerts it would send
-def test_valid_settings_name_the_destination_and_the_alerts(pm_module, monkeypatch):
+# Verifies a usable channel reports the sign-in, the alerts it would send and that nothing was sent
+def test_a_usable_email_channel_reports_the_sign_in_and_the_alerts(pm_module, monkeypatch, smtp_sign_in_ok):
     monkeypatch.setattr(pm_module, "GAME_CHANGE_NOTIFICATION", True)
     report = pm_module.DoctorReport()
 
     check = pm_module.doctor_check_notifications(report)[0]
 
-    assert check.status == "PASS"
-    assert "alerts@example.test" in check.detail
-    assert "game changes" in check.detail
+    assert (check.status, check.label) == ("PASS", pm_module.SMTP_READY_CHECK_LABEL)
+    assert check.detail == "Alerts: game changes. No email was sent during this passive check"
     assert report.email_ready is True
+
+
+# Verifies the passive check signs in rather than trusting the settings, since a rejected password must not pass
+def test_the_email_check_signs_in_before_reporting_ready(pm_module, monkeypatch):
+    attempts = []
+    monkeypatch.setattr(pm_module, "GAME_CHANGE_NOTIFICATION", True)
+    monkeypatch.setattr(pm_module, "smtp_sign_in", lambda password, timeout=15: attempts.append(timeout) or pm_module.SMTP_USER)
+    report = pm_module.DoctorReport()
+
+    pm_module.doctor_check_notifications(report)
+
+    assert attempts == [pm_module.DOCTOR_SMTP_TIMEOUT]
+
+
+# Verifies a rejected sign-in fails the row and leaves the channel out of the delivery tests
+def test_a_rejected_sign_in_fails_the_email_row(pm_module, monkeypatch):
+    advice = pm_module.classify_recovery_error(smtplib.SMTPAuthenticationError(535, b"denied"), context="smtp", detail="Signing in failed")
+
+    # Refuses the sign-in the way a wrong app password would
+    def reject(password, timeout=15):
+        raise pm_module.RecoveryError(advice)
+
+    monkeypatch.setattr(pm_module, "GAME_CHANGE_NOTIFICATION", True)
+    monkeypatch.setattr(pm_module, "smtp_sign_in", reject)
+    report = pm_module.DoctorReport()
+
+    check = pm_module.doctor_check_notifications(report)[0]
+
+    assert (check.status, check.advice.code) == ("FAIL", "smtp.authentication")
+    assert report.email_ready is False
+
+
+# Verifies an empty password is reported before any connection is attempted
+def test_missing_smtp_credentials_warn_without_connecting(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "GAME_CHANGE_NOTIFICATION", True)
+    monkeypatch.setattr(pm_module, "SMTP_PASSWORD", "")
+    monkeypatch.setattr(pm_module, "smtp_sign_in", _unreachable_smtp)
+    report = pm_module.DoctorReport()
+
+    check = pm_module.doctor_check_notifications(report)[0]
+
+    assert (check.status, check.label) == ("WARN", "Email alerts are on but cannot be delivered")
+    assert report.email_ready is False
 
 
 # Verifies a fresh install is not warned at for the webhook error alert that ships on with nowhere to send it
@@ -530,14 +584,15 @@ def test_a_usable_webhook_names_the_service_without_the_private_url(pm_module, m
 
     assert check.status == "PASS"
     assert "Discord" in check.label
+    assert check.label.startswith(pm_module.WEBHOOK_READY_CHECK_LABEL)
     assert "game changes" in check.detail
-    assert "discord.com" in check.detail
     assert "aVeryLongWebhookTokenValue" not in check.detail
+    assert "discord.com" not in check.detail
     assert report.webhook_ready is True
 
 
 # Verifies both channels are reported, so one being unusable never hides the state of the other
-def test_both_channels_are_reported_together(pm_module, monkeypatch):
+def test_both_channels_are_reported_together(pm_module, monkeypatch, smtp_sign_in_ok):
     monkeypatch.setattr(pm_module, "GAME_CHANGE_NOTIFICATION", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_URL", WEBHOOK_URL)
@@ -668,7 +723,7 @@ def test_an_invalid_timezone_is_reported_not_fatal(pm_module, psn_session, monke
 
     output = capsys.readouterr().out
     assert code == 1
-    assert "[FAIL] Configured LOCAL_TIMEZONE 'Mars/Olympus_Mons' is not valid" in output
+    assert "[FAIL] Local timezone is invalid\n  Mars/Olympus_Mons" in output
     assert "Notifications" in output
 
 

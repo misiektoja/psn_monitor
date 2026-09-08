@@ -347,6 +347,9 @@ NTFY_ACCESS_TOKEN = ""
 PSN_CHECK_INTERVAL = 0
 PSN_ACTIVE_CHECK_INTERVAL = 0
 LOCAL_TIMEZONE = ""
+
+# How the running timezone was arrived at, so Doctor can name the outcome the way the sibling monitors do
+LOCAL_TIMEZONE_STATE = "config"
 OFFLINE_INTERRUPT = 0
 LIVENESS_CHECK_INTERVAL = 0
 CHECK_INTERNET_URL = ""
@@ -3954,6 +3957,16 @@ DOCTOR_OPTIONAL_DEPENDENCIES = (
 # An active check interval below this invites the PSN rate limiter, which stops the tool seeing anything
 DOCTOR_MIN_SAFE_ACTIVE_INTERVAL = 30
 
+# Doctor label for each timezone outcome, kept identical to the sibling monitors
+TIMEZONE_CHECK_LABELS = {"config": "Local timezone is valid", "auto": "Local timezone can be detected", "auto_unavailable": "Automatic timezone detection is unavailable", "auto_failed": "Automatic timezone detection failed", "invalid": "Local timezone is invalid"}
+
+# Seconds the passive doctor sign-in waits, shorter than a real delivery so a dead host does not stall the report
+DOCTOR_SMTP_TIMEOUT = 5
+
+# Shared doctor labels for the two delivery channels, kept identical to the sibling monitors
+SMTP_READY_CHECK_LABEL = "SMTP connection and login succeeded"
+WEBHOOK_READY_CHECK_LABEL = "Webhook URL, headers and alert choices look valid"
+
 
 # Stores one doctor result before the report is rendered
 @dataclass(frozen=True)
@@ -4061,10 +4074,11 @@ def doctor_check_configuration(config_path=None, env_path=None, config_advice=No
 
     checks.extend(doctor_secret_checks())
 
+    timezone_label = TIMEZONE_CHECK_LABELS[LOCAL_TIMEZONE_STATE]
     if timezone_advice is not None:
-        checks.append(make_doctor_check("Configuration", "FAIL", timezone_advice.summary, advice=timezone_advice))
+        checks.append(make_doctor_check("Configuration", "FAIL", timezone_label, timezone_advice.detail, timezone_advice))
     else:
-        checks.append(make_doctor_check("Configuration", "PASS", f"Time zone is {LOCAL_TIMEZONE}"))
+        checks.append(make_doctor_check("Configuration", "PASS", timezone_label, LOCAL_TIMEZONE))
 
     intervals = f"{display_time(PSN_CHECK_INTERVAL)} while offline, {display_time(PSN_ACTIVE_CHECK_INTERVAL)} while online"
     if PSN_ACTIVE_CHECK_INTERVAL < DOCTOR_MIN_SAFE_ACTIVE_INTERVAL:
@@ -4163,9 +4177,13 @@ def doctor_check_email_notifications(report):
         return [make_doctor_check("Notifications", "PASS", "Email alerts are disabled", "Use -a, -g or SMTP settings with ERROR_NOTIFICATION to turn them on")]
     if settings_advice is not None:
         return [make_doctor_check("Notifications", "WARN", "Email alerts are on but cannot be delivered", settings_advice.summary, settings_advice)]
+    try:
+        smtp_sign_in(SMTP_PASSWORD, timeout=DOCTOR_SMTP_TIMEOUT)
+    except RecoveryError as exc:
+        return [make_doctor_check("Notifications", "FAIL", exc.advice.summary, exc.advice.detail, exc.advice)]
     alerts = ", ".join(name for name, enabled in (("status changes", ACTIVE_INACTIVE_NOTIFICATION), ("game changes", GAME_CHANGE_NOTIFICATION), ("errors", ERROR_NOTIFICATION)) if enabled)
     report.email_ready = True
-    return [make_doctor_check("Notifications", "PASS", "SMTP settings and alert choices look valid", f"{SMTP_HOST}:{SMTP_PORT} to {RECEIVER_EMAIL}, alerts: {alerts}")]
+    return [make_doctor_check("Notifications", "PASS", SMTP_READY_CHECK_LABEL, f"Alerts: {alerts}. No email was sent during this passive check")]
 
 
 # Reports whether webhook alerts can fire at all, then whether the destination and customization are usable
@@ -4193,7 +4211,7 @@ def doctor_check_webhook_notifications(report):
             advice = classify_recovery_error(context="webhook", detail=validation_error)
             return [make_doctor_check("Notifications", "WARN", advice.summary, advice.detail, advice)]
     report.webhook_ready = True
-    return [make_doctor_check("Notifications", "PASS", f"Webhook settings and alert choices look valid for {webhook_provider_display_name()}", f"{webhook_destination_host()}, alerts: {', '.join(selected)}. The private URL was not shown and no webhook was sent")]
+    return [make_doctor_check("Notifications", "PASS", f"{WEBHOOK_READY_CHECK_LABEL} for {webhook_provider_display_name()}", f"Alerts: {', '.join(selected)}. The private link was not displayed. No webhook was sent during this passive check")]
 
 
 # Reports both delivery channels, each one switched on and diagnosed independently of the other
@@ -4891,11 +4909,28 @@ def _wizard_edit_setup_section(state, input_func=None, getpass_func=None):
     collectors[name]()
 
 
+# The theme part each setup summary row draws its value in, for rows whose value has a known kind
+WIZARD_SUMMARY_VALUE_STYLES = {"Target": "username", "Polling interval while offline": "duration", "Polling interval while online": "duration"}
+
+
+# Colours one setup summary value from its row label
+def _wizard_summary_value(label, value):
+    text = str(value)
+    part = WIZARD_SUMMARY_VALUE_STYLES.get(label)
+    if part:
+        return colorize(part, text)
+    if text.startswith("enabled") or text == "complete":
+        return colorize("boolean_true", text)
+    if text in ("disabled", "incomplete"):
+        return colorize("boolean_false", text)
+    return text
+
+
 # Prints one aligned label and value block, so every summary row lines up
 def _wizard_print_summary_rows(rows):
     width = max(len(label) for label, _ in rows) + 1
     for label, value in rows:
-        print(f"  {(label + ':'):<{width}} {value}")
+        print(f"  {(label + ':'):<{width}} {_wizard_summary_value(label, value)}")
 
 
 # Shows everything that is about to be written, by name and never by secret value
@@ -5338,7 +5373,7 @@ def run_set_smtp_password(env_file=None, config_path=None, psn_user_id=None, int
 
 
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, PSN_STATUS_FILE, LOCAL_TIMEZONE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, COLORED_OUTPUT, WEBHOOK_ENABLED, stdout_bck
+    global CLI_CONFIG_PATH, DOTENV_FILE, PSN_STATUS_FILE, LOCAL_TIMEZONE, LOCAL_TIMEZONE_STATE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, COLORED_OUTPUT, WEBHOOK_ENABLED, stdout_bck
 
     if "--generate-config" in sys.argv:
         config_content = CONFIG_BLOCK.strip("\n") + "\n"
@@ -5780,12 +5815,18 @@ def main():
                 local_tz = get_localzone()
             except Exception as diag_exc:
                 debug_print(f"Local timezone auto-detection failed: {type(diag_exc).__name__}: {diag_exc}")
-        if local_tz:
+        if local_tz and is_valid_timezone(str(local_tz)):
             LOCAL_TIMEZONE = str(local_tz)
+            LOCAL_TIMEZONE_STATE = "auto"
+        elif get_localzone is None:
+            LOCAL_TIMEZONE_STATE = "auto_unavailable"
+            timezone_advice = make_recovery_advice("dependency.missing", "The local timezone could not be detected", recovery_fix_with_guide(f"Install tzlocal with: {pip_install_command('tzlocal')} or set LOCAL_TIMEZONE to a pytz timezone name such as 'Europe/Warsaw'", TIMEZONE_GUIDE_URL), False, "LOCAL_TIMEZONE is Auto but tzlocal is unavailable")
         else:
-            timezone_advice = missing_dependency_advice("tzlocal", "The local timezone could not be detected", f"Or set LOCAL_TIMEZONE to a pytz timezone name such as 'Europe/Warsaw'. See {TIMEZONE_GUIDE_URL}")
+            LOCAL_TIMEZONE_STATE = "auto_failed"
+            timezone_advice = make_recovery_advice("config.invalid", "The local timezone could not be detected", recovery_fix_with_guide("Set LOCAL_TIMEZONE to a pytz timezone name such as 'Europe/Warsaw'", TIMEZONE_GUIDE_URL), False, "tzlocal did not return a supported timezone")
     elif not is_valid_timezone(LOCAL_TIMEZONE):
-        timezone_advice = classify_recovery_error(context="config.invalid", detail=f"Configured LOCAL_TIMEZONE '{LOCAL_TIMEZONE}' is not valid")
+        LOCAL_TIMEZONE_STATE = "invalid"
+        timezone_advice = make_recovery_advice("config.invalid", f"Configured LOCAL_TIMEZONE '{LOCAL_TIMEZONE}' is not valid", recovery_fix_with_guide("Set LOCAL_TIMEZONE to a pytz timezone name such as 'Europe/Warsaw'", TIMEZONE_GUIDE_URL), False, str(LOCAL_TIMEZONE))
 
     if timezone_advice is not None:
         if not doctor_mode:
