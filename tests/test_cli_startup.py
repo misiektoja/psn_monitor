@@ -405,3 +405,104 @@ def test_truncation_width_from_the_command_line_reaches_the_writer(pm_module, mo
     assert run_main(pm_module, monkeypatch, ["--truncate", "100", USER_ID]) == 0
 
     assert pm_module.TRUNCATE_CHARS == 100
+
+
+# Verifies a PSN ID saved in the config file starts monitoring instead of showing the welcome screen
+def test_a_saved_psn_user_id_is_used_when_none_is_given(pm_module, monkeypatch, monitor_calls, isolated_working_directory, capsys):
+    config = isolated_working_directory / "psn_monitor_test_only.conf"
+    config.write_text(f'PSN_USER_ID = "{USER_ID}"\n', encoding="utf-8")
+
+    assert run_main(pm_module, monkeypatch, []) == 0
+
+    assert monitor_calls[0]["psn_user_id"] == USER_ID
+    assert "Quickest start" not in capsys.readouterr().out
+
+
+# Verifies a PSN ID typed on the command line wins over the saved one
+def test_a_given_psn_user_id_wins_over_the_saved_one(pm_module, monkeypatch, monitor_calls, isolated_working_directory):
+    config = isolated_working_directory / "psn_monitor_test_only.conf"
+    config.write_text('PSN_USER_ID = "saved_player"\n', encoding="utf-8")
+
+    assert run_main(pm_module, monkeypatch, [USER_ID]) == 0
+
+    assert monitor_calls[0]["psn_user_id"] == USER_ID
+
+
+# Verifies a config file that saves no PSN ID still leaves a bare run at the welcome screen
+def test_a_config_without_a_saved_id_still_shows_the_welcome_screen(pm_module, monkeypatch, isolated_working_directory, capsys):
+    config = isolated_working_directory / "psn_monitor_test_only.conf"
+    config.write_text("PSN_CHECK_INTERVAL = 900\n", encoding="utf-8")
+
+    assert run_main(pm_module, monkeypatch, []) == 1
+
+    assert "Quickest start" in capsys.readouterr().out
+
+
+# Verifies the status file destination from the command line reaches the file the monitor saves to
+def test_the_status_file_from_the_command_line_reaches_the_monitor(pm_module, monkeypatch, monitor_calls, isolated_working_directory):
+    destination = isolated_working_directory / "history" / "last_status.json"
+
+    assert run_main(pm_module, monkeypatch, ["--status-file", str(destination), USER_ID]) == 0
+
+    assert pm_module.resolve_status_file(USER_ID) == str(destination)
+
+
+# Verifies the status file destination from the config file reaches the same place
+def test_the_status_file_from_the_config_file_reaches_the_monitor(pm_module, monkeypatch, monitor_calls, isolated_working_directory):
+    config = isolated_working_directory / "psn_monitor_test_only.conf"
+    config.write_text('PSN_STATUS_FILE = "saved_status.json"\n', encoding="utf-8")
+
+    assert run_main(pm_module, monkeypatch, [USER_ID]) == 0
+
+    assert pm_module.resolve_status_file(USER_ID).endswith("saved_status.json")
+
+
+# Verifies the default status file name is still the per-user one, so an upgrade keeps its history
+def test_the_default_status_file_keeps_the_existing_name(pm_module, monkeypatch, monitor_calls):
+    assert run_main(pm_module, monkeypatch, [USER_ID]) == 0
+
+    assert pm_module.resolve_status_file(USER_ID) == f"psn_{USER_ID}_last_status.json"
+
+
+# Verifies a generated config is written where it was asked for
+def test_generate_config_writes_the_named_file(pm_module, monkeypatch, isolated_working_directory, capsys):
+    destination = isolated_working_directory / "generated.conf"
+
+    assert run_main(pm_module, monkeypatch, ["--generate-config", str(destination)]) == 0
+
+    assert "PSN_CHECK_INTERVAL" in destination.read_text(encoding="utf-8")
+    assert f"Config written to: {destination}" in capsys.readouterr().out
+
+
+# Verifies a second run cannot quietly replace the config the first one wrote
+def test_generate_config_refuses_to_replace_an_existing_file(pm_module, monkeypatch, isolated_working_directory, capsys):
+    destination = isolated_working_directory / "generated.conf"
+    destination.write_text("PSN_CHECK_INTERVAL = 900\n", encoding="utf-8")
+
+    assert run_main(pm_module, monkeypatch, ["--generate-config", str(destination)]) == 1
+
+    assert destination.read_text(encoding="utf-8") == "PSN_CHECK_INTERVAL = 900\n"
+    output = capsys.readouterr().out
+    assert "already exists" in output
+    assert "--force" in output
+
+
+# Verifies --force replaces the config and says where the previous one was kept
+def test_generate_config_with_force_keeps_a_backup(pm_module, monkeypatch, isolated_working_directory, capsys):
+    destination = isolated_working_directory / "generated.conf"
+    destination.write_text("PSN_CHECK_INTERVAL = 900\n", encoding="utf-8")
+
+    assert run_main(pm_module, monkeypatch, ["--generate-config", str(destination), "--force"]) == 0
+
+    assert "PSN_CHECK_INTERVAL = 900" not in destination.read_text(encoding="utf-8")
+    backups = [path for path in isolated_working_directory.iterdir() if path.name.endswith(".bak")]
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == "PSN_CHECK_INTERVAL = 900\n"
+    assert "Previous config backed up to:" in capsys.readouterr().out
+
+
+# Verifies the template still goes to standard output when no filename is given, which is the documented default
+def test_generate_config_without_a_filename_prints_the_template(pm_module, monkeypatch, capsys):
+    assert run_main(pm_module, monkeypatch, ["--generate-config"]) == 0
+
+    assert "PSN_CHECK_INTERVAL" in capsys.readouterr().out

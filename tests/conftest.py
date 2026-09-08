@@ -152,6 +152,8 @@ def deterministic_globals(monkeypatch):
     monkeypatch.setattr(pm, "SENDER_EMAIL", "monitor@example.test", raising=False)
     monkeypatch.setattr(pm, "RECEIVER_EMAIL", "alerts@example.test", raising=False)
     monkeypatch.setattr(pm, "CSV_FILE", "", raising=False)
+    monkeypatch.setattr(pm, "PSN_USER_ID", "", raising=False)
+    monkeypatch.setattr(pm, "PSN_STATUS_FILE", "", raising=False)
     monkeypatch.setattr(pm, "DOTENV_FILE", "", raising=False)
     monkeypatch.setattr(pm, "DISABLE_LOGGING", True, raising=False)
     monkeypatch.setattr(pm, "CLEAR_SCREEN", False, raising=False)

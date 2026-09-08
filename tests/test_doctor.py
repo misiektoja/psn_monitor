@@ -564,3 +564,14 @@ def test_an_invalid_timezone_still_stops_a_normal_run(pm_module, monkeypatch, ca
 
     assert code == 1
     assert "is not valid" in capsys.readouterr().out
+
+
+# Verifies the report names the status file it would write, so a bad destination is found before monitoring
+def test_the_report_names_the_status_file(pm_module, doctor_run, monkeypatch, tmp_path):
+    destination = tmp_path / "last_status.json"
+    monkeypatch.setattr(pm_module, "PSN_STATUS_FILE", str(destination))
+
+    _, raw = doctor_run(psn_user_id=USER_ID)
+
+    assert "[PASS] Status file is writable" in raw
+    assert str(destination) in raw

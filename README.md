@@ -166,7 +166,21 @@ psn_monitor --generate-config psn_monitor.conf
 
 When you include the filename, PSN Monitor writes the template directly as UTF-8. This avoids PowerShell changing the file encoding during redirection.
 
+Writing over an existing file asks first and keeps a timestamped `psn_monitor.conf.<timestamp>.bak` copy next to it. Outside an interactive terminal the write is refused instead, and `--force` replaces the file after taking the same backup:
+
+```sh
+psn_monitor --generate-config psn_monitor.conf --force
+```
+
+> **NOTE**: The guard only covers the filename form. Shell redirection with `>` empties the file before PSN Monitor starts, so nothing can protect it there.
+
 Edit the `psn_monitor.conf` file and change any desired configuration options (detailed comments are provided for each).
+
+Set `PSN_USER_ID` to save the account you usually watch. A PSN ID passed on the command line always wins over the saved one, and with a saved value you can start monitoring with no arguments at all:
+
+```sh
+psn_monitor
+```
 
 <a id="psn-npsso-code"></a>
 ### PSN NPSSO Code
@@ -354,7 +368,13 @@ Set `TRUNCATE_CHARS` or use the `--truncate` flag to cut each screen line to a m
 
 Names that come from PlayStation Network, such as game titles and profile text, can contain terminal control sequences. They are removed before the text reaches the screen, the log file, the CSV file or an email, so a crafted name cannot clear your screen or overwrite a line that was already printed. Error messages are also checked for your NPSSO code and SMTP password before they are shown or logged.
 
-The tool also saves the timestamp and last status (after every change) to `psn_<psn_user_id>_last_status.json` file, so the last status is available after the restart of the tool.
+The tool also saves the timestamp and last status (after every change) to `psn_<psn_user_id>_last_status.json` file, so the last status is available after the restart of the tool. Set `PSN_STATUS_FILE` or use the `--status-file` flag to keep it somewhere else:
+
+```sh
+psn_monitor <psn_user_id> --status-file ~/psn/last_status.json
+```
+
+The status file is written through a temporary file in the same directory, so an interrupted run cannot leave a half-written file behind.
 
 <a id="email-notifications"></a>
 ### Email Notifications

@@ -32,6 +32,7 @@ and again before anything is published to PyPI.
 | `conftest.py` | Import setup, deterministic globals and the PSN, SMTP and clock test doubles |
 | `test_cli_startup.py` | Command line handling, config and dotenv loading, startup validation and logging setup |
 | `test_config_loading.py` | Declarative config parsing and refusal of executable config content |
+| `test_config_writing.py` | Timestamped backups, atomic replacement, the guard on replacing a config and the replay of every released template |
 | `test_csv_output.py` | The CSV history file, its header, its rows and its error reporting |
 | `test_diagnostic_modes.py` | What `--verbose` and `--debug` report, and which setting wins when both a flag and the config file are present |
 | `test_doctor.py` | The `--doctor` report: its output contract, every section it checks and the exit code it returns |

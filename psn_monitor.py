@@ -24,6 +24,10 @@ VERSION = "1.9"
 # ---------------------------
 
 CONFIG_BLOCK = """
+# Optional PSN ID to monitor when none is given on the command line
+# A PSN ID passed as an argument always wins over this value
+PSN_USER_ID = ""
+
 # Log in to your PSN account:
 # https://my.playstation.com/
 #
@@ -103,6 +107,11 @@ CHECK_INTERNET_TIMEOUT = 5
 # Can also be set using the -b flag
 CSV_FILE = ""
 
+# File the tool saves the last seen status to, so a restart resumes from the previous session
+# Leave empty to use psn_<psn_user_id>_last_status.json in the current directory
+# Can also be set using the --status-file flag
+PSN_STATUS_FILE = ""
+
 # Location of the optional dotenv file which can keep secrets
 # If not specified it will try to auto-search for .env files
 # To disable auto-search, set this to the literal string "none"
@@ -158,6 +167,8 @@ PSN_ACTIVE_CHECK_SIGNAL_VALUE = 30  # 30 seconds
 
 # Default dummy values so linters shut up
 # Do not change values below - modify them in the configuration section or config file instead
+PSN_USER_ID = ""
+PSN_STATUS_FILE = ""
 PSN_NPSSO = ""
 SMTP_HOST = ""
 SMTP_PORT = 0
@@ -273,6 +284,7 @@ import importlib.util
 import shlex
 import shutil
 import subprocess
+import tempfile
 import textwrap
 from collections import namedtuple
 from dataclasses import dataclass, field
@@ -425,7 +437,7 @@ RECOVERY_CODES = frozenset({
     "psn.malformed_response", "psn.rate_limited", "resource.exhausted",
     "target.missing", "target.not_found", "target.not_visible",
     "smtp.invalid", "smtp.authentication", "smtp.connection",
-    "file.unreadable", "file.unwritable", "unknown",
+    "file.exists", "file.unreadable", "file.unwritable", "unknown",
 })
 
 # How the monitoring loop retries each category. Anything absent falls back to the unknown policy
@@ -540,13 +552,16 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         return make_recovery_advice("config.missing", safe_detail or "The configuration file was not found", recovery_fix_with_guide(f"Check the --config-file path, or create one with: {tool_command('--generate-config', 'psn_monitor.conf')}", CONFIG_GUIDE_URL), False, safe_detail)
 
     if context == "config.invalid":
-        return make_recovery_advice("config.invalid", safe_detail or "The configuration file could not be loaded", recovery_fix_with_guide(f"Config files are read as data. Only documented SETTING = value lines with plain literal values are accepted. Correct the reported line, or generate a fresh file with: {tool_command('--generate-config', 'psn_monitor.conf')}", CONFIG_GUIDE_URL), False, safe_detail)
+        return make_recovery_advice("config.invalid", safe_detail or "The configuration file could not be loaded", recovery_fix_with_guide(f"Config files are read as data. Only documented SETTING = value lines with plain literal values are accepted. Correct the reported line, or write a fresh template to a different path with: {tool_command('--generate-config', '<new-file>')}", CONFIG_GUIDE_URL), False, safe_detail)
 
     if context == "secret.missing":
         return make_recovery_advice("secret.missing", safe_detail or "A required credential is missing", recovery_fix_with_guide(npsso_recovery_fix(), SECRETS_GUIDE_URL), False, safe_detail)
 
     if context == "target.missing":
         return make_recovery_advice("target.missing", safe_detail or "No PlayStation ID was given", recovery_fix_with_guide(f"Pass the account to watch: {tool_command_prefix()} <psn_user_id>. Use the {PSN_TARGET_FORMS}", QUICK_START_GUIDE_URL), False, safe_detail)
+
+    if context == "file.exists":
+        return make_recovery_advice("file.exists", safe_detail or "The destination file already exists", recovery_fix_with_guide("Re-run with --force to replace it after a timestamped backup, or write to a different path", CONFIG_GUIDE_URL), False, safe_detail)
 
     if context == "smtp.settings":
         return make_recovery_advice("smtp.invalid", f"The SMTP settings are incorrect: {safe_detail}" if safe_detail else "The SMTP settings are incorrect", recovery_fix_with_guide(f"Check SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SENDER_EMAIL and RECEIVER_EMAIL then run: {tool_command('--send-test-email')}", SMTP_GUIDE_URL), False, safe_detail)
@@ -845,9 +860,93 @@ def truncate_string_per_line(message, truncate_width, tabsize=8):
     return "\n".join(truncated_lines)
 
 
+# Copies an existing file to a timestamped private backup before it is replaced, returning the backup path or None
+def create_timestamped_backup(destination, attempts=100):
+    destination_path = Path(destination).expanduser()
+    if not destination_path.is_file():
+        return None
+    existing_bytes = destination_path.read_bytes()
+    stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    for attempt in range(attempts):
+        suffix = f".{stamp}.bak" if attempt == 0 else f".{stamp}-{attempt}.bak"
+        backup_path = destination_path.with_name(destination_path.name + suffix)
+        try:
+            # O_EXCL so a backup can never overwrite an earlier one, even under a concurrent run
+            descriptor = os.open(str(backup_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            continue
+        try:
+            with os.fdopen(descriptor, "wb") as backup_file:
+                backup_file.write(existing_bytes)
+                backup_file.flush()
+                os.fsync(backup_file.fileno())
+        except Exception:
+            try:
+                os.unlink(str(backup_path))
+            except OSError as cleanup_error:
+                debug_print(f"Could not remove the failed backup '{backup_path}': {cleanup_error}")
+            raise
+        debug_print(f"Backed up '{destination_path}' to '{backup_path}'")
+        return str(backup_path)
+    raise OSError(f"Could not create a unique backup for '{destination_path}' after {attempts} attempts")
+
+
+# Writes one file through a temporary file in the same directory, so a crash cannot leave a half-written file
+def write_file_atomically(destination, content):
+    destination_path = Path(destination).expanduser()
+    if destination_path.parent != Path(""):
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n", prefix=f".{destination_path.name}.", suffix=".tmp", dir=str(destination_path.parent), delete=False) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(content)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.replace(str(temporary_path), str(destination_path))
+        temporary_path = None
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+    return str(destination_path)
+
+
+# Confirms replacing one existing generated config, or requires --force when there is nobody to ask
+def confirm_generated_config_replacement(destination, force=False, interactive=None, input_func=input):
+    destination_path = Path(destination).expanduser()
+    if not destination_path.exists() or force:
+        return True
+    terminal_is_interactive = bool(sys.stdin.isatty()) if interactive is None else bool(interactive)
+    if not terminal_is_interactive:
+        raise FileExistsError(f"Config file '{destination_path}' already exists and there is no terminal to confirm replacing it")
+    try:
+        answer = str(input_func(f"Config file '{destination_path}' exists. Replace it and keep a timestamped backup? [y/N]: ")).strip().casefold()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        answer = ""
+    return answer in {"y", "yes"}
+
+
+# Writes one generated config atomically, backing up whatever was there first
+def write_generated_config(output_file, content, force=False, interactive=None, input_func=input):
+    destination = Path(os.path.expanduser(str(output_file)))
+    if not confirm_generated_config_replacement(destination, force, interactive, input_func):
+        return None, False
+    backup_path = create_timestamped_backup(destination)
+    write_file_atomically(destination, content)
+    return backup_path, True
+
+
 # Returns the file the tool saves the last seen status to, so a restart resumes from it
 def resolve_status_file(psn_user_id):
+    if PSN_STATUS_FILE:
+        return os.path.expanduser(PSN_STATUS_FILE)
     return f"psn_{psn_user_id}_last_status.json"
+
+
+# Saves the last seen status atomically, so an interrupted write cannot strand a half-written status file
+def save_last_status(status_file, status_ts, status):
+    write_file_atomically(status_file, json.dumps([status_ts, status], indent=2) + "\n")
 
 
 # Returns the log file path for one monitored user, without creating anything
@@ -2316,13 +2415,9 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                     status_ts_old = last_status_ts
 
     if last_status_ts > 0 and status != last_status:
-        last_status_to_save = []
-        last_status_to_save.append(status_ts_old)
-        last_status_to_save.append(status)
         try:
-            with open(psn_last_status_file, 'w', encoding="utf-8") as f:
-                json.dump(last_status_to_save, f, indent=2)
-            debug_print(f"Saved status written to '{psn_last_status_file}': {last_status_to_save[1]}")
+            save_last_status(psn_last_status_file, status_ts_old, status)
+            debug_print(f"Saved status written to '{psn_last_status_file}': {status}")
         except Exception as e:
             report_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{psn_last_status_file}': {e}")
 
@@ -2399,13 +2494,9 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     if last_status_ts == 0:
         if lastonline_ts and status == "offline":
             status_ts_old = lastonline_ts
-        last_status_to_save = []
-        last_status_to_save.append(status_ts_old)
-        last_status_to_save.append(status)
         try:
-            with open(psn_last_status_file, 'w', encoding="utf-8") as f:
-                json.dump(last_status_to_save, f, indent=2)
-            debug_print(f"Saved status written to '{psn_last_status_file}': {last_status_to_save[1]}")
+            save_last_status(psn_last_status_file, status_ts_old, status)
+            debug_print(f"Saved status written to '{psn_last_status_file}': {status}")
         except Exception as e:
             report_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{psn_last_status_file}': {e}")
 
@@ -2594,13 +2685,9 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         # Player status changed
         if status != status_old:
 
-            last_status_to_save = []
-            last_status_to_save.append(status_ts)
-            last_status_to_save.append(status)
             try:
-                with open(psn_last_status_file, 'w', encoding="utf-8") as f:
-                    json.dump(last_status_to_save, f, indent=2)
-                debug_print(f"Saved status written to '{psn_last_status_file}': {last_status_to_save[1]}")
+                save_last_status(psn_last_status_file, status_ts, status)
+                debug_print(f"Saved status written to '{psn_last_status_file}': {status}")
             except Exception as e:
                 report_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{psn_last_status_file}': {e}")
 
@@ -2892,6 +2979,13 @@ def doctor_check_configuration(config_path=None, env_path=None, config_advice=No
             checks.append(make_doctor_check("Configuration", "FAIL", advice.summary, advice=advice))
     else:
         checks.append(make_doctor_check("Configuration", "PASS", "CSV history is disabled", "Set CSV_FILE or use -b to record every reported change"))
+
+    status_path = resolve_status_file(psn_user_id or "<psn_user_id>")
+    if path_is_writable(status_path):
+        checks.append(make_doctor_check("Configuration", "PASS", "Status file is writable", f"Path: {status_path}"))
+    else:
+        advice = classify_recovery_error(context="file.unwritable", detail=f"Status file '{status_path}' cannot be written")
+        checks.append(make_doctor_check("Configuration", "FAIL", advice.summary, advice=advice))
 
     if DISABLE_LOGGING:
         checks.append(make_doctor_check("Configuration", "PASS", "Output logging is disabled", "Nothing is written to a log file"))
@@ -3189,7 +3283,7 @@ def print_welcome_screen():
 
 
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, LOCAL_TIMEZONE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, stdout_bck
+    global CLI_CONFIG_PATH, DOTENV_FILE, PSN_STATUS_FILE, LOCAL_TIMEZONE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, stdout_bck
 
     if "--generate-config" in sys.argv:
         config_content = CONFIG_BLOCK.strip("\n") + "\n"
@@ -3197,12 +3291,22 @@ def main():
             idx = sys.argv.index("--generate-config")
             if idx + 1 < len(sys.argv) and not sys.argv[idx + 1].startswith("-"):
                 output_file = sys.argv[idx + 1]
-                with open(output_file, "w", encoding="utf-8") as f:
-                    f.write(config_content)
+                backup_path, written = write_generated_config(output_file, config_content, force="--force" in sys.argv)
+                if not written:
+                    print("Config was not replaced. The existing file is unchanged")
+                    sys.exit(1)
                 print(f"Config written to: {output_file}")
+                if backup_path:
+                    print(f"Previous config backed up to: {backup_path}")
                 sys.exit(0)
         except (ValueError, IndexError):
             pass
+        except FileExistsError as exc:
+            print_recovery_advice(classify_recovery_error(context="file.exists", detail=str(exc)))
+            sys.exit(1)
+        except OSError as exc:
+            print_recovery_advice(classify_recovery_error(exc, context="file.unwritable", detail=f"The config file could not be written: {exc}"))
+            sys.exit(1)
         sys.stdout.buffer.write(config_content.encode("utf-8"))
         sys.stdout.buffer.flush()
         sys.exit(0)
@@ -3260,6 +3364,12 @@ def main():
         const=True,
         metavar="FILENAME",
         help="Print default config template and exit (on Windows PowerShell, specify a filename to avoid redirect encoding issues)",
+    )
+    conf.add_argument(
+        "--force",
+        dest="force",
+        action="store_true",
+        help="Let --generate-config replace an existing file, after a timestamped backup"
     )
     conf.add_argument(
         "--env-file",
@@ -3356,6 +3466,13 @@ def main():
         help="Write status & game changes to CSV"
     )
     opts.add_argument(
+        "--status-file",
+        dest="status_file",
+        metavar="PATH",
+        type=str,
+        help="File to save the last seen status to (default: psn_<psn_user_id>_last_status.json)"
+    )
+    opts.add_argument(
         "-d", "--disable-logging",
         dest="disable_logging",
         action="store_true",
@@ -3395,9 +3512,6 @@ def main():
     # Applied before the config file is read, so a failure while reading it is already diagnosable
     apply_diagnostic_cli_overrides(args)
 
-    if len(sys.argv) == 1:
-        sys.exit(print_welcome_screen())
-
     if args.config_file:
         CLI_CONFIG_PATH = os.path.expanduser(args.config_file)
 
@@ -3424,6 +3538,15 @@ def main():
 
     # Applied again, so a saved VERBOSE_MODE or DEBUG_MODE cannot switch off a flag the user just typed
     apply_diagnostic_cli_overrides(args)
+
+    # A PSN ID given on the command line always wins over the saved one
+    if not args.psn_user_id and PSN_USER_ID:
+        args.psn_user_id = PSN_USER_ID
+        debug_print(f"PSN user ID taken from the config file: {args.psn_user_id}")
+
+    # Evaluated after the config file is read, so a saved PSN ID starts monitoring instead of being welcomed
+    if len(sys.argv) == 1 and not args.psn_user_id:
+        sys.exit(print_welcome_screen())
 
     if args.env_file:
         DOTENV_FILE = os.path.expanduser(args.env_file)
@@ -3538,6 +3661,11 @@ def main():
 
     if args.active_interval:
         PSN_ACTIVE_CHECK_INTERVAL = args.active_interval
+
+    if args.status_file:
+        PSN_STATUS_FILE = os.path.expanduser(args.status_file)
+    elif PSN_STATUS_FILE:
+        PSN_STATUS_FILE = os.path.expanduser(PSN_STATUS_FILE)
 
     if args.csv_file:
         CSV_FILE = os.path.expanduser(args.csv_file)
