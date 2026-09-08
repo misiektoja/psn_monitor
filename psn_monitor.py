@@ -15,6 +15,7 @@ pytz
 tzlocal (optional)
 python-dotenv (optional)
 wcwidth (optional, needed by TRUNCATE_CHARS feature)
+colorama (optional, for better colours on Windows terminals)
 """
 
 VERSION = "1.9"
@@ -156,6 +157,53 @@ HORIZONTAL_LINE = 113
 # Whether to clear the terminal screen after starting the tool
 CLEAR_SCREEN = True
 
+# Whether to use coloured output in the terminal (auto-disabled if the terminal
+# does not appear to support colours or when output is redirected to a file)
+# Can also be disabled via the --no-color flag
+COLORED_OUTPUT = True
+
+# Colour theme used for different parts of the output
+# Keys are logical names used by the tool, values are colour/style strings
+# You can combine multiple attributes with spaces or '+', for example:
+#   "bright_cyan bold", "yellow", "red underline", "bright_magenta bold underline", "red bold blink"
+# Valid colour names: black, red, green, yellow, blue, magenta, cyan, white,
+# and their bright_ variants (bright_red, bright_green, ...).
+COLOR_THEME = {
+    # Headings and commands the wizard tells you to run
+    "header": "bright_cyan",
+    "section": "bright_white",
+    # Identity
+    "username": "blue underline",
+    "user_uri_id": "bright_magenta",
+    # Presence status values
+    "status_active": "green",
+    "status_inactive": "red",
+    "status_offline": "red",
+    "status_other": "white",
+    # PlayStation info
+    "game": "bright_yellow",
+    "platform": "bright_blue",
+    "trophy": "bright_green",
+    "duration": "green",
+    # Activity info
+    "status_change": "yellow",
+    # Misc
+    "timestamp_label": "",
+    "timestamp_value": "cyan",
+    "info": "cyan",
+    "warning": "yellow",
+    "error": "red",
+    "signal": "yellow",
+    "email": "bright_cyan",
+    # Dates
+    "date": "magenta",
+    "date_range": "magenta",
+    # Boolean values
+    "boolean_true": "green",
+    "boolean_false": "red",
+    "link": "blue underline",
+}
+
 # Value used by signal handlers increasing/decreasing the check for player activity
 # when user is online (PSN_ACTIVE_CHECK_INTERVAL); in seconds
 PSN_ACTIVE_CHECK_SIGNAL_VALUE = 30  # 30 seconds
@@ -197,6 +245,8 @@ DEBUG_MODE = False
 TRUNCATE_CHARS = 0
 HORIZONTAL_LINE = 0
 CLEAR_SCREEN = False
+COLORED_OUTPUT = False
+COLOR_THEME: dict = {}
 PSN_ACTIVE_CHECK_SIGNAL_VALUE = 0
 
 exec(CONFIG_BLOCK, globals())
@@ -290,6 +340,10 @@ import textwrap
 from collections import namedtuple
 from dataclasses import dataclass, field
 from pathlib import Path
+try:
+    from colorama import init as colorama_init  # type: ignore[import]
+except ImportError:
+    colorama_init = None
 
 
 # Probes the PSN OAuth endpoint with the given npsso and returns a specific error hint if the redirect carries a recognizable error such as ToSUA re-acceptance, otherwise None
@@ -997,15 +1051,413 @@ def normalize_log_separators(message):
     return re.sub(r"(?m)^─+$", lambda match: match.group(0).replace("─", "-"), message)
 
 
+# Internal flag and style map for colour handling
+COLOR_ENABLED = False
+_COLOR_STYLES: dict = {}
+
+# Default built-in colour theme, kept byte-identical to COLOR_THEME in the config template above
+DEFAULT_COLOR_THEME = {
+    # Headings and commands the wizard tells you to run
+    "header": "bright_cyan",
+    "section": "bright_white",
+    # Identity
+    "username": "blue underline",
+    "user_uri_id": "bright_magenta",
+    # Presence status values
+    "status_active": "green",
+    "status_inactive": "red",
+    "status_offline": "red",
+    "status_other": "white",
+    # PlayStation info
+    "game": "bright_yellow",
+    "platform": "bright_blue",
+    "trophy": "bright_green",
+    "duration": "green",
+    # Activity info
+    "status_change": "yellow",
+    # Misc
+    "timestamp_label": "",
+    "timestamp_value": "cyan",
+    "info": "cyan",
+    "warning": "yellow",
+    "error": "red",
+    "signal": "yellow",
+    "email": "bright_cyan",
+    # Dates
+    "date": "magenta",
+    "date_range": "magenta",
+    # Boolean values
+    "boolean_true": "green",
+    "boolean_false": "red",
+    "link": "blue underline",
+}
+
+ANSI_RESET = "\033[0m"
+
+# Mapping of style names to ANSI SGR codes
+_STYLE_CODES = {
+    "bold": "1",
+    "dim": "2",
+    "underline": "4",
+    "blink": "5",
+    "black": "30",
+    "red": "31",
+    "green": "32",
+    "yellow": "33",
+    "blue": "34",
+    "magenta": "35",
+    "cyan": "36",
+    "white": "37",
+    "bright_black": "90",
+    "bright_red": "91",
+    "bright_green": "92",
+    "bright_yellow": "93",
+    "bright_blue": "94",
+    "bright_magenta": "95",
+    "bright_cyan": "96",
+    "bright_white": "97",
+}
+
+# Whole-line styles, listed so the palette test can prove no value colour disappears inside one of them
+BLOCK_STYLE_PARTS = ("error", "warning", "signal", "email", "info")
+
+# Parts that carry a name supplied by PlayStation Network or by the user, which a block style must never hide
+NAME_STYLE_PARTS = ("username", "user_uri_id", "game", "platform", "trophy", "link")
+
+# Output labels whose value is coloured with one theme style, longest label first so a prefix cannot win
+_LABEL_STYLES = (
+    (("PlayStation ID:", "PSN ID:"), "username"),
+    (("PSN account ID:", "Account ID:"), "user_uri_id"),
+    (("User is currently in-game:", "In-game:"), "game"),
+    (("Trophies earned:", "Trophy level:"), "trophy"),
+    (("Platform:",), "platform"),
+)
+
+# Pre-compiled regexes used for line-level colourisation
+_USER_TAG_RE = re.compile(r"((?:PSN user|PlayStation user|for user|by user|of user|Monitoring user):?)([\t ]+)((?!ID\b)[\w.-]+)")
+
+# A quoted value right after "user" or "for" names the monitored account, the same value the "PlayStation ID:"
+# row reports. Every "for '<value>'" line this tool prints names either that account or a file
+_QUOTED_USER_ID_CONTEXT_RE = re.compile(r"\b(?:user(?:\s+id)?|for)\s+$", re.IGNORECASE)
+
+# The two presence values a status change reports, coloured with the same table the "Status:" row uses
+_FROM_TO_STATUS_RE = re.compile(r"(changed status from\s+)(\w+)(\s+to\s+)(\w+)")
+_DURATION_RE = re.compile(r"~?\b[0-9]{1,20}[ \t]{1,20}(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\b", re.IGNORECASE)
+_LONG_DATE_RE = re.compile(r"\b(?:\w{3}\s+)?\d{1,2}\s+\w{3}(?:\s+\d{2,4})?[\s,]*\d{2}:\d{2}(:\d{2})?(\s*[AP]M)?\b", re.IGNORECASE)
+_TIME_ONLY_RE = re.compile(r"(?<![\w:])(~?(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:\s*[AP]M)?)(?![\w:])", re.IGNORECASE)
+_SHORT_RANGE_DATE_RE = re.compile(r"\(\w{3}\s+\d{1,2}\s+\w{3}\s+\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\)", re.IGNORECASE)
+_DATE_RANGE_RE = re.compile(r"\b\w{3}\s+\d{1,2}\s+\w{3}\s+\d{2}:\d{2}(\s*[AP]M)?\s*(?:-|to)\s*\d{2}:\d{2}(\s*[AP]M)?\b", re.IGNORECASE)
+_HOUR_RANGE_RE = re.compile(r"\b\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\b", re.IGNORECASE)
+_URL_RE = re.compile(r"(https?://[^\s\]]+)")
+_BOOLEAN_TRUE_RE = re.compile(r"\bTrue\b|\bEnabled\b")
+_BOOLEAN_FALSE_RE = re.compile(r"\bFalse\b|\bDisabled\b")
+_NOTIFICATION_SUMMARY_STATE_RE = re.compile(r"^(\* Notifications \(email\):\s+)(On|Off)(.*)$")
+
+# Every failure this tool reports is printed by the recovery renderer, which always writes its marker at the
+# start of the line. Anchoring here instead of scanning for problem words keeps a diagnostic detail such as
+# "timeout=15" or a recovery notice from painting its line red
+_ERROR_LINE_RE = re.compile(r"^\s*\*\s*(?:error|critical)\b", re.IGNORECASE)
+_WARNING_LINE_RE = re.compile(r"^\s*\*\s*(?:warning|caution)\b", re.IGNORECASE)
+_INFO_LINE_RE = re.compile(r"^\s*\*\s*(?:info|note)\b", re.IGNORECASE)
+_SIGNAL_LINE_RE = re.compile(r"^\s*\*\s*signal\b.*\breceived\b", re.IGNORECASE)
+
+# Doctor status markers, coloured with the same theme parts the sibling monitors use for them
+_DOCTOR_MARK_RE = re.compile(r"^\[(PASS|WARN|FAIL|SKIP)\]")
+_DOCTOR_MARK_STYLES = {"PASS": "boolean_true", "WARN": "warning", "FAIL": "error", "SKIP": "info"}
+
+# One row of the earned-trophy listing: "- <date> | <game> | <trophy type> | <trophy name>"
+_TROPHY_ROW_RE = re.compile(r"^- ([^|]+) \| ([^|]+) \| ([A-Z]+) \| (.+)$")
+
+# Quoted names such as game titles. At least one word character is required so a run of punctuation between
+# two apostrophes is not read as a name
+_QUOTED_CONTENT_RE = re.compile(r"(')([^'\n]*\w[^'\n]*)(')")
+
+# Quoted values shaped like a file name or a filesystem path stay plain, since a log or state destination is
+# not content. Game titles routinely contain slashes and dots, so only these two shapes are excluded
+_QUOTED_FILE_LIKE_RE = re.compile(r"^[~.]?[\\/]|^[A-Za-z]:[\\/]|\.[A-Za-z0-9]{1,8}$")
+
+# A quoted command-line option is an instruction to retype, not a name
+_QUOTED_OPTION_RE = re.compile(r"^-")
+
+# The console tag printed beside a game, for example "(PS5)"
+_LAUNCH_PLATFORM_RE = re.compile(r"\((PS[A-Z0-9_]*|MOBILE_APP)\)")
+_TRAILING_PLATFORM_RE = re.compile(r"\s*\((PS[A-Z0-9_]*|MOBILE_APP)\)\s*$")
+
+# Presence keywords the event lines print in capitals
+_ACTIVE_WORD_RE = re.compile(r"\b(ACTIVE|ONLINE)\b")
+_OFFLINE_WORD_RE = re.compile(r"\b(OFFLINE)\b")
+_INACTIVE_WORD_RE = re.compile(r"\b(INACTIVE|STANDBY)\b")
+
+# This tool has no capitalised playback keywords, so the same three activity styles attach to the verbs its
+# change reports use instead
+_GAME_STARTED_RE = re.compile(r"\bstarted playing\b")
+_GAME_STOPPED_RE = re.compile(r"\bstopped playing\b")
+_STATUS_CHANGE_RE = re.compile(r"\b(?:changed status|changed game)\b")
+
+
+# Builds an ANSI escape sequence from a style description string
+def _build_ansi_sequence(style_str):
+    if not style_str:
+        return ""
+    parts = re.split(r"[+ ]+", style_str.strip().lower())
+    codes = [_STYLE_CODES[part] for part in parts if part in _STYLE_CODES]
+    if not codes:
+        return ""
+    return f"\033[{';'.join(codes)}m"
+
+
+# Detects whether the given output stream likely supports ANSI colours
+def _stream_supports_color(stream):
+    if not hasattr(stream, "isatty") or not stream.isatty():
+        return False
+    if os.getenv("NO_COLOR"):
+        return False
+    # On Windows with colorama, skip the TERM check since colorama translates the sequences itself and
+    # neither Windows Terminal nor Command Prompt sets TERM
+    if not (colorama_init and platform.system() == "Windows"):
+        if os.getenv("TERM", "").lower() in ("", "dumb", "unknown"):
+            return False
+    # A piped stdin means the run is part of a pipeline such as tee, where escape codes would end up in a file
+    if hasattr(sys.stdin, "isatty") and not sys.stdin.isatty():
+        return False
+    return True
+
+
+# Initialises colour handling from the resolved settings and the terminal's capabilities
+def init_color_output(stream):
+    global COLOR_ENABLED, _COLOR_STYLES
+
+    # Done before the support check because colorama is what makes an older Windows console report support
+    if colorama_init and platform.system() == "Windows":
+        try:
+            colorama_init(autoreset=False)
+        except Exception:
+            pass
+
+    COLOR_ENABLED = bool(globals().get("COLORED_OUTPUT", False)) and _stream_supports_color(stream)
+
+    if not COLOR_ENABLED:
+        _COLOR_STYLES = {}
+        return
+
+    configured = globals().get("COLOR_THEME")
+    theme = {**DEFAULT_COLOR_THEME, **(configured if isinstance(configured, dict) else {})}
+    _COLOR_STYLES = {name: sequence for name, style in theme.items() for sequence in (_build_ansi_sequence(style),) if sequence}
+
+
+# Applies one configured colour style, by logical part name, to the given text
+def colorize(part, text):
+    if not COLOR_ENABLED:
+        return text
+    start = _COLOR_STYLES.get(part)
+    if not start:
+        return text
+    return f"{start}{text}{ANSI_RESET}"
+
+
+# Returns the coloured form of one PlayStation presence value
+def colorize_status(status_text):
+    status = (status_text or "").strip().lower()
+    if status in ("active", "online", "availabletoplay", "available", "yes"):
+        key = "status_active"
+    elif status in ("inactive", "standby", "no"):
+        key = "status_inactive"
+    elif status == "offline":
+        key = "status_offline"
+    else:
+        key = "status_other"
+    return colorize(key, status_text)
+
+
+# Splits a recognized output label from its value without applying a backtracking expression
+def _split_output_label(value, labels):
+    body = value.rstrip("\n")
+    cursor = len(body) - len(body.lstrip())
+    if body[cursor:cursor + 1] == "*":
+        cursor += 1
+        cursor += len(body[cursor:]) - len(body[cursor:].lstrip())
+    for label in labels:
+        if not body.startswith(label, cursor):
+            continue
+        value_start = cursor + len(label)
+        value_start += len(body[value_start:]) - len(body[value_start:].lstrip())
+        if value_start == cursor + len(label):
+            return None
+        return body[:value_start], body[value_start:]
+    return None
+
+
+# Applies a whole-line style while preserving the highlights already inside the line
+def _apply_style_nested(line, style_name):
+    start_style = _COLOR_STYLES.get(style_name)
+    if not start_style:
+        return line
+    # Each internal reset returns to the block style instead of to plain, so the line keeps one colour throughout
+    line = f"{start_style}{line}{ANSI_RESET}"
+    line = line.replace(ANSI_RESET, f"{ANSI_RESET}{start_style}")
+    if line.endswith(f"{ANSI_RESET}{start_style}"):
+        line = line[:-len(start_style)]
+    return line
+
+
+# Applies one substitution only to the parts of a line that are not already inside a colour span, so a later
+# rule cannot reclaim text an earlier rule has already coloured
+def _sub_outside_color(pattern, replacement, line):
+    if ANSI_RESET not in line:
+        return pattern.sub(replacement, line)
+    parts = []
+    position = 0
+    inside = False
+    for match in SGR_SEQUENCE_RE.finditer(line):
+        segment = line[position:match.start()]
+        parts.append(segment if inside else pattern.sub(replacement, segment))
+        parts.append(match.group(0))
+        inside = match.group(0) != ANSI_RESET
+        position = match.end()
+    trailing = line[position:]
+    parts.append(trailing if inside else pattern.sub(replacement, trailing))
+    return "".join(parts)
+
+
+# Colours one quoted name unless the quoted value is a file name, a path or a command-line option
+def _colorize_quoted_name(match, style_name):
+    name = match.group(2)
+    if _QUOTED_FILE_LIKE_RE.search(name) or _QUOTED_OPTION_RE.match(name):
+        return match.group(0)
+    # What sits right before the quote decides the colour, so an account name is not read as a game title
+    if _QUOTED_USER_ID_CONTEXT_RE.search(match.string[:match.start()]):
+        style_name = "username"
+    return f"{match.group(1)}{colorize(style_name, name)}{match.group(3)}"
+
+
+# Applies the colour rules to a single output line
+def _colorize_line(line):
+    lowered = line.lower()
+
+    # The notification summary row carries its own On/Off state word
+    notification_match = _NOTIFICATION_SUMMARY_STATE_RE.match(line)
+    if notification_match:
+        prefix, state, suffix = notification_match.groups()
+        return f"{prefix}{colorize('boolean_true' if state == 'On' else 'boolean_false', state)}{suffix}"
+
+    # Doctor status markers keep the rest of their line plain so long labels stay readable
+    doctor_match = _DOCTOR_MARK_RE.match(line)
+    if doctor_match:
+        return colorize(_DOCTOR_MARK_STYLES[doctor_match.group(1)], doctor_match.group(0)) + line[doctor_match.end():]
+
+    # Trophy listing rows are a fixed four-column shape, so each column is coloured for what it holds
+    trophy_match = _TROPHY_ROW_RE.match(line.rstrip("\n"))
+    if trophy_match:
+        earned, game, trophy_type, trophy_name = trophy_match.groups()
+        colored = f"- {colorize('date', earned)} | {colorize('game', game)} | {colorize('trophy', trophy_type)} | {colorize('trophy', trophy_name)}"
+        return colored + ("\n" if line.endswith("\n") else "")
+
+    # Timestamp rows get an uncoloured label and a coloured value
+    labeled_value = _split_output_label(line, ("Liveness check, timestamp:", "Timestamp:"))
+    if labeled_value:
+        label, rest = labeled_value
+        return f"{colorize('timestamp_label', label)}{colorize('timestamp_value', rest)}" + ("\n" if line.endswith("\n") else "")
+
+    # Any '<something> URL:' row is a link, checked before the label table so 'Profile URL:' is not read as a name
+    if _split_output_label(line, ("URL:",)) or " URL:" in line:
+        return _sub_outside_color(_URL_RE, lambda mo: colorize("link", mo.group(0)), line)
+
+    # Presence rows report the monitored account's status
+    labeled_value = _split_output_label(line, ("Available to play:", "STATUS:", "Status:"))
+    if labeled_value:
+        label, status = labeled_value
+        return f"{label}{colorize_status(status)}" + ("\n" if line.endswith("\n") else "")
+
+    # Labelled PlayStation rows keep their label plain and colour only the value
+    for labels, style_name in _LABEL_STYLES:
+        labeled_value = _split_output_label(line, labels)
+        if not labeled_value:
+            continue
+        label, rest = labeled_value
+        # The console tag after a game name keeps its own colour instead of disappearing into the title
+        trailing_platform = _TRAILING_PLATFORM_RE.search(rest) if style_name == "game" else None
+        if trailing_platform:
+            colored_value = f"{colorize(style_name, rest[:trailing_platform.start()])} ({colorize('platform', trailing_platform.group(1))})"
+        else:
+            colored_value = colorize(style_name, rest)
+        return f"{label}{colored_value}" + ("\n" if line.endswith("\n") else "")
+
+    # Highlight the PlayStation account named inside a sentence
+    line = _sub_outside_color(_USER_TAG_RE, lambda mo: f"{mo.group(1)}{mo.group(2)}{colorize('username', mo.group(3))}", line)
+
+    # Highlight the two presence values a status change reports
+    line = _sub_outside_color(_FROM_TO_STATUS_RE, lambda mo: f"{mo.group(1)}{colorize_status(mo.group(2))}{mo.group(3)}{colorize_status(mo.group(4))}", line)
+
+    # Highlight durations
+    line = _sub_outside_color(_DURATION_RE, lambda mo: colorize("duration", mo.group(0)), line)
+
+    # Highlight date ranges before single dates so a range is not split into two dates
+    line = _sub_outside_color(_SHORT_RANGE_DATE_RE, lambda mo: colorize("date_range", mo.group(0)), line)
+    line = _sub_outside_color(_DATE_RANGE_RE, lambda mo: colorize("date_range", mo.group(0)), line)
+    line = _sub_outside_color(_HOUR_RANGE_RE, lambda mo: colorize("date_range", mo.group(0)), line)
+    line = _sub_outside_color(_LONG_DATE_RE, lambda mo: colorize("date", mo.group(0)), line)
+    line = _sub_outside_color(_TIME_ONLY_RE, lambda mo: colorize("date", mo.group(0)), line)
+
+    # Highlight links
+    line = _sub_outside_color(_URL_RE, lambda mo: colorize("link", mo.group(0)), line)
+
+    # Highlight quoted names. A line that is only a quoted string is a free-form description, so it stays plain
+    if not line.lstrip().startswith("'"):
+        line = _sub_outside_color(_QUOTED_CONTENT_RE, lambda mo: _colorize_quoted_name(mo, "game"), line)
+
+    # Highlight the console tag printed beside a game
+    line = _sub_outside_color(_LAUNCH_PLATFORM_RE, lambda mo: f"({colorize('platform', mo.group(1))})", line)
+
+    # Highlight boolean values
+    line = _sub_outside_color(_BOOLEAN_TRUE_RE, lambda mo: colorize("boolean_true", mo.group(0)), line)
+    line = _sub_outside_color(_BOOLEAN_FALSE_RE, lambda mo: colorize("boolean_false", mo.group(0)), line)
+
+    # Highlight presence keywords and the verbs that report an activity change
+    line = _sub_outside_color(_ACTIVE_WORD_RE, lambda mo: colorize("status_active", mo.group(0)), line)
+    line = _sub_outside_color(_OFFLINE_WORD_RE, lambda mo: colorize("status_offline", mo.group(0)), line)
+    line = _sub_outside_color(_INACTIVE_WORD_RE, lambda mo: colorize("status_inactive", mo.group(0)), line)
+    line = _sub_outside_color(_GAME_STARTED_RE, lambda mo: colorize("status_active", mo.group(0)), line)
+    line = _sub_outside_color(_GAME_STOPPED_RE, lambda mo: colorize("status_inactive", mo.group(0)), line)
+    line = _sub_outside_color(_STATUS_CHANGE_RE, lambda mo: colorize("status_change", mo.group(0)), line)
+
+    # Whole-line styling last, so the colours applied above survive the nesting logic
+    if lowered.startswith("to fix:") or _INFO_LINE_RE.match(line):
+        line = _apply_style_nested(line, "info")
+    elif _ERROR_LINE_RE.match(line):
+        line = _apply_style_nested(line, "error")
+    elif _WARNING_LINE_RE.match(line):
+        line = _apply_style_nested(line, "warning")
+    elif _SIGNAL_LINE_RE.match(line):
+        line = _apply_style_nested(line, "signal")
+    elif "sending email" in lowered:
+        line = _apply_style_nested(line, "email")
+
+    return line
+
+
+# Applies colourisation to multi-line text, preserving the line breaks
+def apply_color_to_text(text):
+    if not COLOR_ENABLED or not isinstance(text, str):
+        return text
+    parts = []
+    for chunk in text.splitlines(keepends=True):
+        if chunk.endswith(("\n", "\r")):
+            stripped = chunk.rstrip("\r\n")
+            parts.append(_colorize_line(stripped) + chunk[len(stripped):])
+        else:
+            parts.append(_colorize_line(chunk))
+    return "".join(parts)
+
+
 # Sanitizing stdout wrapper installed before the logging policy is known, so early output is covered too
 class TerminalStream(object):
     # Stores the wrapped terminal stream
     def __init__(self, stream):
         self.terminal = stream
 
-    # Writes one sanitized message to the wrapped terminal
+    # Writes one sanitized and coloured message to the wrapped terminal
     def write(self, message):
-        self.terminal.write(sanitize_terminal_text(message))
+        self.terminal.write(apply_color_to_text(sanitize_terminal_text(message)))
         self.terminal.flush()
 
     # Flushes the wrapped terminal
@@ -1027,8 +1479,9 @@ def unwrap_terminal_stream(stream):
 # Logger class to output messages to stdout and log file
 class Logger(object):
     def __init__(self, filename):
-        # The early sanitizing stream is unwrapped so sanitizing happens exactly once. Writing through it would
-        # sanitize every line twice, and it would leave two layers to keep in step once colouring is added
+        # The early sanitizing stream is unwrapped so sanitizing and colouring happen exactly once. Writing
+        # through it would colourise every line twice, and the second pass no longer sees the label it already
+        # coloured, so it would recolour the value with the generic rules
         self.terminal = unwrap_terminal_stream(sys.stdout)
         self.logfile = open(filename, "a", buffering=1, encoding="utf-8")
 
@@ -1036,10 +1489,10 @@ class Logger(object):
         message = sanitize_terminal_text(message)
         # The log file stays plain text, so colour codes are stripped and tabs expanded before it is written
         self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", message).expandtabs(8)))
-        # Truncation runs on the text as displayed, so escape sequences never count toward the visible width
+        # Truncation runs before colouring, so escape sequences never count toward the visible width
         if TRUNCATE_CHARS:
             message = truncate_string_per_line(message, TRUNCATE_CHARS)
-        self.terminal.write(message)
+        self.terminal.write(apply_color_to_text(message))
         self.terminal.flush()
         self.logfile.flush()
 
@@ -1053,7 +1506,7 @@ class Logger(object):
         message = sanitize_terminal_text(message)
         if TRUNCATE_CHARS:
             message = truncate_string_per_line(message, TRUNCATE_CHARS)
-        self.terminal.write(message)
+        self.terminal.write(apply_color_to_text(message))
         self.terminal.flush()
 
     def flush(self):
@@ -1103,6 +1556,11 @@ def clear_screen(enabled=True):
     except Exception as e:
         debug_print(f"Clearing the screen failed: {type(e).__name__}: {e}")
         print("* Cannot clear the screen contents")
+
+
+# Prints the startup line, with the version coloured apart from the name so it reads as context
+def print_startup_banner():
+    print(f"{colorize('header', 'PSN Monitoring Tool')} {colorize('info', 'v' + VERSION)}\n")
 
 
 # Converts absolute value of seconds to human readable format
@@ -1620,6 +2078,38 @@ def find_config_file(cli_path=None):
         if p.is_file():
             return str(p)
     return None
+
+
+# Returns the --config-file value from the raw arguments, before argparse has run
+def early_config_file_argument(arguments=None):
+    values = list(sys.argv[1:] if arguments is None else arguments)
+    for index, argument in enumerate(values):
+        if argument == "--config-file" and index + 1 < len(values):
+            return values[index + 1]
+        if argument.startswith("--config-file="):
+            return argument.split("=", 1)[1]
+    return None
+
+
+# Applies the two settings that decide how the terminal looks before arguments are parsed, leaving every error
+# to the real config load. The screen clear and the startup banner both run before argparse, so colour has to
+# be resolved here or a configured COLORED_OUTPUT would only take effect after the first output was written
+def apply_early_output_config():
+    global CLEAR_SCREEN, COLORED_OUTPUT
+    try:
+        cli_path = early_config_file_argument()
+        config_path = find_config_file(os.path.expanduser(cli_path) if cli_path else None)
+        if not config_path:
+            return
+        # Reading a config never runs it, so this early peek cannot have side effects
+        values = parse_config_content(Path(config_path).read_text(encoding="utf-8"), str(config_path))
+    except Exception:
+        # A broken or unreadable config is reported with full detail once the arguments are parsed
+        return
+    if isinstance(values.get("CLEAR_SCREEN"), bool):
+        CLEAR_SCREEN = values["CLEAR_SCREEN"]
+    if isinstance(values.get("COLORED_OUTPUT"), bool):
+        COLORED_OUTPUT = values["COLORED_OUTPUT"]
 
 
 # Settings an older version wrote that this version no longer defines, ignored instead of rejected
@@ -2229,7 +2719,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
                 print()
                 hdr = f"{'#'.ljust(w_num)}  {'Title'.ljust(w_title)}  {'Platform'.ljust(w_platform)}  {'Last played'.ljust(w_last)}  {'Total'.ljust(w_total)}"
                 sep = f"{'-' * w_num}  {'-' * w_title}  {'-' * w_platform}  {'-' * w_last}  {'-' * w_total}"
-                print(hdr)
+                print(colorize("section", hdr))
                 print(sep)
 
                 for i, entry in enumerate(recent_entries, 1):
@@ -2246,12 +2736,14 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
                         continue
 
                     name_fmt = _shorten_middle(name, w_title)
+                    # Coloured here rather than by a line rule: the columns are positional, with no label or
+                    # separator a rule could recognize once the values are padded to width
                     row = (
                         f"{str(i).ljust(w_num)}  "
-                        f"{name_fmt.ljust(w_title)}  "
-                        f"{cat.ljust(w_platform)}  "
-                        f"{last_played.ljust(w_last)}  "
-                        f"{total.ljust(w_total)}"
+                        f"{colorize('game', name_fmt.ljust(w_title))}  "
+                        f"{colorize('platform', cat.ljust(w_platform))}  "
+                        f"{colorize('date', last_played.ljust(w_last))}  "
+                        f"{colorize('duration', total.ljust(w_total))}"
                     )
                     print(row)
         except Exception as diag_exc:
@@ -3070,12 +3562,14 @@ DOCTOR_PROGRESS_WIDTH = 0
 
 
 # Shows one transient step only on an interactive terminal, erased by overwriting its own width
+# The line stays uncoloured on purpose: it is erased by writing exactly len(line) spaces, and an escape
+# sequence would make that width wrong and leave a styled remnant behind
 def doctor_progress(label):
     global DOCTOR_PROGRESS_WIDTH
     terminal = doctor_terminal_stream()
     if terminal.isatty():
         doctor_progress_clear()
-        line = f"* Checking {sanitize_terminal_text(label)} ..."
+        line = f"* Checking {plain_text(label)} ..."
         DOCTOR_PROGRESS_WIDTH = len(line)
         terminal.write("\r" + line)
         terminal.flush()
@@ -3117,12 +3611,12 @@ def render_doctor_notice():
 def render_doctor_sections(report):
     # The install method is context rather than a check: it cannot fail, so it is stated once here
     # instead of occupying a result row that no marker describes. The raw key is what support reports use
-    lines = ["Doctor", f"Detected install method: {detect_install_method()}"]
+    lines = [colorize("header", "Doctor"), f"Detected install method: {colorize('username', detect_install_method())}"]
     for section in DOCTOR_SECTIONS:
         section_checks = [check for check in report.checks if check.section == section]
         if not section_checks:
             continue
-        lines.extend(("", section))
+        lines.extend(("", colorize("section", section)))
         for check in section_checks:
             lines.append(f"[{check.status}] {check.label}")
             if check.detail:
@@ -3137,12 +3631,12 @@ def render_doctor_summary(checks):
     failures = sum(check.status == "FAIL" for check in checks)
     warnings = sum(check.status == "WARN" for check in checks)
     if failures:
-        sentence = f"  {failures} check(s) failed, {warnings} warning(s). Fix the failures above before relying on the tool."
+        sentence = colorize("error", f"  {failures} check(s) failed, {warnings} warning(s). Fix the failures above before relying on the tool.")
     elif warnings:
-        sentence = f"  All critical checks passed with {warnings} warning(s). Review the warnings above."
+        sentence = colorize("warning", f"  All critical checks passed with {warnings} warning(s). Review the warnings above.")
     else:
-        sentence = "  All checks passed. You are good to go!"
-    return "\n".join(("", "Summary", sentence, "", f"Guide: {DOCTOR_GUIDE_URL}"))
+        sentence = colorize("boolean_true", "  All checks passed. You are good to go!")
+    return "\n".join(("", colorize("header", "Summary"), sentence, "", f"Guide: {DOCTOR_GUIDE_URL}"))
 
 
 # Asks one yes or no question, treating a closed or interrupted input as no
@@ -3233,6 +3727,8 @@ def build_startup_summary(psn_user_id=None, config_path=None, env_path=None, log
         StartupSummaryRow("Liveness output", display_time(LIVENESS_CHECK_INTERVAL) if LIVENESS_CHECK_INTERVAL else "Disabled", concise=bool(LIVENESS_CHECK_INTERVAL)),
         StartupSummaryRow("CSV output", CSV_FILE or "Disabled", concise=bool(CSV_FILE)),
         StartupSummaryRow("Terminal truncation", f"{TRUNCATE_CHARS} chars" if TRUNCATE_CHARS else "Disabled", concise=bool(TRUNCATE_CHARS)),
+        # The resolved state, not the setting: colour also switches itself off when the output is not a terminal
+        StartupSummaryRow("Coloured output", f"{COLOR_ENABLED} (setting: {COLORED_OUTPUT})"),
         StartupSummaryRow("Verbose mode", str(VERBOSE_MODE), concise=bool(VERBOSE_MODE)),
         StartupSummaryRow("Debug mode", str(DEBUG_MODE), concise=bool(DEBUG_MODE)),
         # Points at the two modes for a reader who does not know they exist, so the full view drops it
@@ -3271,7 +3767,7 @@ def emit_startup_summary(rows, show_full=False, stream=None):
 # Prints one labelled command on its own indented line, the shared shape across these tools
 def print_labelled_command(label, command, suffix=""):
     print(label)
-    print(f"    {command}{suffix}\n")
+    print(f"    {colorize('section', command)}{colorize('info', suffix) if suffix else ''}\n")
 
 
 
@@ -3336,7 +3832,7 @@ def _wizard_print_default_guidance():
 # that nothing was written
 def _wizard_input(prompt_text, input_func=None):
     prompt = input if input_func is None else input_func
-    return prompt(prompt_text)
+    return prompt(colorize("info", prompt_text))
 
 
 # Asks one free-text question, returning the shown default when the answer is empty
@@ -3371,7 +3867,7 @@ def _wizard_ask_choice(question, options, default_index=0, input_func=None):
     print(question)
     for index, (label, description) in enumerate(options, 1):
         marker = " (default)" if index - 1 == default_index else ""
-        print(f"  {index}. {label}{marker}")
+        print(f"  {colorize('username', str(index))}. {label}{colorize('info', marker) if marker else ''}")
         if description:
             for line in description.splitlines():
                 print(f"     {line}")
@@ -3433,6 +3929,13 @@ def _wizard_ask_secret(question, getpass_func=None, required=False):
         print("  This secret is required and cannot be empty.")
 
 
+# Renders one setting for the generated config, keeping a mapping readable instead of on one very long line
+def render_config_value(value):
+    if isinstance(value, dict) and value:
+        return "{\n" + "".join(f"    {key!r}: {item!r},\n" for key, item in value.items()) + "}"
+    return repr(value)
+
+
 # Renders one configuration file from the built-in template with the chosen values substituted in
 def generate_config_with_current_values(config_values):
     tree = ast.parse(CONFIG_BLOCK, "<built-in-config>", "exec")
@@ -3443,7 +3946,7 @@ def generate_config_with_current_values(config_values):
         name = statement.targets[0].id
         if name not in config_values:
             continue
-        replacements[name] = (statement.lineno, getattr(statement, "end_lineno", statement.lineno), repr(config_values[name]))
+        replacements[name] = (statement.lineno, getattr(statement, "end_lineno", statement.lineno), render_config_value(config_values[name]))
     lines = CONFIG_BLOCK.strip("\n").split("\n")
     # The template keeps its own leading blank line, so template line numbers are one ahead of this list
     offset = 1 if CONFIG_BLOCK.startswith("\n") else 0
@@ -3485,7 +3988,7 @@ WIZARD_SECTIONS = (
     ("Polling", "Polling intervals", "Change how often PlayStation Network is checked.", ("PSN_CHECK_INTERVAL", "PSN_ACTIVE_CHECK_INTERVAL"), ()),
     ("Authentication", "Authentication", "Enter the NPSSO code again.", (), ("PSN_NPSSO",)),
     ("Email", "Email notifications", "Change SMTP details and which events are mailed.", ("SMTP_HOST", "SMTP_PORT", "SMTP_SSL", "SMTP_USER", "SENDER_EMAIL", "RECEIVER_EMAIL") + WIZARD_EMAIL_NOTIFICATION_KEYS, ("SMTP_PASSWORD",)),
-    ("Output", "Output files", "Change the log, CSV and status file destinations.", ("DISABLE_LOGGING", "CSV_FILE", "PSN_STATUS_FILE"), ()),
+    ("Output", "Output files", "Change the log, CSV and status file destinations and the coloured output.", ("DISABLE_LOGGING", "CSV_FILE", "PSN_STATUS_FILE", "COLORED_OUTPUT"), ()),
 )
 
 
@@ -3586,6 +4089,7 @@ def _wizard_collect_output_section(state, input_func=None):
     state.config_values["DISABLE_LOGGING"] = not _wizard_ask_yes_no("Write the normal per-user log file?", default=not bool(state.config_values.get("DISABLE_LOGGING")), input_func=input_func)
     state.config_values["CSV_FILE"] = _wizard_ask_text("Optional CSV output path (blank disables it)", default=str(state.config_values.get("CSV_FILE") or ""), input_func=input_func)
     state.config_values["PSN_STATUS_FILE"] = _wizard_ask_text("Optional status file path (blank uses the default next to the tool)", default=str(state.config_values.get("PSN_STATUS_FILE") or ""), input_func=input_func)
+    state.config_values["COLORED_OUTPUT"] = _wizard_ask_yes_no("Use coloured terminal output?", default=bool(state.config_values.get("COLORED_OUTPUT", True)), input_func=input_func)
 
 
 # Runs one editable section again after resetting only the keys it owns
@@ -3633,11 +4137,12 @@ def _wizard_print_setup_summary(state):
         ("Output log", "disabled" if state.config_values.get("DISABLE_LOGGING") else "enabled"),
         ("CSV output", state.config_values.get("CSV_FILE") or "disabled"),
         ("Status file", state.config_values.get("PSN_STATUS_FILE") or "default"),
+        ("Coloured output", "enabled" if state.config_values.get("COLORED_OUTPUT", True) else "disabled"),
         ("Config destination", state.config_path),
         ("Dotenv destination", state.env_path),
         ("Install method", install_method_display_name()),
     ]
-    print("\nSetup summary\n")
+    print("\n" + colorize("header", "Setup summary") + "\n")
     _wizard_print_summary_rows(rows)
 
 
@@ -3663,7 +4168,7 @@ def _wizard_review_setup(state, input_func=None, getpass_func=None):
 
 # Prints where setup will write and which install method the printed commands are written for
 def _wizard_print_setup_destinations(config_path, env_path):
-    print(f"Detected install method: {install_method_display_name()}")
+    print(f"Detected install method: {colorize('username', install_method_display_name())}")
     print(f"Configuration:           {config_path}")
     print(f"Dotenv:                  {env_path}\n")
 
@@ -3731,7 +4236,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     config_path = Path(config_file).expanduser() if config_file else Path.cwd() / DEFAULT_CONFIG_FILENAME
     env_path = Path(env_file).expanduser() if env_file else Path.cwd() / ".env"
 
-    print("Setup Wizard\n")
+    print(colorize("header", "Setup Wizard") + "\n")
     print("This asks a few questions and writes a ready-to-run configuration.")
     _wizard_print_default_guidance()
     print("Secrets go to the dotenv file. Non-secret settings go to the config file.\n")
@@ -3775,7 +4280,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
             print_recovery_advice(classify_recovery_error(exc, context="file.unwritable", detail=f"Could not write the secrets to '{state.env_path}': {exc}"))
             return 1
 
-    print("\nSaved files\n")
+    print("\n" + colorize("header", "Saved files") + "\n")
     print(f"  Configuration: {state.config_path}")
     if config_backup:
         print(f"  Backup:        {config_backup}")
@@ -3799,7 +4304,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     # A saved target is already in the config file, so the printed commands stay short
     target_arguments = [] if state.persist_target or not state.target else [state.target]
     paths = ["--config-file", str(state.config_path)] + env_arguments
-    print("\nNext steps\n")
+    print("\n" + colorize("header", "Next steps") + "\n")
     print_labelled_command("Check setup again:", tool_command("--doctor", *target_arguments, *paths))
     start_label = "After Doctor passes, start monitoring:" if doctor_exit not in (None, 0) else "Start monitoring:"
     print_labelled_command(start_label, tool_command(*target_arguments, *paths))
@@ -3822,7 +4327,7 @@ def print_welcome_screen(input_func=None, interactive=None, config_file=None, en
     print_labelled_command("Easiest start (guided setup wizard):", f"{prefix} --setup", "   (or just answer Y below)" if terminal_is_interactive else "")
     print_labelled_command("Check setup before monitoring:", f"{prefix} --doctor <psn_user_id>")
     print_labelled_command("Show profile details and exit:", f"{prefix} -i <psn_user_id>")
-    print(f"Full options: {prefix} --help")
+    print(f"Full options: {colorize('section', prefix + ' --help')}")
     print(f"\nGuide:        {QUICK_START_GUIDE_URL}\n")
     if terminal_is_interactive and _wizard_ask_yes_no("Run the guided setup wizard now?", default=True, input_func=input_func):
         print()
@@ -4021,7 +4526,7 @@ def run_set_smtp_password(env_file=None, config_path=None, psn_user_id=None, int
 
 
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, PSN_STATUS_FILE, LOCAL_TIMEZONE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, stdout_bck
+    global CLI_CONFIG_PATH, DOTENV_FILE, PSN_STATUS_FILE, LOCAL_TIMEZONE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, COLORED_OUTPUT, stdout_bck
 
     if "--generate-config" in sys.argv:
         config_content = CONFIG_BLOCK.strip("\n") + "\n"
@@ -4055,8 +4560,17 @@ def main():
 
     stdout_bck = sys.stdout
 
+    # The screen clear and the banner both run before the arguments are parsed, so the two config settings
+    # that decide how the terminal looks are read here as well
+    apply_early_output_config()
+
+    if "--no-color" in sys.argv:
+        COLORED_OUTPUT = False
+
+    init_color_output(stdout_bck)
+
     # Installed before the banner and before one-shot modes run, so PSN-supplied text printed by --info cannot
-    # drive the terminal either. The Logger installed later unwraps this again to keep sanitizing single-pass
+    # drive the terminal either. The Logger installed later unwraps this again to keep the single colour pass
     if not isinstance(sys.stdout, TerminalStream):
         sys.stdout = TerminalStream(sys.stdout)
 
@@ -4065,7 +4579,7 @@ def main():
 
     clear_screen(CLEAR_SCREEN)
 
-    print(f"PSN Monitoring Tool v{VERSION}\n")
+    print_startup_banner()
 
     parser = argparse.ArgumentParser(
         prog="psn_monitor",
@@ -4245,6 +4759,13 @@ def main():
         help="Max characters per screen line (not log), use 999 to auto-detect terminal width, ignored if -d is set"
     )
     opts.add_argument(
+        "--no-color",
+        dest="no_color",
+        action="store_true",
+        default=None,
+        help="Disable coloured output in the terminal"
+    )
+    opts.add_argument(
         "--doctor",
         dest="doctor",
         action="store_true",
@@ -4297,6 +4818,13 @@ def main():
 
     # Applied again, so a saved VERBOSE_MODE or DEBUG_MODE cannot switch off a flag the user just typed
     apply_diagnostic_cli_overrides(args)
+
+    if args.no_color is True:
+        COLORED_OUTPUT = False
+
+    # Re-initialised so a COLORED_OUTPUT or COLOR_THEME from the config file takes effect before the welcome
+    # screen, the setup wizard or doctor print anything, with --no-color still winning over both
+    init_color_output(stdout_bck)
 
     # A PSN ID given on the command line always wins over the saved one
     if not args.psn_user_id and PSN_USER_ID:

@@ -157,6 +157,12 @@ def deterministic_globals(monkeypatch):
     monkeypatch.setattr(pm, "DOTENV_FILE", "", raising=False)
     monkeypatch.setattr(pm, "DISABLE_LOGGING", True, raising=False)
     monkeypatch.setattr(pm, "CLEAR_SCREEN", False, raising=False)
+    # Colour is resolved once at startup and left in module state, so without a reset a test that enables it
+    # would colour the output every later test asserts on
+    monkeypatch.setattr(pm, "COLORED_OUTPUT", False, raising=False)
+    monkeypatch.setattr(pm, "COLOR_THEME", {}, raising=False)
+    monkeypatch.setattr(pm, "COLOR_ENABLED", False, raising=False)
+    monkeypatch.setattr(pm, "_COLOR_STYLES", {}, raising=False)
     # Startup assigns these directly rather than through a fixture, so without a reset a run with --debug or
     # --verbose would leave both modes on for every later test
     monkeypatch.setattr(pm, "VERBOSE_MODE", False, raising=False)

@@ -44,6 +44,7 @@ and again before anything is published to PyPI.
 | `test_repository_contracts.py` | Governance documents, issue templates, action pinning, release gating and the CI contract |
 | `test_repository_metadata.py` | Governance files, citation, funding, line endings, the declared editor style, the pinned linter and release integrity |
 | `test_startup_summary.py` | The startup summary rows, which view each one appears in, what the log file keeps and the welcome screen |
+| `test_terminal_color.py` | The colour theme, which part colours which token, where colour must never reach and how it is switched off |
 | `test_setup_wizard.py` | The guided setup: what it asks, what it writes, when it writes nothing and the welcome screen offer |
 | `test_secret_commands.py` | The one-shot secret commands, their validation before writing and the dotenv file they update |
 | `test_runtime_controls.py` | Signal-driven toggles, interval changes, secret reload and the log output filter |

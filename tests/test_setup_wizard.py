@@ -54,7 +54,7 @@ def happy_path(target=USER_ID, persist="", save="1", doctor="n", monitor_now="n"
         "y",                           # configure email
         "smtp.example.test", "587", "y", "monitor@example.test", "monitor@example.test", "alerts@example.test",
         "1",                           # the recommended notification preset
-        "y", "", "",                   # keep the log, no CSV, default status file
+        "y", "", "", "y",              # keep the log, no CSV, default status file, coloured output
         save, doctor, monitor_now,
     )
 

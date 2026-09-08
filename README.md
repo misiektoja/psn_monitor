@@ -31,6 +31,7 @@ pip install psn_monitor
 - **Saving all user activities** with timestamps to a **CSV file**
 - **Status persistence** - automatically saves last status to JSON file to resume monitoring after restart
 - **Smart session continuity** - handles short offline interruptions and preserves session statistics
+- **Coloured terminal output** with a configurable theme, switched off automatically when the output is redirected
 - **Flexible configuration** - support for config files, dotenv files, environment variables and command-line arguments
 - Possibility to **control the running copy** of the script via signals
 - **Functional, procedural Python** (minimal OOP)
@@ -62,6 +63,7 @@ pip install psn_monitor
    * [Error Messages and Recovery](#error-messages-and-recovery)
    * [Verbose and Debug Output](#verbose-and-debug-output)
    * [Signal Controls (macOS/Linux/Unix)](#signal-controls-macoslinuxunix)
+   * [Terminal Colours](#terminal-colours)
    * [Coloring Log Output with GRC](#coloring-log-output-with-grc)
 6. [Change Log](#change-log)
 7. [Contributing](#contributing)
@@ -73,7 +75,7 @@ pip install psn_monitor
 ## Requirements
 
 * Python 3.10 or higher
-* Libraries: [PSNAWP](https://codeberg.org/YoshikageKira/psnawp), `requests`, `python-dateutil`, `pytz`, `tzlocal`, `python-dotenv`, `wcwidth`
+* Libraries: [PSNAWP](https://codeberg.org/YoshikageKira/psnawp), `requests`, `python-dateutil`, `pytz`, `tzlocal`, `python-dotenv`, `wcwidth`, `colorama` (Windows only, optional)
 
 Tested on:
 
@@ -130,7 +132,7 @@ The quickest way to a working setup is the guided one:
 psn_monitor --setup
 ```
 
-It asks for the account to monitor, how often to check it, your [PSN npsso code](#psn-npsso-code) and whether to send email alerts, then writes a ready-to-run configuration. Nothing is written until you choose **Save settings**, and an existing configuration file is backed up first. Your npsso code is checked against PlayStation Network before it is saved, so you find out immediately if it was copied incompletely. At the end it offers to run the preflight checks and to start monitoring.
+It asks for the account to monitor, how often to check it, your [PSN npsso code](#psn-npsso-code), whether to send email alerts and where the output goes, then writes a ready-to-run configuration. Nothing is written until you choose **Save settings**, and an existing configuration file is backed up first. Your npsso code is checked against PlayStation Network before it is saved, so you find out immediately if it was copied incompletely. At the end it offers to run the preflight checks and to start monitoring.
 
 The wizard needs an interactive terminal. Without one, use `--generate-config` and edit the file by hand.
 
@@ -471,7 +473,7 @@ Monitoring mode prints the settings that are actually in effect before the first
 * More details:                 use --verbose or --debug
 ```
 
-`--verbose` or `--debug` replaces this with the complete list: the log file, the status file, the CSV file, the install method, which secrets came from the dotenv file and which from the environment, the resolved time zone, the liveness interval, the truncation width and the two flags themselves.
+`--verbose` or `--debug` replaces this with the complete list: the log file, the status file, the CSV file, the install method, which secrets came from the dotenv file and which from the environment, the resolved time zone, the liveness interval, the truncation width, whether colour is actually in use and the two flags themselves.
 
 The log file always receives the complete list, whichever view the terminal was shown, so a log attached to a bug report carries every effective setting.
 
@@ -553,6 +555,68 @@ pkill -USR1 -f "psn_monitor <psn_user_id>"
 ```
 
 As Windows supports limited number of signals, this functionality is available only on Linux/Unix/macOS.
+
+<a id="terminal-colours"></a>
+### Terminal Colours
+
+Terminal output is coloured by default. Colour switches itself off when the output is not an interactive
+terminal, when `TERM` is unset or `dumb`, when `NO_COLOR` is set and when the output is piped or redirected, so a
+log file or a piped run never contains escape sequences.
+
+Turn it off for one run:
+
+```sh
+psn_monitor <psn_user_id> --no-color
+```
+
+Turn it off permanently in the config file:
+
+```python
+COLORED_OUTPUT = False
+```
+
+On Windows, install [colorama](https://pypi.org/project/colorama/) for colours in the older Command Prompt.
+Windows Terminal needs nothing extra.
+
+Each part of the output has a logical name, and `COLOR_THEME` in the config file overrides only the names it
+lists. Combine attributes with spaces or `+`, for example `"bright_cyan bold"` or `"red underline"`. Valid
+colours are `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white` and their `bright_` variants,
+plus the `bold`, `dim`, `underline` and `blink` attributes. An empty string leaves that part uncoloured.
+
+```python
+COLOR_THEME = {
+    "game": "bright_magenta bold",
+    "duration": "cyan",
+}
+```
+
+| Theme key | Default | What it colours |
+| --- | --- | --- |
+| `header` | `bright_cyan` | Report and wizard headings, and the tool name in the startup line |
+| `section` | `bright_white` | Section names and every command the tool tells you to run |
+| `username` | `blue underline` | The monitored PlayStation ID, the detected install method and wizard menu numbers |
+| `user_uri_id` | `bright_magenta` | The numeric PSN account ID |
+| `status_active` | `green` | An online or available presence, and a game that just started |
+| `status_inactive` | `red` | A standby or unavailable presence, and a game that just stopped |
+| `status_offline` | `red` | An offline presence |
+| `status_other` | `white` | A presence value the tool does not recognise |
+| `game` | `bright_yellow` | Game titles |
+| `platform` | `bright_blue` | Console names and the platform tag beside a game |
+| `trophy` | `bright_green` | Trophy level, trophy counts, trophy types and trophy names |
+| `duration` | `green` | Time spans such as `3 hours, 21 minutes` |
+| `status_change` | `yellow` | The `changed status` and `changed game` part of a change report |
+| `timestamp_label` | *(empty)* | The `Timestamp:` label, left uncoloured by default |
+| `timestamp_value` | `cyan` | The timestamp itself |
+| `info` | `cyan` | `To fix:` lines, notes, prompts and default markers |
+| `warning` | `yellow` | `* Warning:` lines and `[WARN]` rows |
+| `error` | `red` | `* Error:` lines and `[FAIL]` rows |
+| `signal` | `yellow` | `* Signal ... received` lines |
+| `email` | `bright_cyan` | Lines reporting an email being sent |
+| `date` | `magenta` | Single dates and times |
+| `date_range` | `magenta` | Date and time ranges |
+| `boolean_true` | `green` | `True`, `Enabled`, `On` and `[PASS]` rows |
+| `boolean_false` | `red` | `False`, `Disabled` and `Off` |
+| `link` | `blue underline` | URLs |
 
 <a id="coloring-log-output-with-grc"></a>
 ### Coloring Log Output with GRC

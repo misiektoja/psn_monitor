@@ -549,3 +549,44 @@ def test_setup_accepts_a_config_path_that_does_not_exist_yet(pm_module, monkeypa
     assert run_main(pm_module, monkeypatch, ["--setup", "--config-file", "not-created-yet.conf"]) == 0
 
     assert "does not exist" not in capsys.readouterr().out
+
+
+@pytest.fixture
+# Makes the captured stream look like a colour-capable terminal so startup resolves colour on
+def color_capable_terminal(monkeypatch, pm_module):
+    monkeypatch.setattr(pm_module, "_stream_supports_color", lambda stream: True)
+    monkeypatch.setattr(pm_module, "COLORED_OUTPUT", True)
+
+
+# Verifies colour reaches the startup banner, which is printed before the arguments are parsed
+def test_the_startup_banner_is_coloured(pm_module, monkeypatch, monitor_calls, capsys, color_capable_terminal):
+    assert run_main(pm_module, monkeypatch, [USER_ID]) == 0
+
+    assert "\x1b[96mPSN Monitoring Tool\x1b[0m" in capsys.readouterr().out
+
+
+# Verifies a config file that switches colour off is read early enough to reach the banner. Without the early
+# peek the banner would already be coloured by the time the config file is loaded
+def test_a_config_that_disables_colour_is_read_before_the_banner(pm_module, monkeypatch, monitor_calls, capsys, color_capable_terminal, isolated_working_directory):
+    (isolated_working_directory / "psn_monitor_test_only.conf").write_text("CLEAR_SCREEN = False\nCOLORED_OUTPUT = False\n", encoding="utf-8")
+
+    assert run_main(pm_module, monkeypatch, [USER_ID]) == 0
+
+    assert "\x1b" not in capsys.readouterr().out
+    assert pm_module.COLOR_ENABLED is False
+
+
+# Verifies --no-color is honoured from the raw command line, so even the banner printed before argparse is plain
+def test_the_no_color_flag_reaches_the_banner(pm_module, monkeypatch, monitor_calls, capsys, color_capable_terminal):
+    assert run_main(pm_module, monkeypatch, ["--no-color", USER_ID]) == 0
+
+    assert "\x1b" not in capsys.readouterr().out
+    assert pm_module.COLOR_ENABLED is False
+
+
+# Verifies an abbreviated --no-color still switches colour off. The raw scan before argparse only matches the
+# full spelling, so this is the flag arriving through argparse instead
+def test_an_abbreviated_no_color_flag_still_disables_colour(pm_module, monkeypatch, monitor_calls, color_capable_terminal):
+    assert run_main(pm_module, monkeypatch, ["--no-col", USER_ID]) == 0
+
+    assert pm_module.COLOR_ENABLED is False
