@@ -247,7 +247,7 @@ def test_every_guide_link_points_at_a_real_section(pm_module):
 
 # Every place that reports a problem without the classifier, and the reason it cannot use one
 CLASSIFIER_EXEMPTIONS = {
-    "Python version 3.10 or higher required": "runs at import on an interpreter too old to load the rest of the file",
+    "or higher required": "runs at import on an interpreter too old to load the rest of the file",
     "Couldn't find the pytz library": "raised at import, while a dependency the classifier itself needs is missing",
     "Couldn't find the PSNAWP library": "raised at import, while a dependency the classifier itself needs is missing",
     "sanitize_error_text(message)": "the debug and verbose printers, whose content the redactor guard covers",

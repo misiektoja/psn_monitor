@@ -6,6 +6,7 @@ module and drive it with test doubles that stand in for the PlayStation Network.
 
 import os
 import sys
+from types import SimpleNamespace
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
@@ -106,6 +107,10 @@ class FakePSNAWP:
         self.npsso = npsso
         self.closed = False
         FakePSNAWP.instances.append(self)
+
+    # Returns the signed-in account, which is what the doctor reports after authenticating
+    def me(self):
+        return SimpleNamespace(online_id="signed-in-account")
 
     # Returns the fake user this class was primed with
     def user(self, online_id):

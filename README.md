@@ -57,6 +57,7 @@ pip install psn_monitor
    * [Email Notifications](#email-notifications)
    * [CSV Export](#csv-export)
    * [Check Intervals](#check-intervals)
+   * [Preflight Checks](#doctor-preflight)
    * [Error Messages and Recovery](#error-messages-and-recovery)
    * [Verbose and Debug Output](#verbose-and-debug-output)
    * [Signal Controls (macOS/Linux/Unix)](#signal-controls-macoslinuxunix)
@@ -409,6 +410,29 @@ psn_monitor <psn_user_id> -k 30 -c 120
 
 * `PSN_ACTIVE_CHECK_INTERVAL`, `-k`: check interval when the user is online (seconds)
 * `PSN_CHECK_INTERVAL`, `-c`: check interval when the user is offline (seconds)
+
+<a id="doctor-preflight"></a>
+### Preflight Checks
+
+`--doctor` checks a setup and prints one report instead of failing at the first problem:
+
+```sh
+psn_monitor <psn_user_id> --doctor
+```
+
+It writes no files, and it exits `1` if any check failed so you can run it from a script.
+
+Five sections are reported, each row marked `[PASS]`, `[WARN]`, `[FAIL]` or `[SKIP]`:
+
+* **Environment**: the Python version, the required libraries, the optional ones and what stops working without each, and how the tool was installed
+* **Configuration**: the configuration and dotenv files in use, which secrets are loaded and where each came from, the time zone, the check intervals and the files the tool would write
+* **Authentication**: whether PlayStation Network accepts your NPSSO code, and which account it signed in as
+* **Target**: whether the monitored PlayStation ID exists and shares its presence with your account
+* **Notifications**: whether email alerts can fire, and whether the SMTP settings they would use are valid
+
+Rows that are not a pass carry the same `To fix:` and `Guide:` lines described in [Error Messages and Recovery](#error-messages-and-recovery). Secrets are reported by name and never by value.
+
+If SMTP settings pass and you are on an interactive terminal, the doctor offers to send one real test email. It asks first and does nothing without a `y`.
 
 <a id="error-messages-and-recovery"></a>
 ### Error Messages and Recovery

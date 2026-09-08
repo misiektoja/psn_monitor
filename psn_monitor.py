@@ -227,10 +227,14 @@ PLATFORM_DISPLAY_NAMES = {
 }
 
 
+# Held in one place so the startup gate and the doctor Environment check can never disagree
+MINIMUM_PYTHON_VERSION = (3, 10)
+MINIMUM_PYTHON_VERSION_TEXT = ".".join(str(part) for part in MINIMUM_PYTHON_VERSION)
+
 import sys
 
-if sys.version_info < (3, 10):
-    print("* Error: Python version 3.10 or higher required !")
+if sys.version_info < MINIMUM_PYTHON_VERSION:
+    print(f"* Error: Python version {MINIMUM_PYTHON_VERSION_TEXT} or higher required !")
     sys.exit(1)
 
 import time
@@ -265,10 +269,11 @@ try:
     from psnawp_api import PSNAWP
 except ModuleNotFoundError:
     raise SystemExit("Error: Couldn't find the PSNAWP library !\n\nTo install it, run:\n    pip3 install PSNAWP\n\nOnce installed, re-run this tool. For more help, visit:\nhttps://github.com/isFakeAccount/psnawp")
+import importlib.util
 import shlex
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -834,6 +839,15 @@ def truncate_string_per_line(message, truncate_width, tabsize=8):
     return "\n".join(truncated_lines)
 
 
+# Returns the log file path for one monitored user, without creating anything
+def resolve_log_path(psn_user_id):
+    log_path = Path(os.path.expanduser(PSN_LOGFILE))
+    if log_path.suffix == "":
+        named = f"{log_path.name}_{psn_user_id}.log"
+        log_path = log_path.parent / named if log_path.parent != Path('.') else Path(named)
+    return log_path
+
+
 # Resolves the configured and command line truncation width, expanding the terminal-width sentinel
 def resolve_truncate_chars(cli_value, configured_value, logging_disabled):
     truncate_chars = configured_value if cli_value is None else cli_value
@@ -1078,32 +1092,40 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
         return '0 seconds'
 
 
-# Sends email notification
-def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
+# Returns advice for the first unusable SMTP server setting, or None when they are all present and valid
+def validate_smtp_settings():
     fqdn_re = re.compile(r'(?=^.{4,253}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}\.?$)')
     email_re = re.compile(r'[^@]+@[^@]+\.[^@]+')
+    reason = ""
 
     try:
         ipaddress.ip_address(str(SMTP_HOST))
     except ValueError:
         if not fqdn_re.search(str(SMTP_HOST)):
-            report_recovery_error(context="smtp.settings", detail="SMTP_HOST is not a valid IP address or hostname")
-            return 1
+            reason = "SMTP_HOST is not a valid IP address or hostname"
 
-    try:
-        port = int(SMTP_PORT)
-        if not (1 <= port <= 65535):
-            raise ValueError
-    except ValueError:
-        report_recovery_error(context="smtp.settings", detail="SMTP_PORT is not a port number between 1 and 65535")
-        return 1
+    if not reason:
+        try:
+            port = int(SMTP_PORT)
+            if not (1 <= port <= 65535):
+                raise ValueError
+        except ValueError:
+            reason = "SMTP_PORT is not a port number between 1 and 65535"
 
-    if not email_re.search(str(SENDER_EMAIL)) or not email_re.search(str(RECEIVER_EMAIL)):
-        report_recovery_error(context="smtp.settings", detail="SENDER_EMAIL or RECEIVER_EMAIL is not an email address")
-        return 1
+    if not reason and (not email_re.search(str(SENDER_EMAIL)) or not email_re.search(str(RECEIVER_EMAIL))):
+        reason = "SENDER_EMAIL or RECEIVER_EMAIL is not an email address"
 
-    if not SMTP_USER or not isinstance(SMTP_USER, str) or SMTP_USER == "your_smtp_user" or not SMTP_PASSWORD or not isinstance(SMTP_PASSWORD, str) or SMTP_PASSWORD == "your_smtp_password":
-        report_recovery_error(context="smtp.settings", detail="SMTP_USER or SMTP_PASSWORD is empty or still set to its placeholder")
+    if not reason and (not SMTP_USER or not isinstance(SMTP_USER, str) or SMTP_USER == "your_smtp_user" or not SMTP_PASSWORD or not isinstance(SMTP_PASSWORD, str) or SMTP_PASSWORD == "your_smtp_password"):
+        reason = "SMTP_USER or SMTP_PASSWORD is empty or still set to its placeholder"
+
+    return classify_recovery_error(context="smtp.settings", detail=reason) if reason else None
+
+
+# Sends email notification
+def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
+    settings_advice = validate_smtp_settings()
+    if settings_advice is not None:
+        print_recovery_advice(settings_advice)
         return 1
 
     if not subject or not isinstance(subject, str):
@@ -1527,7 +1549,7 @@ def describe_retired_settings(names, quoted_path):
 
 
 # Loads a config file as data and applies only recognized literal settings
-def load_config_file(config_path, namespace=None, report_errors=True):
+def load_config_file(config_path, namespace=None, report_errors=True, advice_out=None):
     selected_namespace = globals() if namespace is None else namespace
     retired_settings = []
     try:
@@ -1554,8 +1576,11 @@ def load_config_file(config_path, namespace=None, report_errors=True):
     except Exception as exc:
         detail = f"Config file '{config_path}' failed with {type(exc).__name__}: {exc}"
     debug_print(f"Config file '{config_path}' rejected: {detail}")
+    advice = classify_recovery_error(context="config.invalid", detail=detail)
+    if advice_out is not None:
+        advice_out.append(advice)
     if report_errors:
-        report_recovery_error(context="config.invalid", detail=detail)
+        print_recovery_advice(advice)
     return False
 
 
@@ -2686,6 +2711,362 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         time.sleep(sleep_interval)
 
 
+# Preflight diagnostics. Every section, marker and summary sentence is shared with the sibling monitors,
+# so a user who runs two of them reads one report format rather than two
+DOCTOR_GUIDE_URL = f"{GUIDE_BASE_URL}#doctor-preflight"
+
+DOCTOR_SECTIONS = ("Environment", "Configuration", "Authentication", "Target", "Notifications")
+
+DOCTOR_STATUSES = ("PASS", "WARN", "FAIL", "SKIP")
+
+# Imported without a guard, so the tool cannot start when one of these is missing
+DOCTOR_REQUIRED_DEPENDENCIES = (("psnawp_api", "PSNAWP"), ("requests", "requests"), ("dateutil", "python-dateutil"), ("pytz", "pytz"))
+
+# Guarded imports the tool degrades around, with what stops working and what to do instead
+DOCTOR_OPTIONAL_DEPENDENCIES = (
+    ("tzlocal", "tzlocal", "Used only to auto-detect the local time zone", "Automatic time zone detection is unavailable", "Or set LOCAL_TIMEZONE to a pytz timezone name in the config file"),
+    ("dotenv", "python-dotenv", "Used only to read secrets from a dotenv file", "Secrets cannot be read from a dotenv file", "Or export them as environment variables"),
+    ("wcwidth", "wcwidth", "Used only to measure display width for screen truncation", "Screen truncation is disabled", ""),
+)
+
+# An active check interval below this invites the PSN rate limiter, which stops the tool seeing anything
+DOCTOR_MIN_SAFE_ACTIVE_INTERVAL = 30
+
+
+# Stores one doctor result before the report is rendered
+@dataclass(frozen=True)
+class DoctorCheck:
+    section: str
+    status: str
+    label: str
+    detail: str = ""
+    advice: "RecoveryAdvice | None" = None
+
+
+# Collects doctor results plus the authenticated session the target checks reuse
+@dataclass
+class DoctorReport:
+    checks: list = field(default_factory=list)
+    psnawp: object = None
+    email_ready: bool = False
+
+
+# Creates one doctor result, refusing a marker outside the shared four and redacting every field it shows
+def make_doctor_check(section, status, label, detail="", advice=None):
+    if status not in DOCTOR_STATUSES:
+        raise ValueError(f"Unsupported doctor status: {status}")
+    return DoctorCheck(section, status, sanitize_error_text(label), sanitize_error_text(detail), advice)
+
+
+# Reports whether one module could be imported, without importing it
+def dependency_is_installed(module_name, spec_finder=None):
+    finder = importlib.util.find_spec if spec_finder is None else spec_finder
+    try:
+        return finder(module_name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+# Reports whether a path could be written, without creating anything, so the doctor leaves no files behind
+def path_is_writable(path):
+    target = Path(os.path.expanduser(str(path)))
+    if target.exists():
+        return os.access(target, os.W_OK)
+    parent = target.parent if str(target.parent) else Path(".")
+    return parent.is_dir() and os.access(parent, os.W_OK)
+
+
+# Checks the interpreter, the dependencies the tool needs and the ones it degrades around
+def doctor_check_environment(version_info=None, spec_finder=None):
+    checks = []
+    selected = tuple(sys.version_info if version_info is None else version_info)
+    version_text = ".".join(str(part) for part in selected[:3])
+    if selected[:2] >= MINIMUM_PYTHON_VERSION:
+        checks.append(make_doctor_check("Environment", "PASS", f"Python {version_text} is supported"))
+    else:
+        advice = make_recovery_advice("dependency.missing", f"Python {version_text} is unsupported", recovery_fix_with_guide(f"Install Python {MINIMUM_PYTHON_VERSION_TEXT} or newer then retry", INSTALLATION_GUIDE_URL), False)
+        checks.append(make_doctor_check("Environment", "FAIL", advice.summary, advice=advice))
+
+    for module_name, package_name in DOCTOR_REQUIRED_DEPENDENCIES:
+        if dependency_is_installed(module_name, spec_finder):
+            checks.append(make_doctor_check("Environment", "PASS", f"Required dependency {package_name} is installed"))
+        else:
+            advice = make_recovery_advice("dependency.missing", f"Required dependency {package_name} is missing", recovery_fix_with_guide(f"Install it with: {pip_install_command(package_name)}", INSTALLATION_GUIDE_URL), False)
+            checks.append(make_doctor_check("Environment", "FAIL", advice.summary, advice=advice))
+
+    for module_name, package_name, purpose, effect, alternative in DOCTOR_OPTIONAL_DEPENDENCIES:
+        if dependency_is_installed(module_name, spec_finder):
+            checks.append(make_doctor_check("Environment", "PASS", f"Optional dependency {package_name} is installed", purpose))
+        else:
+            advice = missing_dependency_advice(package_name, effect, alternative)
+            checks.append(make_doctor_check("Environment", "WARN", f"Optional dependency {package_name} is not installed", f"{effect}. Monitoring is unaffected", advice))
+
+    # Stated as the raw key, because setup guidance and support reports use these values as identifiers
+    checks.append(make_doctor_check("Environment", "PASS", f"Install method: {detect_install_method()}", f"Commands in this report are written for a {install_method_display_name()}"))
+    return checks
+
+
+# Groups the secrets that are actually set by the source each value was resolved from
+def doctor_secret_sources():
+    grouped = {}
+    for key in SECRET_KEYS:
+        if secret_is_set(globals().get(key)):
+            grouped.setdefault(SECRET_SOURCES.get(key, "configuration file"), []).append(key)
+    return grouped
+
+
+# Reports which secrets are in effect and where each one came from, by name and never by value
+def doctor_secret_checks():
+    grouped = doctor_secret_sources()
+    if not grouped:
+        return [make_doctor_check("Configuration", "PASS", "No secrets loaded", "Nothing was read from a dotenv file, the environment, the configuration file or the command line")]
+    return [make_doctor_check("Configuration", "PASS", f"Secrets loaded from the {source}", ", ".join(names)) for source, names in sorted(grouped.items())]
+
+
+# Reports the effective settings and the files the tool would write, without writing any of them
+def doctor_check_configuration(config_path=None, env_path=None, config_advice=None, timezone_advice=None, psn_user_id=None):
+    checks = []
+    if config_advice is not None:
+        checks.append(make_doctor_check("Configuration", "FAIL", config_advice.summary, advice=config_advice))
+    elif config_path:
+        checks.append(make_doctor_check("Configuration", "PASS", "Configuration file loaded", f"Path: {config_path}"))
+    else:
+        checks.append(make_doctor_check("Configuration", "PASS", "No configuration file selected", "Using built-in defaults and command-line overrides"))
+
+    if env_path:
+        checks.append(make_doctor_check("Configuration", "PASS", "Dotenv file loaded", f"Path: {env_path}"))
+    else:
+        checks.append(make_doctor_check("Configuration", "PASS", "No dotenv file selected", "Using environment variables and other configured sources"))
+
+    checks.extend(doctor_secret_checks())
+
+    if timezone_advice is not None:
+        checks.append(make_doctor_check("Configuration", "FAIL", timezone_advice.summary, advice=timezone_advice))
+    else:
+        checks.append(make_doctor_check("Configuration", "PASS", f"Time zone is {LOCAL_TIMEZONE}"))
+
+    intervals = f"{display_time(PSN_CHECK_INTERVAL)} while offline, {display_time(PSN_ACTIVE_CHECK_INTERVAL)} while online"
+    if PSN_ACTIVE_CHECK_INTERVAL < DOCTOR_MIN_SAFE_ACTIVE_INTERVAL:
+        advice = make_recovery_advice("psn.rate_limited", "Check intervals are short enough to be rate limited", recovery_fix_with_guide(f"Raise PSN_ACTIVE_CHECK_INTERVAL to at least {DOCTOR_MIN_SAFE_ACTIVE_INTERVAL} seconds", INTERVALS_GUIDE_URL), True)
+        checks.append(make_doctor_check("Configuration", "WARN", "Check intervals are short", intervals, advice))
+    else:
+        checks.append(make_doctor_check("Configuration", "PASS", "Check intervals are set", intervals))
+
+    try:
+        checks.append(make_doctor_check("Configuration", "PASS", f"ASCII log separators are {'on' if ascii_log_separators_enabled() else 'off'}", f"Mode: {ASCII_LOG_SEPARATORS}"))
+    except ValueError as exc:
+        advice = classify_recovery_error(context="config.invalid", detail=str(exc))
+        checks.append(make_doctor_check("Configuration", "FAIL", advice.summary, advice=advice))
+
+    if CSV_FILE:
+        csv_path = os.path.expanduser(CSV_FILE)
+        if path_is_writable(csv_path):
+            checks.append(make_doctor_check("Configuration", "PASS", "CSV history file is writable", f"Path: {csv_path}"))
+        else:
+            advice = classify_recovery_error(context="file.unwritable", detail=f"CSV file '{csv_path}' cannot be written")
+            checks.append(make_doctor_check("Configuration", "FAIL", advice.summary, advice=advice))
+    else:
+        checks.append(make_doctor_check("Configuration", "PASS", "CSV history is disabled", "Set CSV_FILE or use -b to record every reported change"))
+
+    if DISABLE_LOGGING:
+        checks.append(make_doctor_check("Configuration", "PASS", "Output logging is disabled", "Nothing is written to a log file"))
+    else:
+        log_path = resolve_log_path(psn_user_id or "<psn_user_id>")
+        if path_is_writable(log_path):
+            checks.append(make_doctor_check("Configuration", "PASS", "Log file is writable", f"Path: {log_path}"))
+        else:
+            advice = classify_recovery_error(context="file.unwritable", detail=f"Log file '{log_path}' cannot be written")
+            checks.append(make_doctor_check("Configuration", "FAIL", advice.summary, advice=advice))
+    return checks
+
+
+# Authenticates once and keeps the session, so the target checks do not sign in a second time
+def doctor_check_authentication(report):
+    if not secret_is_set(PSN_NPSSO):
+        advice = classify_recovery_error(context="secret.missing", detail="PSN_NPSSO is not set")
+        return [make_doctor_check("Authentication", "FAIL", advice.summary, advice=advice)]
+    try:
+        psnawp = PSNAWP(PSN_NPSSO)
+        signed_in = psnawp.me().online_id
+    except Exception as exc:
+        advice = classify_recovery_error(exc, context="startup", probe_auth=True)
+        return [make_doctor_check("Authentication", "FAIL", advice.summary, advice=advice)]
+    report.psnawp = psnawp
+    return [make_doctor_check("Authentication", "PASS", "PlayStation Network accepted the NPSSO code", f"Signed in as {signed_in}")]
+
+
+# Checks the monitored profile can be found and that it shares the activity the tool reads
+def doctor_check_target(report, psn_user_id=None):
+    if not psn_user_id:
+        advice = classify_recovery_error(context="target.missing", detail="No PlayStation ID was given")
+        return [make_doctor_check("Target", "FAIL", advice.summary, advice=advice)]
+    if report.psnawp is None:
+        # Authentication already failed and reported why. A second row would repeat one problem as two
+        return []
+    try:
+        psn_user = report.psnawp.user(online_id=psn_user_id)
+        account_id = psn_user.account_id
+    except Exception as exc:
+        advice = classify_recovery_error(exc, context="startup")
+        return [make_doctor_check("Target", "FAIL", advice.summary, advice=advice)]
+    checks = [make_doctor_check("Target", "PASS", f"PlayStation ID {psn_user_id} was found", f"Account ID: {account_id}")]
+    try:
+        parsed = parse_presence(psn_user.get_presence())
+    except Exception as exc:
+        advice = classify_recovery_error(exc, context="startup")
+        checks.append(make_doctor_check("Target", "FAIL", advice.summary, advice=advice))
+        return checks
+    checks.append(make_doctor_check("Target", "PASS", "Presence is visible to this account", f"Current status: {str(parsed['status'] or 'unknown').lower()}"))
+    return checks
+
+
+# Reports whether email alerts can fire at all, then whether the settings they would use are usable
+def doctor_check_notifications(report):
+    settings_advice = validate_smtp_settings()
+    # An error alert is on by default, so on its own it cannot make a fresh install look configured
+    deliberate = ACTIVE_INACTIVE_NOTIFICATION or GAME_CHANGE_NOTIFICATION
+    if not deliberate and not (ERROR_NOTIFICATION and settings_advice is None):
+        return [make_doctor_check("Notifications", "PASS", "Email alerts are disabled", "Use -a, -g or SMTP settings with ERROR_NOTIFICATION to turn them on")]
+    if settings_advice is not None:
+        return [make_doctor_check("Notifications", "WARN", "Email alerts are on but cannot be delivered", settings_advice.summary, settings_advice)]
+    alerts = ", ".join(name for name, enabled in (("status changes", ACTIVE_INACTIVE_NOTIFICATION), ("game changes", GAME_CHANGE_NOTIFICATION), ("errors", ERROR_NOTIFICATION)) if enabled)
+    report.email_ready = True
+    return [make_doctor_check("Notifications", "PASS", "SMTP settings and alert choices look valid", f"{SMTP_HOST}:{SMTP_PORT} to {RECEIVER_EMAIL}, alerts: {alerts}")]
+
+
+# Returns the raw terminal stream, so the transient progress line is not captured by the log writer
+def doctor_terminal_stream():
+    stream = sys.stdout
+    while isinstance(stream, (Logger, TerminalStream)):
+        stream = stream.terminal
+    return stream
+
+
+# Width of the progress line currently on screen, which is what erasing it needs to know
+DOCTOR_PROGRESS_WIDTH = 0
+
+
+# Shows one transient step only on an interactive terminal, erased by overwriting its own width
+def doctor_progress(label):
+    global DOCTOR_PROGRESS_WIDTH
+    terminal = doctor_terminal_stream()
+    if terminal.isatty():
+        doctor_progress_clear()
+        line = f"* Checking {sanitize_terminal_text(label)} ..."
+        DOCTOR_PROGRESS_WIDTH = len(line)
+        terminal.write("\r" + line)
+        terminal.flush()
+
+
+# Clears the transient progress line, so nothing of it survives into the report
+def doctor_progress_clear():
+    global DOCTOR_PROGRESS_WIDTH
+    terminal = doctor_terminal_stream()
+    if terminal.isatty() and DOCTOR_PROGRESS_WIDTH:
+        terminal.write("\r" + (" " * DOCTOR_PROGRESS_WIDTH) + "\r")
+        terminal.flush()
+        DOCTOR_PROGRESS_WIDTH = 0
+
+
+# Runs every section in order, reporting each step while it is still running
+def build_doctor_report(psn_user_id=None, config_path=None, env_path=None, config_advice=None, timezone_advice=None, progress=None):
+    report = DoctorReport()
+    steps = (
+        ("environment", lambda: doctor_check_environment()),
+        ("configuration", lambda: doctor_check_configuration(config_path, env_path, config_advice, timezone_advice, psn_user_id)),
+        ("authentication", lambda: doctor_check_authentication(report)),
+        ("target", lambda: doctor_check_target(report, psn_user_id)),
+        ("notifications", lambda: doctor_check_notifications(report)),
+    )
+    for label, run_step in steps:
+        if progress is not None:
+            progress(label)
+        report.checks.extend(run_step())
+    return report
+
+
+# Prints the notice that has to be true before anything runs
+def render_doctor_notice():
+    print("Running preflight checks. No files will be written. Interactive email tests run only after separate approval.\n")
+
+
+# Renders the heading and every non-empty section, with a fix line on the rows that are not a pass
+def render_doctor_sections(report):
+    lines = ["Doctor"]
+    for section in DOCTOR_SECTIONS:
+        section_checks = [check for check in report.checks if check.section == section]
+        if not section_checks:
+            continue
+        lines.extend(("", section))
+        for check in section_checks:
+            lines.append(f"[{check.status}] {check.label}")
+            if check.detail:
+                lines.append(f"  {check.detail}")
+            if check.advice is not None and check.status in ("FAIL", "WARN"):
+                lines.append(f"To fix: {check.advice.fix}")
+    return sanitize_error_text("\n".join(lines))
+
+
+# Renders the one sentence that says whether the setup is usable, and where to read more
+def render_doctor_summary(checks):
+    failures = sum(check.status == "FAIL" for check in checks)
+    warnings = sum(check.status == "WARN" for check in checks)
+    if failures:
+        sentence = f"  {failures} check(s) failed, {warnings} warning(s). Fix the failures above before relying on the tool."
+    elif warnings:
+        sentence = f"  All critical checks passed with {warnings} warning(s). Review the warnings above."
+    else:
+        sentence = "  All checks passed. You are good to go!"
+    return "\n".join(("", "Summary", sentence, "", f"Guide: {DOCTOR_GUIDE_URL}"))
+
+
+# Asks one yes or no question, treating a closed or interrupted input as no
+def ask_yes_no(question, default=False):
+    hint = "[Y/n]" if default else "[y/N]"
+    while True:
+        try:
+            answer = input(f"{question} {hint}: ").strip().casefold()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return False
+        if not answer:
+            return default
+        if answer in ("y", "yes"):
+            return True
+        if answer in ("n", "no"):
+            return False
+        print("  Please answer 'y' or 'n'.")
+
+
+# Offers the one delivery test this tool has, and only for a channel that already passed
+def offer_doctor_delivery_tests(report):
+    if not report.email_ready or not sys.stdin.isatty() or not sys.stdout.isatty():
+        return []
+    print("\nOptional delivery tests\n")
+    print("Doctor will not write files. Each approved test sends one real message.\n")
+    if not ask_yes_no("Send one test email now? This will deliver a real message"):
+        print("[SKIP] Test email was not sent")
+        return [make_doctor_check("Notifications", "SKIP", "Test email was not sent")]
+    delivered = send_email("psn_monitor: doctor test email", "This test email was sent after approval in --doctor. Your SMTP delivery settings work.", "", SMTP_SSL, smtp_timeout=5) == 0
+    check = make_doctor_check("Notifications", "PASS" if delivered else "FAIL", "Doctor test email delivered" if delivered else "Doctor test email delivery failed", "One real test email was sent after confirmation" if delivered else "The approved test email could not be delivered")
+    print(f"[{check.status}] {check.label}")
+    return [check]
+
+
+# Runs the preflight report plus any approved delivery test and returns the process exit code
+def run_doctor(psn_user_id=None, config_path=None, env_path=None, config_advice=None, timezone_advice=None):
+    render_doctor_notice()
+    progress = doctor_progress if doctor_terminal_stream().isatty() else None
+    try:
+        report = build_doctor_report(psn_user_id, config_path, env_path, config_advice, timezone_advice, progress)
+    finally:
+        doctor_progress_clear()
+    print(render_doctor_sections(report))
+    delivery_checks = offer_doctor_delivery_tests(report)
+    print(render_doctor_summary([*report.checks, *delivery_checks]))
+    return 1 if any(check.status == "FAIL" for check in (*report.checks, *delivery_checks)) else 0
+
+
 def main():
     global CLI_CONFIG_PATH, DOTENV_FILE, LOCAL_TIMEZONE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, stdout_bck
 
@@ -2868,6 +3249,12 @@ def main():
         help="Max characters per screen line (not log), use 999 to auto-detect terminal width, ignored if -d is set"
     )
     opts.add_argument(
+        "--doctor",
+        dest="doctor",
+        action="store_true",
+        help="Run preflight checks on this setup and exit"
+    )
+    opts.add_argument(
         "--verbose",
         dest="verbose_mode",
         action="store_true",
@@ -2896,13 +3283,24 @@ def main():
 
     cfg_path = find_config_file(CLI_CONFIG_PATH)
 
+    # Doctor reports a broken setup instead of exiting on the first thing it finds, so the whole report is usable
+    doctor_mode = bool(args.doctor)
+    config_advice = None
+    timezone_advice = None
+
     if not cfg_path and CLI_CONFIG_PATH:
-        report_recovery_error(context="config.missing", detail=f"Config file '{CLI_CONFIG_PATH}' does not exist")
-        sys.exit(1)
+        config_advice = classify_recovery_error(context="config.missing", detail=f"Config file '{CLI_CONFIG_PATH}' does not exist")
+        if not doctor_mode:
+            print_recovery_advice(config_advice)
+            sys.exit(1)
 
     if cfg_path:
-        if not load_config_file(cfg_path):
-            sys.exit(1)
+        reported_advice = []
+        if not load_config_file(cfg_path, report_errors=not doctor_mode, advice_out=reported_advice):
+            if not doctor_mode:
+                sys.exit(1)
+            config_advice = reported_advice[0]
+            cfg_path = None
 
     # Applied again, so a saved VERBOSE_MODE or DEBUG_MODE cannot switch off a flag the user just typed
     apply_diagnostic_cli_overrides(args)
@@ -2968,14 +3366,21 @@ def main():
         if local_tz:
             LOCAL_TIMEZONE = str(local_tz)
         else:
-            print_recovery_advice(missing_dependency_advice("tzlocal", "The local timezone could not be detected", f"Or set LOCAL_TIMEZONE to a pytz timezone name such as 'Europe/Warsaw'. See {TIMEZONE_GUIDE_URL}"))
+            timezone_advice = missing_dependency_advice("tzlocal", "The local timezone could not be detected", f"Or set LOCAL_TIMEZONE to a pytz timezone name such as 'Europe/Warsaw'. See {TIMEZONE_GUIDE_URL}")
+    elif not is_valid_timezone(LOCAL_TIMEZONE):
+        timezone_advice = classify_recovery_error(context="config.invalid", detail=f"Configured LOCAL_TIMEZONE '{LOCAL_TIMEZONE}' is not valid")
+
+    if timezone_advice is not None:
+        if not doctor_mode:
+            print_recovery_advice(timezone_advice)
             sys.exit(1)
-    else:
-        if not is_valid_timezone(LOCAL_TIMEZONE):
-            report_recovery_error(context="config.invalid", detail=f"Configured LOCAL_TIMEZONE '{LOCAL_TIMEZONE}' is not valid")
-            sys.exit(1)
+        # The report still stamps timestamps, so it falls back rather than stopping before the diagnosis
+        LOCAL_TIMEZONE = "UTC"
 
     verbose_print(f"Local timezone resolved to {LOCAL_TIMEZONE}")
+
+    if doctor_mode:
+        sys.exit(run_doctor(args.psn_user_id, cfg_path, env_path, config_advice, timezone_advice))
 
     if not check_internet():
         sys.exit(1)
@@ -3040,13 +3445,7 @@ def main():
     TRUNCATE_CHARS = resolve_truncate_chars(args.truncate, TRUNCATE_CHARS, DISABLE_LOGGING)
 
     if not DISABLE_LOGGING:
-        log_path = Path(os.path.expanduser(PSN_LOGFILE))
-        if log_path.parent != Path('.'):
-            if log_path.suffix == "":
-                log_path = log_path.parent / f"{log_path.name}_{args.psn_user_id}.log"
-        else:
-            if log_path.suffix == "":
-                log_path = Path(f"{log_path.name}_{args.psn_user_id}.log")
+        log_path = resolve_log_path(args.psn_user_id)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         FINAL_LOG_PATH = str(log_path)
         sys.stdout = Logger(FINAL_LOG_PATH)
