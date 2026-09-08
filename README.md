@@ -28,6 +28,7 @@ pip install psn_monitor
 - **Basic statistics for user activity** (duration in different states, time spent playing a game, overall time and number of games played in a session etc.)
 - **Detailed user information** display mode providing comprehensive PlayStation profile insights, including **PlayStation/PSN IDs**, **online status** and **availability to play**, **platform information**, **PS+ subscription status**, **verification status**, **about me section**, **languages**, **friendship relation** and **mutual friends count**, **profile URL**, **recently played games** with **last played date** and **total play time**, and optionally **trophy summary** and **last earned trophies**
 - **Email notifications** for various events (player gets online/offline, starts/finishes/changes a game, errors)
+- **Webhook notifications** delivered to **Discord** or **ntfy**, switched on per event independently of email
 - **Saving all user activities** with timestamps to a **CSV file**
 - **Status persistence** - automatically saves last status to JSON file to resume monitoring after restart
 - **Smart session continuity** - handles short offline interruptions and preserves session statistics
@@ -56,6 +57,7 @@ pip install psn_monitor
    * [User Information Display Mode](#user-information-display-mode)
    * [Monitoring Mode](#monitoring-mode)
    * [Email Notifications](#email-notifications)
+   * [Webhook Notifications](#webhook-notifications)
    * [CSV Export](#csv-export)
    * [Check Intervals](#check-intervals)
    * [Startup Summary](#startup-summary)
@@ -255,16 +257,17 @@ psn_monitor --send-test-email
 <a id="storing-secrets"></a>
 ### Storing Secrets
 
-It is recommended to store secrets like `PSN_NPSSO` or `SMTP_PASSWORD` as either an environment variable or in a dotenv file.
+It is recommended to store secrets like `PSN_NPSSO`, `SMTP_PASSWORD`, `WEBHOOK_URL` or `NTFY_ACCESS_TOKEN` as either an environment variable or in a dotenv file.
 
 The tool can write them for you, so a secret never appears in your shell history or in `ps` output:
 
 ```sh
 psn_monitor --set-npsso
 psn_monitor --set-smtp-password
+psn_monitor --set-webhook-url
 ```
 
-Both ask for the value with the input hidden, check it against the live service before saving anything, then write it to your dotenv file with permissions that allow only you to read it. `--set-npsso` signs in to PlayStation Network and reports which account the code belongs to. `--set-smtp-password` signs in to your mail server without sending anything. If the check fails, nothing is written, so a working setup is never replaced by a broken one. Replacing a value that is already saved is confirmed first, and an existing `export PSN_NPSSO=...` line is rewritten in place rather than having a second assignment appended below it. Both commands need an interactive terminal.
+Each asks for the value with the input hidden, checks it before saving anything, then writes it to your dotenv file with permissions that allow only you to read it. `--set-npsso` signs in to PlayStation Network and reports which account the code belongs to. `--set-smtp-password` signs in to your mail server without sending anything. `--set-webhook-url` checks the URL shape without contacting the service, because the only confirmation Discord or ntfy can give is a delivered notification. If the check fails, nothing is written, so a working setup is never replaced by a broken one. Replacing a value that is already saved is confirmed first, and an existing `export PSN_NPSSO=...` line is rewritten in place rather than having a second assignment appended below it. All three need an interactive terminal.
 
 Use `--env-file` to choose which file they write to.
 
@@ -273,6 +276,8 @@ Set environment variables using `export` on **Linux/Unix/macOS/WSL** systems:
 ```sh
 export PSN_NPSSO="your_psn_npsso_code"
 export SMTP_PASSWORD="your_smtp_password"
+export WEBHOOK_URL="your_webhook_url"
+export NTFY_ACCESS_TOKEN="your_ntfy_access_token"
 ```
 
 On **Windows Command Prompt** use `set` instead of `export` and on **Windows PowerShell** use `$env`.
@@ -282,6 +287,8 @@ Alternatively store them persistently in a dotenv file (recommended):
 ```ini
 PSN_NPSSO="your_psn_npsso_code"
 SMTP_PASSWORD="your_smtp_password"
+WEBHOOK_URL="your_webhook_url"
+NTFY_ACCESS_TOKEN="your_ntfy_access_token"
 ```
 
 By default the tool will auto-search for dotenv file named `.env` in current directory and then upward from it.
@@ -436,6 +443,76 @@ Example email:
    <img src="https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/assets/psn_monitor_email_notifications.png" alt="psn_monitor_email_notifications" width="80%"/>
 </p>
 
+<a id="webhook-notifications"></a>
+### Webhook Notifications
+
+Alerts can also be delivered to a **Discord** channel or an **ntfy** topic. The webhook channel is configured and
+switched on separately from email, so you can send game changes to Discord while email stays off, or use both.
+
+Save the destination privately, which never puts it in your shell history:
+
+```sh
+psn_monitor --set-webhook-url
+```
+
+For Discord this is the URL from Edit Channel -> Integrations -> Webhooks -> New Webhook -> Copy Webhook URL. For
+ntfy it is the complete topic URL, such as `https://ntfy.sh/your-private-topic`, or just the topic name when it is
+hosted on ntfy.sh. The service is detected from the URL, so `WEBHOOK_PROVIDER` only needs setting for a self-hosted
+ntfy server.
+
+Then switch the channel on and choose which events it sends:
+
+```python
+WEBHOOK_ENABLED = True
+WEBHOOK_PROVIDER = "discord"                    # or "ntfy"
+WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION = True     # user gets online or offline
+WEBHOOK_GAME_CHANGE_NOTIFICATION = True         # game starts, changes or stops
+WEBHOOK_ERROR_NOTIFICATION = True               # monitoring errors, enabled by default
+```
+
+The same settings have command-line equivalents for one run. Naming any single alert also switches the channel on:
+
+```sh
+psn_monitor <psn_user_id> --webhook-game-change
+psn_monitor <psn_user_id> --webhook --no-webhook-error-notify
+psn_monitor <psn_user_id> --webhook-url <url>
+```
+
+`--webhook-url` leaves the private URL in your shell history, so prefer `--set-webhook-url` for anything permanent.
+
+Verify the destination without starting monitoring:
+
+```sh
+psn_monitor --send-test-webhook
+```
+
+Discord alerts are sent as an embed built from `WEBHOOK_TEMPLATE`, which supports the `title`, `description`,
+`version`, `color`, `timestamp`, `username` and `avatar_url` placeholders. Mentions are always disabled, whatever
+the template says. `WEBHOOK_USERNAME` and `WEBHOOK_AVATAR_URL` override the webhook's own display name and picture,
+and both are ignored by ntfy.
+
+ntfy alerts are sent as a native message with the subject as the title, so no template is involved. Use
+`WEBHOOK_HEADERS` to add ntfy options such as priority or tags, and `NTFY_ACCESS_TOKEN` when the topic needs
+authentication:
+
+```python
+WEBHOOK_HEADERS = {"Priority": "5", "Tags": "video_game"}
+```
+
+`WEBHOOK_TRANSFORMS` applies string methods to the values before they are sent, for example to strip Markdown from
+the body:
+
+```python
+WEBHOOK_TRANSFORMS = [
+    ("title", "upper"),
+    ("description", "replace", "**", ""),
+]
+```
+
+A failed delivery is retried once, a rate limit waits the delay the service asked for and redirects are never
+followed. When both channels are enabled, each is delivered independently: an alert that reached Discord is not
+sent again just because the email failed.
+
 <a id="csv-export"></a>
 ### CSV Export
 
@@ -467,6 +544,7 @@ Monitoring mode prints the settings that are actually in effect before the first
 ```
 * Polling intervals:            [offline: 3 minutes] [online: 1 minute]
 * Notifications (email):        On (status changes, game changes, errors)
+* Notifications (webhook):      On (status changes, errors) through Discord
 * Output:                       psn_monitor_misiektoja.log
 * Config:                       psn_monitor.conf
 * Dotenv:                       .env
@@ -529,7 +607,7 @@ psn_monitor <psn_user_id> --verbose --debug
 * `VERBOSE_MODE`, `--verbose`: rare operational events, such as which configuration and dotenv files are in use, the resolved time zone, whether an email was actually delivered and when a run recovers after a series of failed checks
 * `DEBUG_MODE`, `--debug`: technical diagnostics, such as every PSN API call, the classification and text of each failure, how long the tool will wait before the next check and why, every read and write of the status and CSV files and where each secret was resolved from
 
-Debug lines are prefixed with `[DEBUG HH:MM:SS]`. Both modes redact your NPSSO code and SMTP password, and report a secret by name and source rather than by value. The NPSSO code also reports its length, because a code truncated while copying is the usual reason it stops working. Your SMTP password reports only that it is set.
+Debug lines are prefixed with `[DEBUG HH:MM:SS]`. Both modes redact every secret, including your NPSSO code, SMTP password, webhook URL and ntfy access token, and report a secret by name and source rather than by value. The NPSSO code also reports its length, because a code truncated while copying is the usual reason it stops working. Your SMTP password reports only that it is set.
 
 Both flags take effect before the configuration file is read, so they still work when the problem you are chasing is the configuration file itself. A flag you type always wins over `VERBOSE_MODE` or `DEBUG_MODE` in the configuration file.
 
@@ -612,6 +690,7 @@ COLOR_THEME = {
 | `error` | `red` | `* Error:` lines and `[FAIL]` rows |
 | `signal` | `yellow` | `* Signal ... received` lines |
 | `email` | `bright_cyan` | Lines reporting an email being sent |
+| `webhook` | `magenta` | Lines reporting a webhook being sent |
 | `date` | `magenta` | Single dates and times |
 | `date_range` | `magenta` | Date and time ranges |
 | `boolean_true` | `green` | `True`, `Enabled`, `On` and `[PASS]` rows |

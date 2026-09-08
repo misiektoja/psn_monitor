@@ -4,6 +4,7 @@ import pytest
 
 
 USER_ID = "misiektoja"
+WEBHOOK_URL = "https://discord.com/api/webhooks/123456789/aVeryLongWebhookTokenValue"
 
 
 @pytest.fixture(autouse=True)
@@ -590,3 +591,88 @@ def test_an_abbreviated_no_color_flag_still_disables_colour(pm_module, monkeypat
     assert run_main(pm_module, monkeypatch, ["--no-col", USER_ID]) == 0
 
     assert pm_module.COLOR_ENABLED is False
+
+
+# Verifies naming a destination on the command line switches the channel on for that run
+def test_a_webhook_url_on_the_command_line_enables_the_channel(pm_module, monkeypatch, monitor_calls):
+    assert run_main(pm_module, monkeypatch, [USER_ID, "--webhook-url", WEBHOOK_URL]) == 0
+
+    assert pm_module.WEBHOOK_ENABLED is True
+    assert pm_module.WEBHOOK_URL == WEBHOOK_URL
+    assert pm_module.SECRET_SOURCES["WEBHOOK_URL"] == "command line"
+
+
+# Verifies a destination that is not a complete HTTPS link is refused before monitoring starts
+def test_an_unusable_webhook_url_is_refused(pm_module, monkeypatch, capsys):
+    assert run_main(pm_module, monkeypatch, [USER_ID, "--webhook-url", "http://discord.com/api/webhooks/1/token"]) == 2
+
+    assert "--webhook-url" in capsys.readouterr().err
+
+
+# Verifies naming one alert is enough to switch the channel on with it
+def test_naming_one_alert_enables_the_channel(pm_module, monkeypatch, monitor_calls):
+    assert run_main(pm_module, monkeypatch, [USER_ID, "--webhook-url", WEBHOOK_URL, "--webhook-game-change"]) == 0
+
+    assert pm_module.WEBHOOK_GAME_CHANGE_NOTIFICATION is True
+    assert pm_module.WEBHOOK_ENABLED is True
+
+
+# Verifies the explicit switch wins over the destination that would otherwise enable the channel
+def test_the_off_switch_wins_over_a_supplied_destination(pm_module, monkeypatch, monitor_calls):
+    assert run_main(pm_module, monkeypatch, [USER_ID, "--webhook-url", WEBHOOK_URL, "--no-webhook"]) == 0
+
+    assert pm_module.WEBHOOK_ENABLED is False
+
+
+# Verifies the error alert can be switched off on its own without disabling the channel
+def test_the_webhook_error_alert_can_be_switched_off(pm_module, monkeypatch, monitor_calls):
+    assert run_main(pm_module, monkeypatch, [USER_ID, "--webhook-url", WEBHOOK_URL, "--no-webhook-error-notify"]) == 0
+
+    assert pm_module.WEBHOOK_ERROR_NOTIFICATION is False
+    assert pm_module.WEBHOOK_ENABLED is True
+
+
+# Verifies a recognised URL corrects a provider the settings got wrong, and says so once
+def test_a_recognised_url_corrects_the_configured_provider(pm_module, monkeypatch, monitor_calls, capsys):
+    monkeypatch.setattr(pm_module, "WEBHOOK_PROVIDER", "ntfy")
+
+    assert run_main(pm_module, monkeypatch, [USER_ID, "--webhook-url", WEBHOOK_URL]) == 0
+
+    assert pm_module.WEBHOOK_PROVIDER == "discord"
+    assert "does not match the destination URL" in capsys.readouterr().out
+
+
+# Verifies an explicitly chosen provider is left alone, even when the URL points somewhere else
+def test_an_explicit_provider_is_not_corrected(pm_module, monkeypatch, monitor_calls):
+    assert run_main(pm_module, monkeypatch, [USER_ID, "--webhook-url", WEBHOOK_URL, "--webhook-provider", "ntfy"]) == 0
+
+    assert pm_module.WEBHOOK_PROVIDER == "ntfy"
+
+
+# Verifies an enabled channel with an unusable destination is switched off rather than failing at each alert
+def test_an_enabled_channel_without_a_destination_is_switched_off(pm_module, monkeypatch, monitor_calls):
+    monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
+
+    assert run_main(pm_module, monkeypatch, [USER_ID]) == 0
+
+    assert pm_module.WEBHOOK_ENABLED is False
+
+
+# Verifies the test webhook is sent past the alert settings and exits without starting monitoring
+def test_the_test_webhook_is_sent_and_exits(pm_module, monkeypatch, sent_webhooks, capsys):
+    monkeypatch.setattr(pm_module, "WEBHOOK_URL", WEBHOOK_URL)
+
+    assert run_main(pm_module, monkeypatch, [USER_ID, "--send-test-webhook"]) == 0
+
+    assert len(sent_webhooks) == 1
+    assert sent_webhooks[0]["force"] is True
+    output = capsys.readouterr().out
+    assert "discord.com" in output
+    assert WEBHOOK_URL not in output
+
+
+# Verifies a failed test webhook exits non-zero, so a setup script can act on it
+def test_a_failed_test_webhook_exits_non_zero(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "send_webhook", lambda *args, **kwargs: 1)
+
+    assert run_main(pm_module, monkeypatch, [USER_ID, "--send-test-webhook"]) == 1

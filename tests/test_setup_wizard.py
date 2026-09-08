@@ -10,6 +10,7 @@ import psn_monitor as monitor
 USER_ID = "misiektoja"
 NPSSO = "a-fresh-npsso-code"
 SMTP_SECRET = "aVeryLongSmtpPassword123"
+WEBHOOK_URL = "https://discord.com/api/webhooks/123456789/aVeryLongWebhookTokenValue"
 
 
 # Replays scripted answers the way a terminal does, echoing each prompt so the transcript is what a user sees
@@ -54,6 +55,7 @@ def happy_path(target=USER_ID, persist="", save="1", doctor="n", monitor_now="n"
         "y",                           # configure email
         "smtp.example.test", "587", "y", "monitor@example.test", "monitor@example.test", "alerts@example.test",
         "1",                           # the recommended notification preset
+        "n",                           # no webhook alerts
         "y", "", "", "y",              # keep the log, no CSV, default status file, coloured output
         save, doctor, monitor_now,
     )
@@ -288,3 +290,96 @@ def test_answering_yes_at_the_welcome_screen_starts_the_wizard(monkeypatch, caps
     assert monitor.print_welcome_screen(interactive=True, input_func=lambda prompt: "y") == 0
 
     assert started
+
+
+# Returns the answers up to and including the email preset, which every webhook run shares
+def before_webhook_section():
+    return (
+        USER_ID, "",
+        "", "",
+        "y",
+        "smtp.example.test", "587", "y", "monitor@example.test", "monitor@example.test", "alerts@example.test",
+        "1",
+    )
+
+
+# Returns the answers that follow the webhook section, ending with a saved run
+def after_webhook_section(save="1", doctor="n", monitor_now="n"):
+    return ("y", "", "", "y", save, doctor, monitor_now)
+
+
+# Answers each hidden prompt with the value that prompt asks for
+def secrets_for(webhook_value):
+    return lambda prompt: NPSSO if "NPSSO" in prompt else (webhook_value if "webhook" in prompt.casefold() or "topic" in prompt.casefold() else SMTP_SECRET)
+
+
+# Verifies a configured Discord webhook writes its settings to the config and its URL to the dotenv file
+def test_a_configured_webhook_is_saved(tmp_path):
+    script = before_webhook_section() + ("y", "1", "1") + after_webhook_section()
+
+    assert run_wizard(ScriptedTerminal(*script, secrets=secrets_for(WEBHOOK_URL))) == 0
+
+    values = monitor.parse_config_content((tmp_path / "psn_monitor.conf").read_text(encoding="utf-8"), "psn_monitor.conf")
+    assert values["WEBHOOK_ENABLED"] is True
+    assert values["WEBHOOK_PROVIDER"] == "discord"
+    assert values["WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION"] is True
+    assert f'WEBHOOK_URL="{WEBHOOK_URL}"' in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+# Verifies the private destination is never displayed, in the prompts or in the summary that lists everything else
+def test_the_webhook_url_is_never_displayed(capsys):
+    script = before_webhook_section() + ("y", "1", "1") + after_webhook_section()
+
+    run_wizard(ScriptedTerminal(*script, secrets=secrets_for(WEBHOOK_URL)))
+
+    output = capsys.readouterr().out
+    assert WEBHOOK_URL not in output
+    assert "Webhook:" in output
+    assert "Webhook notifications:" in output
+
+
+# Verifies an ntfy topic name is expanded before it is written, so the saved value is a complete URL
+def test_an_ntfy_topic_name_is_saved_as_a_url(tmp_path):
+    # The ntfy branch asks one extra question, whether the topic needs its own access token
+    script = before_webhook_section() + ("y", "2", "n", "1") + after_webhook_section()
+
+    assert run_wizard(ScriptedTerminal(*script, secrets=secrets_for("private-topic"))) == 0
+
+    assert 'WEBHOOK_URL="https://ntfy.sh/private-topic"' in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+# Verifies an ntfy access token is written only when one was asked for
+def test_an_ntfy_access_token_is_saved_when_offered(tmp_path):
+    script = before_webhook_section() + ("y", "2", "y", "1") + after_webhook_section()
+
+    assert run_wizard(ScriptedTerminal(*script, secrets=lambda prompt: NPSSO if "NPSSO" in prompt else ("tk_a_real_looking_token" if "token" in prompt.casefold() else ("private-topic" if "topic" in prompt.casefold() else SMTP_SECRET)))) == 0
+
+    assert 'NTFY_ACCESS_TOKEN="tk_a_real_looking_token"' in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+# Verifies declining the webhook section leaves the channel and every alert it owns switched off
+def test_declining_webhooks_turns_every_alert_off(tmp_path, monkeypatch):
+    # The error alert ships on, so declining has to switch it off rather than carry the shipped default through
+    monkeypatch.setattr(monitor, "WEBHOOK_ERROR_NOTIFICATION", True)
+    monkeypatch.setattr(monitor, "WEBHOOK_GAME_CHANGE_NOTIFICATION", True)
+
+    run_wizard(ScriptedTerminal(*happy_path()))
+
+    values = monitor.parse_config_content((tmp_path / "psn_monitor.conf").read_text(encoding="utf-8"), "psn_monitor.conf")
+    assert values["WEBHOOK_ENABLED"] is False
+    assert values["WEBHOOK_ERROR_NOTIFICATION"] is False
+    assert values["WEBHOOK_GAME_CHANGE_NOTIFICATION"] is False
+
+
+# Verifies an unusable destination is asked again, and that giving up leaves the channel off rather than looping
+def test_an_unusable_webhook_url_can_be_abandoned(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(monitor, "WEBHOOK_ERROR_NOTIFICATION", True)
+    script = before_webhook_section() + ("y", "1", "n") + after_webhook_section()
+
+    assert run_wizard(ScriptedTerminal(*script, secrets=secrets_for("not-a-url"))) == 0
+
+    values = monitor.parse_config_content((tmp_path / "psn_monitor.conf").read_text(encoding="utf-8"), "psn_monitor.conf")
+    assert values["WEBHOOK_ENABLED"] is False
+    assert values["WEBHOOK_ERROR_NOTIFICATION"] is False
+    assert "complete HTTPS webhook URL" in capsys.readouterr().out
+    assert "WEBHOOK_URL" not in (tmp_path / ".env").read_text(encoding="utf-8")

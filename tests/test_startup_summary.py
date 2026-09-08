@@ -170,6 +170,41 @@ def test_the_notification_row_reports_when_everything_is_off(pm_module, monkeypa
     assert pm_module.startup_notification_state() == "Off"
 
 
+# Verifies the webhook rollup names what is switched on and which service would receive it
+def test_the_webhook_row_names_the_alerts_and_the_service(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_PROVIDER", "ntfy")
+    monkeypatch.setattr(pm_module, "WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_ERROR_NOTIFICATION", True)
+
+    assert pm_module.startup_webhook_notification_state() == "On (status changes, errors) through ntfy"
+
+
+# Verifies the rollup reports the resolved state, so selected alerts with the channel off still read Off
+def test_the_webhook_row_reports_the_channel_being_off(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", False)
+    monkeypatch.setattr(pm_module, "WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION", True)
+
+    assert pm_module.startup_webhook_notification_state() == "Off"
+
+
+# Verifies both channels get their own concise row, so neither is mistaken for the other
+def test_each_channel_has_its_own_row(summary_rows):
+    for label in ("Notifications (email)", "Notifications (webhook)"):
+        assert row_named(summary_rows, label).concise is True
+
+
+# Verifies a long webhook rollup wraps under its own label instead of running past the column
+def test_a_long_webhook_rollup_wraps_under_its_label(pm_module):
+    row = pm_module.StartupSummaryRow("Notifications (webhook)", "On (" + ", ".join(["a long alert name"] * 8) + ") through Discord", concise=True)
+
+    lines = pm_module.format_startup_summary_row(row).splitlines()
+
+    assert len(lines) > 1
+    assert all(len(line) <= 100 for line in lines)
+    assert lines[1].startswith(" " * 32)
+
+
 # Verifies disabled logging is reported as such rather than leaving the reader guessing where output went
 def test_disabled_logging_is_named_in_both_views(pm_module, monkeypatch):
     monkeypatch.setattr(pm_module, "CSV_FILE", None)

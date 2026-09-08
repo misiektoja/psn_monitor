@@ -91,6 +91,18 @@ def test_the_notification_summary_row_colours_its_state(colored):
     assert off_row == f"* Notifications (email):        {colored['boolean_false']}Off{monitor.ANSI_RESET}"
 
 
+# Verifies the webhook rollup gets the same treatment, so one channel is not styled differently from the other
+def test_the_webhook_summary_row_colours_its_state(colored):
+    row = monitor._colorize_line("* Notifications (webhook):      On (status changes) through Discord")
+
+    assert row == f"* Notifications (webhook):      {colored['boolean_true']}On{monitor.ANSI_RESET} (status changes) through Discord"
+
+
+# Verifies the two delivery channels are told apart at a glance rather than sharing one colour
+def test_the_two_delivery_channels_are_coloured_differently(colored):
+    assert colored["email"] != colored["webhook"]
+
+
 # Verifies a debug trace and a recovery notice are not painted red. A debug line records an attempt the tool
 # then handles, and a rebuilt session reports a recovery that worked rather than the failures behind it
 @pytest.mark.parametrize("line", [
@@ -110,6 +122,7 @@ def test_diagnostic_details_and_recovery_notices_are_not_error_colored(colored, 
     ("* Note: Config file contains settings this version no longer uses", "info"),
     ("* Signal SIGUSR1 received", "signal"),
     ("Sending email notification to alerts@example.test", "email"),
+    ("Sending webhook notification", "webhook"),
 ])
 def test_only_problem_lines_are_painted_end_to_end(colored, line, part):
     assert monitor._colorize_line(line).startswith(colored[part])

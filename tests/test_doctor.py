@@ -12,6 +12,7 @@ from conftest import presence_payload
 
 
 USER_ID = "misiektoja"
+WEBHOOK_URL = "https://discord.com/api/webhooks/123456789/aVeryLongWebhookTokenValue"
 
 # The four shared markers. A fifth is the drift these tests exist to catch
 MARKERS = ("PASS", "WARN", "FAIL", "SKIP")
@@ -463,6 +464,92 @@ def test_valid_settings_name_the_destination_and_the_alerts(pm_module, monkeypat
     assert report.email_ready is True
 
 
+# Verifies a fresh install is not warned at for the webhook error alert that ships on with nowhere to send it
+def test_a_fresh_install_reports_webhooks_as_disabled(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "WEBHOOK_ERROR_NOTIFICATION", True)
+    report = pm_module.DoctorReport()
+
+    check = pm_module.doctor_check_webhook_notifications(report)[0]
+
+    assert (check.status, check.label) == ("PASS", "Webhook alerts are disabled")
+    assert report.webhook_ready is False
+
+
+# Verifies alerts selected while the channel is off are a warning, since nothing would ever be delivered
+def test_selected_alerts_with_the_channel_off_warn(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "WEBHOOK_GAME_CHANGE_NOTIFICATION", True)
+    report = pm_module.DoctorReport()
+
+    check = pm_module.doctor_check_webhook_notifications(report)[0]
+
+    assert check.status == "WARN"
+    assert check.advice.code == "webhook.invalid"
+    assert report.webhook_ready is False
+
+
+# Verifies an enabled channel with no alert selected is a warning rather than a pass
+def test_an_enabled_channel_with_no_alerts_warns(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_URL", WEBHOOK_URL)
+    report = pm_module.DoctorReport()
+
+    check = pm_module.doctor_check_webhook_notifications(report)[0]
+
+    assert check.status == "WARN"
+    assert report.webhook_ready is False
+
+
+# Verifies each unusable webhook setting is reported as a warning instead of failing at delivery time
+@pytest.mark.parametrize("setting, value", [
+    ("WEBHOOK_URL", "your_webhook_url"),
+    ("WEBHOOK_PROVIDER", "slack"),
+    ("WEBHOOK_AVATAR_URL", "not-a-url"),
+    ("WEBHOOK_HEADERS", {"Bad Header": "value"}),
+])
+def test_an_unusable_webhook_setting_warns(pm_module, monkeypatch, setting, value):
+    monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_URL", WEBHOOK_URL)
+    monkeypatch.setattr(pm_module, "WEBHOOK_ERROR_NOTIFICATION", True)
+    monkeypatch.setattr(pm_module, setting, value)
+    report = pm_module.DoctorReport()
+
+    check = pm_module.doctor_check_webhook_notifications(report)[0]
+
+    assert check.status == "WARN"
+    assert report.webhook_ready is False
+
+
+# Verifies a usable channel names the service and the alerts without printing the private destination
+def test_a_usable_webhook_names_the_service_without_the_private_url(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_URL", WEBHOOK_URL)
+    monkeypatch.setattr(pm_module, "WEBHOOK_GAME_CHANGE_NOTIFICATION", True)
+    report = pm_module.DoctorReport()
+
+    check = pm_module.doctor_check_webhook_notifications(report)[0]
+
+    assert check.status == "PASS"
+    assert "Discord" in check.label
+    assert "game changes" in check.detail
+    assert "discord.com" in check.detail
+    assert "aVeryLongWebhookTokenValue" not in check.detail
+    assert report.webhook_ready is True
+
+
+# Verifies both channels are reported, so one being unusable never hides the state of the other
+def test_both_channels_are_reported_together(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "GAME_CHANGE_NOTIFICATION", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_URL", WEBHOOK_URL)
+    monkeypatch.setattr(pm_module, "WEBHOOK_GAME_CHANGE_NOTIFICATION", True)
+    report = pm_module.DoctorReport()
+
+    checks = pm_module.doctor_check_notifications(report)
+
+    assert len(checks) == 2
+    assert (report.email_ready, report.webhook_ready) == (True, True)
+
+
 # Verifies a declined delivery test is recorded as skipped and sends nothing
 def test_a_declined_delivery_test_sends_nothing(pm_module, monkeypatch, sent_emails):
     monkeypatch.setattr(pm_module, "ask_yes_no", lambda question, default=False: False)
@@ -487,6 +574,35 @@ def test_an_approved_delivery_test_sends_one_message(pm_module, monkeypatch, sen
 
     assert [check.status for check in checks] == ["PASS"]
     assert len(sent_emails) == 1
+
+
+# Verifies each ready channel is offered its own approval, and only the approved one delivers
+def test_each_ready_channel_is_approved_separately(pm_module, monkeypatch, sent_emails, sent_webhooks):
+    answers = {"email": True, "webhook": False}
+    monkeypatch.setattr(pm_module, "ask_yes_no", lambda question, default=False: answers["webhook"] if "webhook" in question else answers["email"])
+    monkeypatch.setattr(pm_module.sys, "stdin", FakeTerminal())
+    monkeypatch.setattr(pm_module.sys, "stdout", FakeTerminal())
+    report = pm_module.DoctorReport(email_ready=True, webhook_ready=True)
+
+    checks = pm_module.offer_doctor_delivery_tests(report)
+
+    assert [check.status for check in checks] == ["PASS", "SKIP"]
+    assert len(sent_emails) == 1
+    assert sent_webhooks == []
+
+
+# Verifies an approved webhook test sends exactly one real notification through the ready channel
+def test_an_approved_webhook_test_sends_one_notification(pm_module, monkeypatch, sent_webhooks):
+    monkeypatch.setattr(pm_module, "ask_yes_no", lambda question, default=False: True)
+    monkeypatch.setattr(pm_module.sys, "stdin", FakeTerminal())
+    monkeypatch.setattr(pm_module.sys, "stdout", FakeTerminal())
+    report = pm_module.DoctorReport(webhook_ready=True)
+
+    checks = pm_module.offer_doctor_delivery_tests(report)
+
+    assert [check.status for check in checks] == ["PASS"]
+    assert len(sent_webhooks) == 1
+    assert sent_webhooks[0]["force"] is True
 
 
 # Verifies nothing is offered when the output is redirected, where no one could answer the prompt

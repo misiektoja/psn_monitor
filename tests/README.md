@@ -50,6 +50,7 @@ and again before anything is published to PyPI.
 | `test_runtime_controls.py` | Signal-driven toggles, interval changes, secret reload and the log output filter |
 | `test_time_formatting.py` | Durations, timespans, timestamp formats and timezone handling |
 | `test_user_info.py` | The one-shot profile report, trophies and recently played games |
+| `test_webhook_notifications.py` | Webhook destinations, the request each provider receives, the bounded retry and the two delivery channels |
 
 ## Conventions
 
@@ -58,7 +59,7 @@ and again before anything is published to PyPI.
 * Restore module-level globals you change. Tests share one imported module, so a
   leaked global affects whatever runs next.
 * Replace PlayStation Network calls and notification delivery with test doubles.
-* Never use a real NPSSO token, SMTP password or webhook URL.
+* Never use a real NPSSO token, SMTP password, webhook URL or ntfy access token.
 
 A change to the monitoring loop, authentication or PlayStation Network data handling is not
 verified by this suite alone. Exercise it against a real account and say so in the

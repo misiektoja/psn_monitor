@@ -10,6 +10,7 @@ import psn_monitor as monitor
 
 NPSSO = "a-fresh-npsso-code"
 SMTP_SECRET = "aVeryLongSmtpPassword123"
+WEBHOOK_URL = "https://discord.com/api/webhooks/123456789/aVeryLongWebhookTokenValue"
 
 
 # Stands in for smtplib.SMTP and records the sign-in the tool attempts
@@ -274,4 +275,62 @@ def test_an_empty_smtp_password_is_refused(tmp_path, smtp_double):
 
     assert raised.value.advice.code == "secret.entry"
     assert smtp_double.last is None
+    assert not env_file.exists()
+
+
+# Verifies a valid webhook URL is written and the service it points at is named back
+def test_a_valid_webhook_url_is_saved(tmp_path, capsys):
+    env_file = tmp_path / ".env"
+
+    monitor.run_set_webhook_url(env_file=str(env_file), interactive=True, getpass_func=lambda prompt: WEBHOOK_URL)
+
+    assert env_file.read_text(encoding="utf-8") == f'WEBHOOK_URL="{WEBHOOK_URL}"\n'
+    output = capsys.readouterr().out
+    assert "valid Discord destination" in output
+    assert WEBHOOK_URL not in output
+
+
+# Verifies an ntfy topic name is expanded before it is stored, so the saved value is a complete URL
+def test_an_ntfy_topic_name_is_saved_as_a_complete_url(tmp_path, monkeypatch):
+    monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "ntfy")
+    env_file = tmp_path / ".env"
+
+    monitor.run_set_webhook_url(env_file=str(env_file), interactive=True, getpass_func=lambda prompt: "private-topic")
+
+    assert env_file.read_text(encoding="utf-8") == 'WEBHOOK_URL="https://ntfy.sh/private-topic"\n'
+
+
+# Verifies a destination that is not a complete HTTPS link never replaces a working one
+def test_an_unusable_webhook_url_is_not_saved(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(f'WEBHOOK_URL="{WEBHOOK_URL}"\n', encoding="utf-8")
+
+    with pytest.raises(monitor.RecoveryError) as raised:
+        monitor.run_set_webhook_url(env_file=str(env_file), interactive=True, input_func=lambda prompt: "y", getpass_func=lambda prompt: "http://discord.com/api/webhooks/1/token")
+
+    assert raised.value.advice.code == "webhook.invalid"
+    assert env_file.read_text(encoding="utf-8") == f'WEBHOOK_URL="{WEBHOOK_URL}"\n'
+
+
+# Verifies a URL for the other service is refused rather than silently saved against the wrong provider
+def test_a_url_for_the_other_service_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "ntfy")
+    env_file = tmp_path / ".env"
+
+    with pytest.raises(monitor.RecoveryError) as raised:
+        monitor.run_set_webhook_url(env_file=str(env_file), interactive=True, getpass_func=lambda prompt: WEBHOOK_URL)
+
+    assert raised.value.advice.code == "webhook.invalid"
+    assert "WEBHOOK_PROVIDER" in raised.value.advice.detail
+    assert not env_file.exists()
+
+
+# Verifies an empty answer is reported as nothing entered rather than as a broken destination
+def test_an_empty_webhook_url_is_refused(tmp_path):
+    env_file = tmp_path / ".env"
+
+    with pytest.raises(monitor.RecoveryError) as raised:
+        monitor.run_set_webhook_url(env_file=str(env_file), interactive=True, getpass_func=lambda prompt: "   ")
+
+    assert raised.value.advice.code == "secret.entry"
     assert not env_file.exists()

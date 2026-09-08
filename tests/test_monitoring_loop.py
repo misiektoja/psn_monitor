@@ -360,3 +360,78 @@ def test_unreachable_profile_stops_startup(pm_module, psn_session, fake_clock, c
 
     assert raised.value.code == 1
     assert "does not know that PlayStation ID" in capsys.readouterr().out
+
+
+# Verifies a status change reaches the webhook channel even when email alerts are off
+def test_a_status_change_reaches_the_webhook_channel(pm_module, psn_session, fake_clock, monkeypatch, sent_webhooks, capsys):
+    monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION", True)
+    psn_session([presence_payload(status="offline"), presence_payload(status="online")])
+
+    run_monitor(pm_module)
+
+    assert [alert["type"] for alert in sent_webhooks] == ["status"]
+    assert sent_webhooks[0]["title"].startswith(f"PSN user {USER_ID} is now online")
+
+
+# Verifies a game change reaches the webhook channel on its own alert setting
+def test_a_game_change_reaches_the_webhook_channel(pm_module, psn_session, fake_clock, monkeypatch, sent_webhooks):
+    monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_GAME_CHANGE_NOTIFICATION", True)
+    psn_session([presence_payload(status="online"), presence_payload(status="online", game="Bloodborne")])
+
+    run_monitor(pm_module)
+
+    assert [alert["type"] for alert in sent_webhooks] == ["game"]
+    assert "Bloodborne" in sent_webhooks[0]["title"]
+
+
+# Verifies each channel is switched on by its own setting rather than by the other channel's
+def test_the_channels_are_selected_independently(pm_module, psn_session, fake_clock, monkeypatch, sent_emails, sent_webhooks):
+    monkeypatch.setattr(pm_module, "ACTIVE_INACTIVE_NOTIFICATION", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_GAME_CHANGE_NOTIFICATION", True)
+    psn_session([presence_payload(status="offline"), presence_payload(status="online"), presence_payload(status="online", game="Bloodborne")])
+
+    run_monitor(pm_module)
+
+    assert len(sent_emails) == 1
+    assert [alert["type"] for alert in sent_webhooks] == ["game"]
+
+
+# Verifies an error alert reaches both channels once, and is not repeated while the same failure persists
+def test_an_error_alerts_both_channels_once(pm_module, psn_session, fake_clock, monkeypatch, sent_emails, sent_webhooks):
+    monkeypatch.setattr(pm_module, "ERROR_NOTIFICATION", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_ERROR_NOTIFICATION", True)
+    psn_session([
+        presence_payload(status="offline"),
+        psnawp_exceptions.PSNAWPAuthenticationError("Your npsso code has expired"),
+        psnawp_exceptions.PSNAWPAuthenticationError("Your npsso code has expired"),
+    ])
+
+    run_monitor(pm_module)
+
+    assert len(sent_emails) == 1
+    assert [alert["type"] for alert in sent_webhooks] == ["error"]
+
+
+# Verifies the channel that failed is retried on the next check while the one that succeeded is not resent
+def test_only_the_failed_channel_is_retried(pm_module, psn_session, fake_clock, monkeypatch, sent_webhooks):
+    monkeypatch.setattr(pm_module, "ERROR_NOTIFICATION", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_ERROR_NOTIFICATION", True)
+    attempts = []
+    monkeypatch.setattr(pm_module, "send_email", lambda *args, **kwargs: attempts.append("email") or 1)
+    psn_session([
+        presence_payload(status="offline"),
+        psnawp_exceptions.PSNAWPAuthenticationError("Your npsso code has expired"),
+        psnawp_exceptions.PSNAWPAuthenticationError("Your npsso code has expired"),
+        psnawp_exceptions.PSNAWPAuthenticationError("Your npsso code has expired"),
+    ])
+
+    run_monitor(pm_module)
+
+    # The webhook was delivered on the first failure, so only the email that failed is attempted again
+    assert len(sent_webhooks) == 1
+    assert len(attempts) == 3

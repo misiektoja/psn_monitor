@@ -137,6 +137,18 @@ def deterministic_globals(monkeypatch):
     monkeypatch.setattr(pm, "ACTIVE_INACTIVE_NOTIFICATION", False, raising=False)
     monkeypatch.setattr(pm, "GAME_CHANGE_NOTIFICATION", False, raising=False)
     monkeypatch.setattr(pm, "ERROR_NOTIFICATION", False, raising=False)
+    monkeypatch.setattr(pm, "WEBHOOK_ENABLED", False, raising=False)
+    monkeypatch.setattr(pm, "WEBHOOK_PROVIDER", "discord", raising=False)
+    monkeypatch.setattr(pm, "WEBHOOK_URL", "your_webhook_url", raising=False)
+    monkeypatch.setattr(pm, "WEBHOOK_USERNAME", "PSN Monitor", raising=False)
+    monkeypatch.setattr(pm, "WEBHOOK_AVATAR_URL", "", raising=False)
+    monkeypatch.setattr(pm, "WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION", False, raising=False)
+    monkeypatch.setattr(pm, "WEBHOOK_GAME_CHANGE_NOTIFICATION", False, raising=False)
+    monkeypatch.setattr(pm, "WEBHOOK_ERROR_NOTIFICATION", False, raising=False)
+    monkeypatch.setattr(pm, "WEBHOOK_HEADERS", {}, raising=False)
+    monkeypatch.setattr(pm, "WEBHOOK_TEMPLATE", dict(pm.WEBHOOK_TEMPLATE), raising=False)
+    monkeypatch.setattr(pm, "WEBHOOK_TRANSFORMS", [], raising=False)
+    monkeypatch.setattr(pm, "NTFY_ACCESS_TOKEN", "", raising=False)
     monkeypatch.setattr(pm, "PSN_CHECK_INTERVAL", 180, raising=False)
     monkeypatch.setattr(pm, "PSN_ACTIVE_CHECK_INTERVAL", 60, raising=False)
     monkeypatch.setattr(pm, "PSN_ACTIVE_CHECK_SIGNAL_VALUE", 30, raising=False)
@@ -189,6 +201,20 @@ def sent_emails(monkeypatch):
         return 0
 
     monkeypatch.setattr(pm, "send_email", fake_send_email)
+    return delivered
+
+
+# Collects every webhook the code under test tries to send instead of contacting Discord or ntfy
+@pytest.fixture
+def sent_webhooks(monkeypatch):
+    delivered = []
+
+    # Records one alert and reports success
+    def fake_send_webhook(title, description, notification_type="status", force=False, sleeper=None):
+        delivered.append({"title": title, "description": description, "type": notification_type, "force": force})
+        return 0
+
+    monkeypatch.setattr(pm, "send_webhook", fake_send_webhook)
     return delivered
 
 
