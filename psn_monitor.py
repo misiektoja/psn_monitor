@@ -1008,6 +1008,15 @@ def verbose_print(message):
         print(f"* {sanitize_error_text(message)}")
 
 
+# Prints verbose-only notices as one block, so a standalone line is not left without the timestamp trailer
+def verbose_notice(*messages):
+    if not VERBOSE_MODE or not messages:
+        return
+    for message in messages:
+        verbose_print(message)
+    print_cur_ts("Timestamp:\t\t\t")
+
+
 # Applies the diagnostic flags that were actually typed, leaving the rest to the config file
 def apply_diagnostic_cli_overrides(args):
     global VERBOSE_MODE, DEBUG_MODE
@@ -3720,7 +3729,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         check_number += 1
         # If PSN_NPSSO changed (e.g. .env updated + SIGHUP), recreate the PSNAWP session immediately.
         if PSN_NPSSO != last_npsso_seen:
-            verbose_print(f"PSN_NPSSO changed ({secret_fingerprint(PSN_NPSSO, 'PSN_NPSSO')}), recreating the PSNAWP session")
+            verbose_notice(f"PSN_NPSSO changed ({secret_fingerprint(PSN_NPSSO, 'PSN_NPSSO')}), recreating the PSNAWP session")
             try:
                 _close_psnawp_sessions(psnawp)
             except Exception as diag_exc:
@@ -3813,7 +3822,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
         else:
             if error_streak:
-                verbose_print(f"Recovered after {error_streak} failed checks in a row")
+                verbose_notice(f"Recovered after {error_streak} failed checks in a row")
             recovery_hints.reset()
             error_email_sent = False
             error_webhook_sent = False
@@ -3966,7 +3975,6 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
         sleep_interval = get_sleep_interval()
         debug_print("Completed check", check=f"#{check_number}", user=psn_user_id, status=status or "unknown", game=game_name or None, next=display_time(sleep_interval))
-        verbose_print(f"Monitoring check #{check_number} completed for {psn_user_id}")
         time.sleep(sleep_interval)
 
 

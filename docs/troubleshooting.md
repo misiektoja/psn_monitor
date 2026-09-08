@@ -46,8 +46,8 @@ Two flags make the tool explain what it is doing. They are independent, so you c
 psn_monitor <psn_user_id> --verbose --debug
 ```
 
-* `VERBOSE_MODE`, `--verbose`: operational events, such as how many settings the configuration file supplied, whether an email was actually delivered, when a run recovers after a series of failed checks, one line per completed check so a quiet run still shows the loop is alive, and what a liveness banner means. It also expands the startup summary, which is where the configuration file, dotenv file, time zone and the source of each secret are named
-* `DEBUG_MODE`, `--debug`: technical diagnostics, such as every PSN API call, the classification and text of each failure, how long the tool will wait before the next check and why, every read and write of the status and CSV files and where each secret was resolved from
+* `VERBOSE_MODE`, `--verbose`: operational events, such as how many settings the configuration file supplied, whether an email was actually delivered, when a run recovers after a series of failed checks, and what a liveness banner means. It prints nothing per check, so an uneventful run stays quiet. It also expands the startup summary, which is where the configuration file, dotenv file, time zone and the source of each secret are named
+* `DEBUG_MODE`, `--debug`: technical diagnostics, such as every PSN API call, one line per completed check, the classification and text of each failure, how long the tool will wait before the next check and why, every read and write of the status and CSV files and where each secret was resolved from
 
 Debug lines are prefixed with `[DEBUG HH:MM:SS]`, then name the operation and list its details as comma-separated `key=value` fields, matching the sibling monitors:
 

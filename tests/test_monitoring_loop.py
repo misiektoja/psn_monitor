@@ -344,6 +344,35 @@ def test_rotated_npsso_rebuilds_the_session(pm_module, psn_session, fake_clock, 
     assert psn_session.instances[0].authenticator.request_builder.session.closed is True
 
 
+# Verifies verbose stays quiet on an uneventful cycle instead of printing one line per check
+def test_a_quiet_cycle_stays_silent_in_verbose(pm_module, psn_session, fake_clock, monkeypatch, capsys):
+    monkeypatch.setattr(pm_module, "VERBOSE_MODE", True)
+    psn_session([presence_payload(status="offline")] * 3)
+
+    run_monitor(pm_module)
+
+    assert "Monitoring check #" not in capsys.readouterr().out
+
+
+# Verifies a verbose notice closes with the shared timestamp trailer instead of floating between blocks
+def test_a_verbose_notice_closes_with_a_timestamp(pm_module, psn_session, fake_clock, monkeypatch, capsys):
+    monkeypatch.setattr(pm_module, "VERBOSE_MODE", True)
+
+    # Rotates the token the way a SIGHUP-driven reload does, between two polls
+    def rotate_and_report():
+        monkeypatch.setattr(pm_module, "PSN_NPSSO", "rotated-npsso-value")
+        return presence_payload(status="offline")
+
+    psn_session([presence_payload(status="offline"), rotate_and_report, presence_payload(status="offline")])
+
+    run_monitor(pm_module)
+
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    notice = next(index for index, line in enumerate(lines) if "recreating the PSNAWP session" in line)
+    assert lines[notice + 1].startswith("Timestamp:")
+    assert set(lines[notice + 2]) == {"\u2500"}
+
+
 # Verifies the liveness line is printed while an offline user produces no other output
 def test_liveness_check_reports_the_loop_is_alive(pm_module, psn_session, fake_clock, monkeypatch, capsys):
     monkeypatch.setattr(pm_module, "LIVENESS_CHECK_COUNTER", 2)
