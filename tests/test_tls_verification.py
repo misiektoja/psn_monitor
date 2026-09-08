@@ -1,10 +1,14 @@
 """Tests for VERIFY_SSL: which requests honour it, what is reported while it is off and its shipped default."""
 
+import ssl
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SOURCE = (PROJECT_ROOT / "psn_monitor.py").read_text(encoding="utf-8")
 WEBHOOK_URL = "https://discord.com/api/webhooks/123456789/aVeryLongWebhookTokenValue"
 
 
@@ -78,6 +82,22 @@ def test_a_psn_client_without_the_expected_session_still_starts(pm_module, monke
     monkeypatch.setattr(pm_module, "PSNAWP", lambda npsso: SimpleNamespace(npsso=npsso))
 
     assert pm_module.psn_client("a-code").npsso == "a-code"
+
+
+@pytest.mark.parametrize("verify", [True, False])
+# Verifies the SMTP handshake follows the setting, so email is not the one channel that keeps checking certificates
+def test_the_smtp_context_honours_the_setting(pm_module, monkeypatch, verify):
+    monkeypatch.setattr(pm_module, "VERIFY_SSL", verify)
+
+    context = pm_module.smtp_ssl_context()
+
+    assert context.check_hostname is verify
+    assert (context.verify_mode == ssl.CERT_REQUIRED) is verify
+
+
+# Verifies no SMTP call site builds its own context, which would keep that one connection verifying while the setting is off
+def test_only_the_shared_helper_builds_an_smtp_context():
+    assert SOURCE.count("ssl.create_default_context()") == 1
 
 
 @pytest.mark.parametrize("verify, silenced", [(True, False), (False, True)])

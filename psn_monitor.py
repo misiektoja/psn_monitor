@@ -202,7 +202,7 @@ CHECK_INTERNET_URL = 'https://ca.account.sony.com/'
 # Timeout used when checking initial internet connectivity; in seconds
 CHECK_INTERNET_TIMEOUT = 5
 
-# Whether to verify TLS certificates on every outbound request
+# Whether to verify TLS certificates on every outbound connection, email delivery included
 # Only set this to False on a network that intercepts TLS with its own certificate authority
 # Switching it off removes the protection against an intercepted connection
 VERIFY_SSL = True
@@ -1743,6 +1743,15 @@ def apply_tls_verification_setting():
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
+# Returns the TLS context SMTP uses, unverified while VERIFY_SSL is off so email follows the same switch as every other connection
+def smtp_ssl_context():
+    context = ssl.create_default_context()
+    if not VERIFY_SSL:
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    return context
+
+
 # Returns a PSNAWP client whose session honours the configured TLS verification setting
 def psn_client(npsso=None):
     client = PSNAWP(PSN_NPSSO if npsso is None else npsso)
@@ -1955,7 +1964,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
     debug_print("SMTP delivery", host=SMTP_HOST, port=SMTP_PORT, starttls=bool(use_ssl), timeout=f"{smtp_timeout}s", user=SMTP_USER)
     try:
         if use_ssl:
-            ssl_context = ssl.create_default_context()
+            ssl_context = smtp_ssl_context()
             smtpObj = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=smtp_timeout)
             smtpObj.starttls(context=ssl_context)
         else:
@@ -5373,7 +5382,7 @@ def smtp_sign_in(password, timeout=15):
         debug_print("SMTP sign-in check", host=SMTP_HOST, port=SMTP_PORT, starttls=bool(SMTP_SSL), timeout=f"{timeout}s", user=SMTP_USER)
         connection = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=timeout)
         if SMTP_SSL:
-            connection.starttls(context=ssl.create_default_context())
+            connection.starttls(context=smtp_ssl_context())
         try:
             connection.login(SMTP_USER, candidate)
         finally:
