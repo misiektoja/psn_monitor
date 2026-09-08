@@ -821,9 +821,17 @@ def sanitize_error_text(value):
     return text
 
 
-# Describes a secret in diagnostic output without revealing any part of it
-def secret_fingerprint(value):
-    return f"set, {len(value)} chars" if secret_is_set(value) else "not set"
+# Secrets whose length is a fixed, published property of the credential itself. A truncated paste is the usual
+# way these arrive broken, so the length diagnoses that without revealing anything the format does not already
+FIXED_LENGTH_SECRET_KEYS = frozenset(("PSN_NPSSO",))
+
+
+# Describes a secret in diagnostic output without revealing any part of it. A password the user chose reports
+# presence only: its length is a real disclosure in output that ends up pasted into bug reports
+def secret_fingerprint(value, key=None):
+    if not secret_is_set(value):
+        return "not set"
+    return f"set, {len(value)} chars" if key in FIXED_LENGTH_SECRET_KEYS else "set"
 
 
 # Prints a technical diagnostic line, shown only when debug mode is on
@@ -2047,7 +2055,7 @@ def reload_secrets_signal_handler(sig, frame):
             if val is not None and val != old_val:
                 globals()[secret] = val
                 SECRET_SOURCES[secret] = "dotenv file"
-                debug_print(f"{secret} reloaded from '{env_path}' ({secret_fingerprint(val)})")
+                debug_print(f"{secret} reloaded from '{env_path}' ({secret_fingerprint(val, secret)})")
                 print(f"* Reloaded {secret} from {env_path}")
 
     print_cur_ts("Timestamp:\t\t\t")
@@ -2438,7 +2446,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
 
     print(f"* Fetching details for PlayStation user '{psn_user_id}'...\n")
 
-    debug_print(f"PSNAWP session init for PSN user '{psn_user_id}' with PSN_NPSSO {secret_fingerprint(PSN_NPSSO)}")
+    debug_print(f"PSNAWP session init for PSN user '{psn_user_id}' with PSN_NPSSO {secret_fingerprint(PSN_NPSSO, 'PSN_NPSSO')}")
     print_step("Authenticating with PSN...")
     try:
         psnawp = PSNAWP(PSN_NPSSO)
@@ -2789,7 +2797,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     def print_ok():
         print("OK")
 
-    debug_print(f"PSNAWP session init for PSN user '{psn_user_id}' with PSN_NPSSO {secret_fingerprint(PSN_NPSSO)}")
+    debug_print(f"PSNAWP session init for PSN user '{psn_user_id}' with PSN_NPSSO {secret_fingerprint(PSN_NPSSO, 'PSN_NPSSO')}")
     print_step("Authenticating with PSN...")
     try:
         psnawp = PSNAWP(PSN_NPSSO)
@@ -3069,7 +3077,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         check_number += 1
         # If PSN_NPSSO changed (e.g. .env updated + SIGHUP), recreate the PSNAWP session immediately.
         if PSN_NPSSO != last_npsso_seen:
-            verbose_print(f"PSN_NPSSO changed ({secret_fingerprint(PSN_NPSSO)}), recreating the PSNAWP session")
+            verbose_print(f"PSN_NPSSO changed ({secret_fingerprint(PSN_NPSSO, 'PSN_NPSSO')}), recreating the PSNAWP session")
             try:
                 _close_psnawp_sessions(psnawp)
             except Exception as diag_exc:
@@ -4884,7 +4892,7 @@ def main():
     verbose_print(f"Configuration file in use is {cfg_path or 'none'}")
     verbose_print(f"Dotenv file in use is {env_path or 'none'}")
     for secret in SECRET_KEYS:
-        debug_print(f"Secret {secret} is {secret_fingerprint(globals().get(secret))}, resolved from {SECRET_SOURCES.get(secret, 'nowhere')}")
+        debug_print(f"Secret {secret} is {secret_fingerprint(globals().get(secret), secret)}, resolved from {SECRET_SOURCES.get(secret, 'nowhere')}")
 
     local_tz = None
     if LOCAL_TIMEZONE == "Auto":
@@ -4949,7 +4957,7 @@ def main():
     if args.npsso_key:
         PSN_NPSSO = args.npsso_key
         SECRET_SOURCES["PSN_NPSSO"] = "command line"
-        debug_print(f"PSN_NPSSO taken from the command line ({secret_fingerprint(PSN_NPSSO)})")
+        debug_print(f"PSN_NPSSO taken from the command line ({secret_fingerprint(PSN_NPSSO, 'PSN_NPSSO')})")
 
     if not PSN_NPSSO or PSN_NPSSO == "your_psn_npsso_code":
         report_recovery_error(context="secret.missing", detail="PSN_NPSSO (-n / --npsso_key) value is empty or incorrect")

@@ -179,6 +179,9 @@ def test_debug_reports_the_config_load_and_the_secret_source(pm_module, monkeypa
     output = capsys.readouterr().out
     assert f"Config file '{config}' applied 2 settings: PSN_CHECK_INTERVAL, PSN_NPSSO" in output
     assert "Secret PSN_NPSSO is set, 17 chars, resolved from configuration file" in output
+    # A password the user chose is reported as present only, since debug output is what bug reports carry
+    assert "Secret SMTP_PASSWORD is set, resolved from" in output
+    assert f"Secret SMTP_PASSWORD is set, {len(pm_module.SMTP_PASSWORD)} chars" not in output
 
 
 # Verifies a secret supplied on the command line is reported as such, without any part of its value

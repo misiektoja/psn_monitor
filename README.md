@@ -529,7 +529,7 @@ psn_monitor <psn_user_id> --verbose --debug
 * `VERBOSE_MODE`, `--verbose`: rare operational events, such as which configuration and dotenv files are in use, the resolved time zone, whether an email was actually delivered and when a run recovers after a series of failed checks
 * `DEBUG_MODE`, `--debug`: technical diagnostics, such as every PSN API call, the classification and text of each failure, how long the tool will wait before the next check and why, every read and write of the status and CSV files and where each secret was resolved from
 
-Debug lines are prefixed with `[DEBUG HH:MM:SS]`. Both modes redact your NPSSO code and SMTP password, and report secrets only as a length, never as a value.
+Debug lines are prefixed with `[DEBUG HH:MM:SS]`. Both modes redact your NPSSO code and SMTP password, and report a secret by name and source rather than by value. The NPSSO code also reports its length, because a code truncated while copying is the usual reason it stops working. Your SMTP password reports only that it is set.
 
 Both flags take effect before the configuration file is read, so they still work when the problem you are chasing is the configuration file itself. A flag you type always wins over `VERBOSE_MODE` or `DEBUG_MODE` in the configuration file.
 
