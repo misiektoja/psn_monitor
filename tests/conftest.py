@@ -106,6 +106,8 @@ class FakePSNAWP:
     def __init__(self, npsso):
         self.npsso = npsso
         self.closed = False
+        # Mirrors the PSNAWP session the tool reaches for to apply the TLS verification setting
+        self.authenticator = SimpleNamespace(request_builder=SimpleNamespace(session=SimpleNamespace(verify=True)))
         FakePSNAWP.instances.append(self)
 
     # Returns the signed-in account, which is what the doctor reports after authenticating
@@ -137,6 +139,7 @@ def deterministic_globals(monkeypatch):
     monkeypatch.setattr(pm, "ACTIVE_INACTIVE_NOTIFICATION", False, raising=False)
     monkeypatch.setattr(pm, "GAME_CHANGE_NOTIFICATION", False, raising=False)
     monkeypatch.setattr(pm, "ERROR_NOTIFICATION", False, raising=False)
+    monkeypatch.setattr(pm, "VERIFY_SSL", True, raising=False)
     monkeypatch.setattr(pm, "WEBHOOK_ENABLED", False, raising=False)
     monkeypatch.setattr(pm, "WEBHOOK_PROVIDER", "discord", raising=False)
     monkeypatch.setattr(pm, "WEBHOOK_URL", "your_webhook_url", raising=False)

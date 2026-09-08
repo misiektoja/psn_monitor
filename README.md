@@ -52,6 +52,7 @@ pip install psn_monitor
    * [User Privacy Settings](#user-privacy-settings)
    * [Time Zone](#time-zone)
    * [SMTP Settings](#smtp-settings)
+   * [TLS Verification](#tls-verification)
    * [Storing Secrets](#storing-secrets)
 5. [Usage](#usage)
    * [User Information Display Mode](#user-information-display-mode)
@@ -253,6 +254,15 @@ Verify your SMTP settings by using `--send-test-email` flag (the tool will try t
 ```sh
 psn_monitor --send-test-email
 ```
+
+<a id="tls-verification"></a>
+### TLS Verification
+
+The tool verifies the TLS certificate of every server it contacts: PlayStation Network, the connectivity check endpoint and, when enabled, the webhook service.
+
+Set `VERIFY_SSL` to `False` only on a network that intercepts TLS with its own certificate authority, such as a corporate proxy. With verification off, an intercepted connection cannot be told apart from the real service.
+
+The startup summary shows `TLS verification` and `--doctor` reports a warning while it is off.
 
 <a id="storing-secrets"></a>
 ### Storing Secrets

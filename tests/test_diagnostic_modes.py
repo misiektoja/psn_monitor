@@ -77,7 +77,7 @@ def test_debug_reports_the_connectivity_check(pm_module, monkeypatch, both_modes
     monkeypatch.setattr(pm_module, "CHECK_INTERNET_TIMEOUT", 7, raising=False)
 
     # Fails the way a broken network does, so the real error branch runs
-    def refuse(url, timeout=None):
+    def refuse(url, timeout=None, verify=None):
         raise requests.exceptions.ConnectionError("name resolution failed")
 
     monkeypatch.setattr(pm_module.req, "get", refuse)

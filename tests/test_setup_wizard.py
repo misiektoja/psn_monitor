@@ -181,14 +181,14 @@ def test_a_profile_link_is_accepted_as_a_target(tmp_path):
 # Verifies an empty NPSSO answer is asked again rather than quietly leaving monitoring unusable
 def test_an_empty_npsso_answer_is_asked_again():
     entered = ["", NPSSO]
-    # The extra "n" answers "Continue without a code?", which must default to keeping the setup usable
+    # The extra "n" answers "Continue without the NPSSO code?", which must default to keeping the setup usable
     script = happy_path()[:4] + ("n",) + happy_path()[4:]
     terminal = ScriptedTerminal(*script, secrets=lambda prompt: entered.pop(0) if "NPSSO" in prompt else SMTP_SECRET)
 
     run_wizard(terminal)
 
     assert entered == []
-    assert terminal.asked("Continue without a code?")
+    assert terminal.asked("Continue without the NPSSO code?")
 
 
 # Verifies a code PSN rejects is asked again instead of being written
@@ -201,10 +201,14 @@ def test_a_rejected_npsso_code_is_asked_again(tmp_path, monkeypatch):
         return "signed-in-account"
 
     monkeypatch.setattr(monitor, "validate_npsso_code", validator)
+    # The extra "y" accepts the offer to enter the rejected code again
+    script = happy_path()[:4] + ("y",) + happy_path()[4:]
 
-    run_wizard(ScriptedTerminal(*happy_path(), secrets=lambda prompt: attempts.pop(0) if "NPSSO" in prompt else SMTP_SECRET))
+    terminal = ScriptedTerminal(*script, secrets=lambda prompt: attempts.pop(0) if "NPSSO" in prompt else SMTP_SECRET)
+    run_wizard(terminal)
 
     assert attempts == []
+    assert terminal.asked("Try entering the NPSSO code again?")
     assert f'PSN_NPSSO="{NPSSO}"' in (tmp_path / ".env").read_text(encoding="utf-8")
 
 
@@ -383,3 +387,62 @@ def test_an_unusable_webhook_url_can_be_abandoned(tmp_path, capsys, monkeypatch)
     assert values["WEBHOOK_ERROR_NOTIFICATION"] is False
     assert "complete HTTPS webhook URL" in capsys.readouterr().out
     assert "WEBHOOK_URL" not in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+# Verifies a blank destination is told apart from a malformed one and that skipping it leaves the channel off
+def test_a_blank_webhook_url_is_worded_as_a_blank_one(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(monitor, "WEBHOOK_ERROR_NOTIFICATION", True)
+    # The final "y" accepts continuing without a URL, which is what the blank wording offers
+    script = before_webhook_section() + ("y", "1", "y") + after_webhook_section()
+
+    terminal = ScriptedTerminal(*script, secrets=secrets_for(""))
+    assert run_wizard(terminal) == 0
+
+    values = monitor.parse_config_content((tmp_path / "psn_monitor.conf").read_text(encoding="utf-8"), "psn_monitor.conf")
+    assert values["WEBHOOK_ENABLED"] is False
+    assert values["WEBHOOK_ERROR_NOTIFICATION"] is False
+    assert terminal.asked("Continue without the webhook URL?")
+    assert "complete HTTPS webhook URL" not in capsys.readouterr().out
+
+
+# Verifies a code PSN keeps rejecting can be given up on, since it cannot be corrected from inside the loop
+def test_a_rejected_npsso_code_can_be_abandoned(tmp_path, monkeypatch):
+    def validator(code):
+        raise monitor.RecoveryError(monitor.classify_recovery_error(context="secret.entry", detail="PSN rejected that code"))
+
+    monkeypatch.setattr(monitor, "validate_npsso_code", validator)
+    # The extra "n" declines entering the rejected code again
+    script = happy_path()[:4] + ("n",) + happy_path()[4:]
+
+    assert run_wizard(ScriptedTerminal(*script)) == 0
+
+    assert "PSN_NPSSO" not in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+# Verifies an abandoned mail server answer switches email off rather than writing half a configuration
+def test_an_abandoned_mail_server_answer_turns_email_off(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(monitor, "ERROR_NOTIFICATION", True)
+    monkeypatch.setattr(monitor, "GAME_CHANGE_NOTIFICATION", True)
+    # Cleared so the prompt has no default to fall back on, which is what a first-time setup looks like
+    monkeypatch.setattr(monitor, "SMTP_HOST", "")
+    # A blank SMTP host, then declining to enter it again, then declining webhooks
+    script = (USER_ID, "", "", "", "y", "", "n", "n") + after_webhook_section()
+
+    assert run_wizard(ScriptedTerminal(*script)) == 0
+
+    values = monitor.parse_config_content((tmp_path / "psn_monitor.conf").read_text(encoding="utf-8"), "psn_monitor.conf")
+    assert values["ERROR_NOTIFICATION"] is False
+    assert values["GAME_CHANGE_NOTIFICATION"] is False
+    assert "Email notifications stay off" in capsys.readouterr().out
+
+
+# Verifies a token pasted with its authorization scheme can be given up on without losing the topic already entered
+def test_a_pasted_ntfy_authorization_scheme_can_be_abandoned(tmp_path):
+    # The "n" declines entering the token again, leaving the topic URL that was already accepted
+    script = before_webhook_section() + ("y", "2", "y", "n", "1") + after_webhook_section()
+
+    assert run_wizard(ScriptedTerminal(*script, secrets=lambda prompt: NPSSO if "NPSSO" in prompt else ("Bearer tk_a_real_looking_token" if "token" in prompt.casefold() else ("private-topic" if "topic" in prompt.casefold() else SMTP_SECRET)))) == 0
+
+    env = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert 'WEBHOOK_URL="https://ntfy.sh/private-topic"' in env
+    assert "NTFY_ACCESS_TOKEN" not in env

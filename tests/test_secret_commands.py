@@ -334,3 +334,22 @@ def test_an_empty_webhook_url_is_refused(tmp_path):
 
     assert raised.value.advice.code == "secret.entry"
     assert not env_file.exists()
+
+
+# Verifies a destination that was only checked offline is followed by the delivery test that does confirm it
+def test_a_saved_webhook_url_names_the_delivery_test(tmp_path, capsys):
+    monitor.run_set_webhook_url(env_file=str(tmp_path / ".env"), interactive=True, getpass_func=lambda prompt: WEBHOOK_URL)
+
+    output = capsys.readouterr().out
+    assert "Send a test webhook:" in output
+    assert "--send-test-webhook" in output
+    assert output.index("Send a test webhook:") < output.index("Check setup again:")
+
+
+# Verifies a secret the live service already accepted is not followed by a delivery test it does not need
+def test_a_saved_npsso_code_names_no_delivery_test(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(monitor, "validate_npsso_code", lambda code: "signed-in-account")
+
+    monitor.run_set_npsso(env_file=str(tmp_path / ".env"), interactive=True, getpass_func=lambda prompt: "a-fresh-npsso-code")
+
+    assert "Send a test" not in capsys.readouterr().out

@@ -202,6 +202,11 @@ CHECK_INTERNET_URL = 'https://ca.account.sony.com/'
 # Timeout used when checking initial internet connectivity; in seconds
 CHECK_INTERNET_TIMEOUT = 5
 
+# Whether to verify TLS certificates on every outbound request
+# Only set this to False on a network that intercepts TLS with its own certificate authority
+# Switching it off removes the protection against an intercepted connection
+VERIFY_SSL = True
+
 # CSV file to write all status & game changes
 # Can also be set using the -b flag
 CSV_FILE = ""
@@ -346,6 +351,7 @@ OFFLINE_INTERRUPT = 0
 LIVENESS_CHECK_INTERVAL = 0
 CHECK_INTERNET_URL = ""
 CHECK_INTERNET_TIMEOUT = 0
+VERIFY_SSL = True
 CSV_FILE = ""
 DOTENV_FILE = ""
 PSN_LOGFILE = ""
@@ -417,6 +423,7 @@ from dateutil import relativedelta
 from dateutil.parser import isoparse
 import calendar
 import requests as req
+import urllib3
 import signal
 import smtplib
 import ssl
@@ -503,7 +510,7 @@ def probe_npsso_auth_error(npsso):
             "ui": "pr",
         }
         debug_print(f"HTTP GET {BASE_PATH['base_uri']}{API_PATH['oauth_code']} (auth probe, timeout 15s)")
-        resp = req.get(f"{BASE_PATH['base_uri']}{API_PATH['oauth_code']}", headers=headers, params=params, allow_redirects=False, timeout=15)
+        resp = req.get(f"{BASE_PATH['base_uri']}{API_PATH['oauth_code']}", headers=headers, params=params, allow_redirects=False, timeout=15, verify=VERIFY_SSL)
         debug_print(f"Auth probe returned HTTP {resp.status_code}")
         loc = resp.headers.get("location", "")
         if not loc:
@@ -559,6 +566,7 @@ SECRETS_GUIDE_URL = f"{GUIDE_BASE_URL}#storing-secrets"
 PRIVACY_GUIDE_URL = f"{GUIDE_BASE_URL}#user-privacy-settings"
 TIMEZONE_GUIDE_URL = f"{GUIDE_BASE_URL}#time-zone"
 SMTP_GUIDE_URL = f"{GUIDE_BASE_URL}#smtp-settings"
+TLS_GUIDE_URL = f"{GUIDE_BASE_URL}#tls-verification"
 WEBHOOK_GUIDE_URL = f"{GUIDE_BASE_URL}#webhook-notifications"
 INTERVALS_GUIDE_URL = f"{GUIDE_BASE_URL}#check-intervals"
 DIAGNOSTICS_GUIDE_URL = f"{GUIDE_BASE_URL}#verbose-and-debug-output"
@@ -601,7 +609,7 @@ def tool_command(*arguments, method=None):
 
 # Stable recovery categories. Every code here is produced somewhere in this file, and nothing else is accepted
 RECOVERY_CODES = frozenset({
-    "config.missing", "config.invalid", "dependency.missing", "secret.missing",
+    "config.missing", "config.invalid", "config.insecure", "dependency.missing", "secret.missing",
     "auth.npsso_invalid", "auth.npsso_expired", "auth.tos_required",
     "network.unavailable", "network.timeout",
     "psn.malformed_response", "psn.rate_limited", "resource.exhausted",
@@ -1704,11 +1712,28 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 
+# Silences the repeated certificate warning once verification is off, so the choice is reported by the summary and the doctor instead of on every request
+def apply_tls_verification_setting():
+    if not VERIFY_SSL:
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+# Returns a PSNAWP client whose session honours the configured TLS verification setting
+def psn_client(npsso=None):
+    client = PSNAWP(PSN_NPSSO if npsso is None else npsso)
+    # Applied after construction because PSNAWP signs in on the first request, so this still covers the token exchange
+    try:
+        client.authenticator.request_builder.session.verify = VERIFY_SSL
+    except AttributeError as diag_exc:
+        debug_print(f"TLS verification could not be applied to the PSNAWP session: {diag_exc}")
+    return client
+
+
 # Checks internet connectivity
 def check_internet(url=CHECK_INTERNET_URL, timeout=CHECK_INTERNET_TIMEOUT):
     debug_print(f"HTTP GET {url} (connectivity check, timeout {timeout}s)")
     try:
-        _ = req.get(url, timeout=timeout)
+        _ = req.get(url, timeout=timeout, verify=VERIFY_SSL)
         debug_print(f"HTTP GET {url} succeeded")
         return True
     except req.RequestException as e:
@@ -2253,7 +2278,7 @@ def post_webhook_request(**request_kwargs):
     if not validate_webhook_url(destination):
         raise req.exceptions.InvalidURL("WEBHOOK_URL must contain a complete HTTPS link")
     # Redirects are refused, so a moved endpoint cannot forward the alert and its authorization header elsewhere
-    return WEBHOOK_SESSION.post(destination, timeout=WEBHOOK_TIMEOUT_SECONDS, allow_redirects=False, **request_kwargs)
+    return WEBHOOK_SESSION.post(destination, timeout=WEBHOOK_TIMEOUT_SECONDS, verify=VERIFY_SSL, allow_redirects=False, **request_kwargs)
 
 
 # Sends one webhook through its own bounded retry path, which never shares the PlayStation Network retry policy
@@ -3017,7 +3042,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
     debug_print(f"PSNAWP session init for PSN user '{psn_user_id}' with PSN_NPSSO {secret_fingerprint(PSN_NPSSO, 'PSN_NPSSO')}")
     print_step("Authenticating with PSN...")
     try:
-        psnawp = PSNAWP(PSN_NPSSO)
+        psnawp = psn_client()
         psn_user = psnawp.user(online_id=psn_user_id)
     except Exception as e:
         print()
@@ -3368,7 +3393,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     debug_print(f"PSNAWP session init for PSN user '{psn_user_id}' with PSN_NPSSO {secret_fingerprint(PSN_NPSSO, 'PSN_NPSSO')}")
     print_step("Authenticating with PSN...")
     try:
-        psnawp = PSNAWP(PSN_NPSSO)
+        psnawp = psn_client()
         psn_user = psnawp.user(online_id=psn_user_id)
     except Exception as e:
         print()
@@ -3624,7 +3649,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         except Exception as diag_exc:
             debug_print(f"Closing the old PSNAWP session before recreating it failed: {type(diag_exc).__name__}: {diag_exc}")
         try:
-            psnawp = PSNAWP(PSN_NPSSO)
+            psnawp = psn_client()
             psn_user = psnawp.user(online_id=psn_user_id)
             last_recreate_ts = now
             verbose_print("Recreated the PSNAWP session")
@@ -3652,7 +3677,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             except Exception as diag_exc:
                 debug_print(f"Closing the old PSNAWP session after the NPSSO change failed: {type(diag_exc).__name__}: {diag_exc}")
             try:
-                psnawp = PSNAWP(PSN_NPSSO)
+                psnawp = psn_client()
                 psn_user = psnawp.user(online_id=psn_user_id)
                 last_recreate_ts = int(time.time())
                 print("* PSN_NPSSO updated - recreated PSNAWP session")
@@ -4037,6 +4062,12 @@ def doctor_check_configuration(config_path=None, env_path=None, config_advice=No
     else:
         checks.append(make_doctor_check("Configuration", "PASS", "Check intervals are set", intervals))
 
+    if VERIFY_SSL:
+        checks.append(make_doctor_check("Configuration", "PASS", "TLS certificate verification is on", "Every outbound request checks the server certificate"))
+    else:
+        advice = make_recovery_advice("config.insecure", "TLS certificate verification is off", recovery_fix_with_guide("Set VERIFY_SSL back to True unless this network intercepts TLS with its own certificate authority", TLS_GUIDE_URL), False)
+        checks.append(make_doctor_check("Configuration", "WARN", "TLS certificate verification is off", "VERIFY_SSL is False, so an intercepted connection cannot be told apart from the real service", advice))
+
     try:
         checks.append(make_doctor_check("Configuration", "PASS", f"ASCII log separators are {'on' if ascii_log_separators_enabled() else 'off'}", f"Mode: {ASCII_LOG_SEPARATORS}"))
     except ValueError as exc:
@@ -4078,7 +4109,7 @@ def doctor_check_authentication(report):
         advice = classify_recovery_error(context="secret.missing", detail="PSN_NPSSO is not set")
         return [make_doctor_check("Authentication", "FAIL", advice.summary, advice=advice)]
     try:
-        psnawp = PSNAWP(PSN_NPSSO)
+        psnawp = psn_client()
         signed_in = psnawp.me().online_id
     except Exception as exc:
         advice = classify_recovery_error(exc, context="startup", probe_auth=True)
@@ -4340,6 +4371,7 @@ def build_startup_summary(psn_user_id=None, config_path=None, env_path=None, log
     output_state = str(log_path) if log_path else "Terminal only (logging disabled)"
     return [
         StartupSummaryRow("Polling intervals", f"[offline: {display_time(PSN_CHECK_INTERVAL)}] [online: {display_time(PSN_ACTIVE_CHECK_INTERVAL)}]", concise=True),
+        StartupSummaryRow("TLS verification", "On" if VERIFY_SSL else "Off, server certificates are not checked", concise=not VERIFY_SSL),
         StartupSummaryRow("Notifications (email)", startup_notification_state(), concise=True),
         StartupSummaryRow("Notifications (webhook)", startup_webhook_notification_state(), concise=True),
         StartupSummaryRow("Output", output_state, concise=True, full=False, log=False),
@@ -4474,6 +4506,8 @@ def _wizard_ask_text(question, default="", required=False, input_func=None):
         if answer or not required:
             return answer
         print("  This value is required.")
+        if not _wizard_offer_retry(question, input_func=input_func):
+            return ""
 
 
 # Asks one yes or no question with a visible default
@@ -4488,6 +4522,13 @@ def _wizard_ask_yes_no(question, default=True, input_func=None):
         if answer in ("n", "no"):
             return False
         print("  Please answer 'y' or 'n'.")
+
+
+# Offers the one way out after an entry the wizard cannot use, so declining keeps every answer already given
+def _wizard_offer_retry(label, consequence="", input_func=None):
+    if consequence:
+        return not _wizard_ask_yes_no(f"Continue without the {label}? {consequence}", default=False, input_func=input_func)
+    return _wizard_ask_yes_no(f"Try entering the {label} again?", default=True, input_func=input_func)
 
 
 # Asks one numbered multiple-choice question and returns the chosen index
@@ -4549,13 +4590,9 @@ def _wizard_ask_duration(question, default, input_func=None):
 
 
 # Asks one secret through a hidden prompt, so it never reaches the screen or the shell history
-def _wizard_ask_secret(question, getpass_func=None, required=False):
+def _wizard_ask_secret(question, getpass_func=None):
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
-    while True:
-        value = str(hidden_prompt(f"{question}: ")).strip()
-        if value or not required:
-            return value
-        print("  This secret is required and cannot be empty.")
+    return str(hidden_prompt(f"{question}: ")).strip()
 
 
 # Renders one setting for the generated config, keeping a mapping readable instead of on one very long line
@@ -4671,13 +4708,16 @@ def _wizard_collect_auth_section(state, input_func=None, getpass_func=None, vali
         npsso = _wizard_ask_secret("NPSSO code", getpass_func=getpass_func)
         if not npsso:
             # Monitoring cannot run without it, so leaving it unset has to be a decision rather than a fallthrough
-            if _wizard_ask_yes_no("Continue without a code? Nothing can be monitored until one is set", default=False, input_func=input_func):
+            if not _wizard_offer_retry("NPSSO code", "Nothing can be monitored until one is set", input_func=input_func):
                 return
             continue
         try:
             account = validate(npsso)
         except RecoveryError as exc:
             print(f"  {exc.advice.summary}. {exc.advice.fix}")
+            # A code PSN keeps rejecting cannot be corrected from inside the loop, so the wizard must be leavable here too
+            if not _wizard_offer_retry("NPSSO code", input_func=input_func):
+                return
             continue
         state.secret_updates["PSN_NPSSO"] = npsso
         print(f"  PlayStation Network accepted the code, signed in as {account}.")
@@ -4687,15 +4727,22 @@ def _wizard_collect_auth_section(state, input_func=None, getpass_func=None, vali
 # Asks whether to send email alerts and collects only the settings that choice needs
 def _wizard_collect_email_section(state, input_func=None, getpass_func=None):
     if not _wizard_ask_yes_no("Configure email notifications?", default=False, input_func=input_func):
-        for key in WIZARD_EMAIL_NOTIFICATION_KEYS:
-            state.config_values[key] = False
+        _wizard_disable_email(state)
         return
     state.config_values["SMTP_HOST"] = _wizard_ask_text("SMTP host", default=_wizard_default(state.config_values.get("SMTP_HOST")), required=True, input_func=input_func)
+    if _wizard_email_answer_missing(state, "SMTP_HOST"):
+        return
     state.config_values["SMTP_PORT"] = _wizard_ask_positive_int("SMTP port", int(state.config_values.get("SMTP_PORT") or 587), input_func=input_func)
     state.config_values["SMTP_SSL"] = _wizard_ask_yes_no("Enable TLS/SSL for SMTP?", default=True, input_func=input_func)
     state.config_values["SMTP_USER"] = _wizard_ask_text("SMTP username", default=_wizard_default(state.config_values.get("SMTP_USER")), required=True, input_func=input_func)
+    if _wizard_email_answer_missing(state, "SMTP_USER"):
+        return
     state.config_values["SENDER_EMAIL"] = _wizard_ask_text("Sender email", default=_wizard_default(state.config_values.get("SENDER_EMAIL")), required=True, input_func=input_func)
+    if _wizard_email_answer_missing(state, "SENDER_EMAIL"):
+        return
     state.config_values["RECEIVER_EMAIL"] = _wizard_ask_text("Receiver email", default=_wizard_default(state.config_values.get("RECEIVER_EMAIL")), required=True, input_func=input_func)
+    if _wizard_email_answer_missing(state, "RECEIVER_EMAIL"):
+        return
     password = _wizard_ask_secret("SMTP password", getpass_func=getpass_func)
     if password:
         state.secret_updates["SMTP_PASSWORD"] = password
@@ -4715,6 +4762,21 @@ def _wizard_collect_email_section(state, input_func=None, getpass_func=None):
         )
         selected = {name: _wizard_ask_yes_no(question, default=False, input_func=input_func) for name, question in questions}
     state.config_values.update(selected)
+
+
+# Switches every email alert off together, so an abandoned answer cannot leave half a mail server configured
+def _wizard_disable_email(state):
+    for key in WIZARD_EMAIL_NOTIFICATION_KEYS:
+        state.config_values[key] = False
+
+
+# Reports whether one required mail server answer was abandoned, switching the channel off when it was
+def _wizard_email_answer_missing(state, key):
+    if state.config_values.get(key):
+        return False
+    print("  Email notifications stay off until every mail server setting is answered.")
+    _wizard_disable_email(state)
+    return True
 
 
 # Asks whether to send webhook alerts and collects only the settings that choice needs
@@ -4738,12 +4800,17 @@ def _wizard_collect_webhook_section(state, input_func=None, getpass_func=None):
         if validate_webhook_url(webhook_url):
             state.secret_updates["WEBHOOK_URL"] = webhook_url
             break
+        # Nothing can be delivered without a destination, so giving up has to stay reachable from the prompt
+        if not webhook_url:
+            if not _wizard_offer_retry("webhook URL", "Webhook alerts stay off until one is set", input_func=input_func):
+                _wizard_disable_webhook(state)
+                return
+            continue
         if provider == "ntfy":
             print("  Enter a complete HTTPS ntfy topic URL, or a topic name of up to 64 letters, digits, hyphens or underscores.")
         else:
             print("  That does not look like a complete HTTPS webhook URL. Copy it again from Discord.")
-        # Nothing can be delivered without a destination, so giving up has to stay reachable from the prompt
-        if not _wizard_ask_yes_no("Try entering the webhook URL again?", default=True, input_func=input_func):
+        if not _wizard_offer_retry("webhook URL", input_func=input_func):
             _wizard_disable_webhook(state)
             return
     if provider == "ntfy" and _wizard_ask_yes_no("Authenticate this ntfy topic with a separate access token?", default=False, input_func=input_func):
@@ -4754,6 +4821,8 @@ def _wizard_collect_webhook_section(state, input_func=None, getpass_func=None):
                     state.secret_updates["NTFY_ACCESS_TOKEN"] = token
                 break
             print("  Paste the access token on its own, without a Bearer or Basic prefix.")
+            if not _wizard_offer_retry("ntfy access token", input_func=input_func):
+                break
     state.config_values["WEBHOOK_ENABLED"] = True
     preset = _wizard_ask_choice("Which webhook notifications should be enabled?", [
         ("Status, games and errors, recommended", "Online and offline changes, game changes and monitoring errors."),
@@ -5123,7 +5192,7 @@ def validate_npsso_code(npsso):
     if "\r" in candidate or "\n" in candidate:
         raise RecoveryError(classify_recovery_error(context="secret.entry", detail="The NPSSO code contains a line break, so the dotenv file was not changed"))
     try:
-        return PSNAWP(candidate).me().online_id
+        return psn_client(candidate).me().online_id
     except Exception as exc:
         raise RecoveryError(classify_recovery_error(exc, context="startup"), exc) from None
 
@@ -5162,19 +5231,21 @@ def smtp_sign_in(password, timeout=15):
 
 
 # Prints the commands to run next, with the file paths this run was given so they can be pasted as they are
-def print_secret_next_steps(env_path, config_path=None, psn_user_id=None):
+def print_secret_next_steps(env_path, config_path=None, psn_user_id=None, test_step=None):
     paths = []
     if config_path:
         paths.extend(("--config-file", str(config_path)))
     paths.extend(("--env-file", str(env_path)))
     target = psn_user_id or "<psn_user_id>"
     print()
+    if test_step:
+        print_labelled_command(test_step[0], tool_command(test_step[1], *paths))
     print_labelled_command("Check setup again:", tool_command("--doctor", target, *paths))
     print_labelled_command("Once the checks pass, start monitoring:", tool_command(target, *paths))
 
 
-# Collects one secret through a hidden prompt, validates it against the live service and writes it only then
-def run_set_secret(key, flag, guidance, prompt_text, validator, describe_success, env_file=None, config_path=None, psn_user_id=None, interactive=None, input_func=None, getpass_func=None, normalize=None):
+# Collects one secret through a hidden prompt, checks it with the given validator and writes it only then
+def run_set_secret(key, flag, guidance, prompt_text, validator, describe_success, env_file=None, config_path=None, psn_user_id=None, interactive=None, input_func=None, getpass_func=None, normalize=None, test_step=None):
     global DEBUG_MODE
 
     destination = resolve_secret_env_path(env_file, flag)
@@ -5216,7 +5287,7 @@ def run_set_secret(key, flag, guidance, prompt_text, validator, describe_success
 
     print(f"* {describe_success(outcome)}")
     print(f"* Updated '{destination}', readable only by you")
-    print_secret_next_steps(destination, config_path, psn_user_id)
+    print_secret_next_steps(destination, config_path, psn_user_id, test_step)
     return str(destination)
 
 
@@ -5247,7 +5318,7 @@ def validate_webhook_destination(value):
 
 # Stores one webhook destination in the dotenv file, so the private URL never has to appear on a command line
 def run_set_webhook_url(env_file=None, config_path=None, psn_user_id=None, interactive=None, input_func=None, getpass_func=None):
-    return run_set_secret("WEBHOOK_URL", "--set-webhook-url", "* Discord: Edit Channel > Integrations > Webhooks > New Webhook > Copy Webhook URL\n* ntfy: the complete topic URL, or just the topic name when it is hosted on ntfy.sh", "Enter the webhook URL (input hidden): ", validate_webhook_destination, lambda provider: f"The entered value looks like a valid {provider} destination", env_file, config_path, psn_user_id, interactive, input_func, getpass_func, normalize_webhook_destination)
+    return run_set_secret("WEBHOOK_URL", "--set-webhook-url", "* Discord: Edit Channel > Integrations > Webhooks > New Webhook > Copy Webhook URL\n* ntfy: the complete topic URL, or just the topic name when it is hosted on ntfy.sh", "Enter the webhook URL (input hidden): ", validate_webhook_destination, lambda provider: f"The entered value looks like a valid {provider} destination", env_file, config_path, psn_user_id, interactive, input_func, getpass_func, normalize_webhook_destination, ("Send a test webhook:", "--send-test-webhook"))
 
 
 # Stores one SMTP password in the dotenv file after the mail server has actually accepted it
@@ -5619,6 +5690,8 @@ def main():
 
     # Applied again, so a saved VERBOSE_MODE or DEBUG_MODE cannot switch off a flag the user just typed
     apply_diagnostic_cli_overrides(args)
+
+    apply_tls_verification_setting()
 
     if args.no_color is True:
         COLORED_OUTPUT = False
