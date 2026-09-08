@@ -33,6 +33,7 @@ and again before anything is published to PyPI.
 | `test_cli_startup.py` | Command line handling, config and dotenv loading, startup validation, logging setup and the effective-settings banner |
 | `test_config_loading.py` | Declarative config parsing and refusal of executable config content |
 | `test_csv_output.py` | The CSV history file, its header, its rows and its error reporting |
+| `test_diagnostic_modes.py` | What `--verbose` and `--debug` report, and which setting wins when both a flag and the config file are present |
 | `test_email_notifications.py` | SMTP validation, the delivered message and failure handling |
 | `test_error_classification.py` | Polling error classification, file descriptor exhaustion and the NPSSO auth probe |
 | `test_monitoring_loop.py` | End-to-end monitoring runs: status and game changes, session state, CSV history, alerts and every error recovery path |

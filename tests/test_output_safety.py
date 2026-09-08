@@ -62,11 +62,29 @@ def test_placeholder_values_are_not_treated_as_secrets(pm_module, monkeypatch):
     assert pm_module.known_secret_values() == []
 
 
+# The printers that redact on the caller's behalf, so a call site does not have to name the redactor itself
+SANITIZING_PRINTERS = ("sanitize_error_text", "debug_print(", "verbose_print(")
+
+
 # Guards the rule that no printed exception may reach a user without passing through the redactor
 def test_every_printed_exception_goes_through_the_redactor():
-    unguarded = [line.strip() for line in MODULE_SOURCE.split("\n") if "print(" in line and "{e}" in line and "sanitize_error_text" not in line]
+    unguarded = [line.strip() for line in MODULE_SOURCE.split("\n") if "print(" in line and "{e}" in line and not any(printer in line for printer in SANITIZING_PRINTERS)]
 
     assert unguarded == []
+
+
+# Guards the exemption above, which is only sound while both diagnostic printers redact what they are given
+@pytest.mark.parametrize("printer", ["debug_print", "verbose_print"])
+def test_the_diagnostic_printers_redact_what_they_print(pm_module, monkeypatch, capsys, printer):
+    monkeypatch.setattr(pm_module, "DEBUG_MODE", True)
+    monkeypatch.setattr(pm_module, "VERBOSE_MODE", True)
+    monkeypatch.setattr(pm_module, "PSN_NPSSO", "aVeryLongNpssoValue1234567890")
+
+    getattr(pm_module, printer)("token aVeryLongNpssoValue1234567890 refused")
+
+    printed = capsys.readouterr().out
+    assert "aVeryLongNpssoValue1234567890" not in printed
+    assert "<redacted>" in printed
 
 
 # Verifies PSN-supplied text cannot move the cursor, clear the screen or retitle the terminal window

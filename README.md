@@ -57,6 +57,7 @@ pip install psn_monitor
    * [Email Notifications](#email-notifications)
    * [CSV Export](#csv-export)
    * [Check Intervals](#check-intervals)
+   * [Verbose and Debug Output](#verbose-and-debug-output)
    * [Signal Controls (macOS/Linux/Unix)](#signal-controls-macoslinuxunix)
    * [Coloring Log Output with GRC](#coloring-log-output-with-grc)
 6. [Change Log](#change-log)
@@ -344,7 +345,7 @@ The tool automatically saves its output to `psn_monitor_<psn_user_id>.log` file.
 
 Set `ASCII_LOG_SEPARATORS` to `"Auto"` (default) to use ASCII separator-only lines on Windows, `"On"` to use them on every operating system or `"Off"` to preserve Unicode separators in logs everywhere. Terminal separators stay Unicode. Log files and all other logged text remain UTF-8.
 
-Set `TRUNCATE_CHARS` or use the `--truncate` flag to cut each screen line to a maximum width, which stops long game titles from wrapping. Use `999` to auto-detect the terminal width. The log file always keeps the full line, so the setting is ignored when logging is disabled with `-d`.
+Set `TRUNCATE_CHARS` or use the `--truncate` flag to cut each screen line to a maximum width, which stops long game titles from wrapping. Use `999` to auto-detect the terminal width. The log file always keeps the full line, so the setting is ignored when logging is disabled with `-d`. Truncation needs the optional `wcwidth` library to measure display width. If it is missing, the tool says so at startup and leaves lines untouched.
 
 Names that come from PlayStation Network, such as game titles and profile text, can contain terminal control sequences. They are removed before the text reaches the screen, the log file, the CSV file or an email, so a crafted name cannot clear your screen or overwrite a line that was already printed. Error messages are also checked for your NPSSO code and SMTP password before they are shown or logged.
 
@@ -407,6 +408,22 @@ psn_monitor <psn_user_id> -k 30 -c 120
 
 * `PSN_ACTIVE_CHECK_INTERVAL`, `-k`: check interval when the user is online (seconds)
 * `PSN_CHECK_INTERVAL`, `-c`: check interval when the user is offline (seconds)
+
+<a id="verbose-and-debug-output"></a>
+### Verbose and Debug Output
+
+Two flags make the tool explain what it is doing. They are independent, so you can use either or both:
+
+```sh
+psn_monitor <psn_user_id> --verbose --debug
+```
+
+* `VERBOSE_MODE`, `--verbose`: rare operational events, such as which configuration and dotenv files are in use, the resolved time zone, whether an email was actually delivered and when a run recovers after a series of failed checks
+* `DEBUG_MODE`, `--debug`: technical diagnostics, such as every PSN API call, the classification and text of each failure, how long the tool will wait before the next check and why, every read and write of the status and CSV files and where each secret was resolved from
+
+Debug lines are prefixed with `[DEBUG HH:MM:SS]`. Both modes redact your NPSSO code and SMTP password, and report secrets only as a length, never as a value.
+
+Both flags take effect before the configuration file is read, so they still work when the problem you are chasing is the configuration file itself. A flag you type always wins over `VERBOSE_MODE` or `DEBUG_MODE` in the configuration file.
 
 <a id="signal-controls-macoslinuxunix"></a>
 ### Signal Controls (macOS/Linux/Unix)

@@ -165,3 +165,29 @@ def test_delivery_errors_do_not_leak_the_smtp_password(pm_module, monkeypatch, c
     printed = capsys.readouterr().out
     assert "aVeryLongSmtpPassword123" not in printed
     assert "<redacted>" in printed
+
+
+# Verifies delivery is reported as an outcome, since the caller only announces the attempt
+def test_the_delivery_outcome_is_reported_not_only_the_attempt(pm_module, monkeypatch, smtp_double, capsys):
+    monkeypatch.setattr(pm_module, "VERBOSE_MODE", True)
+    monkeypatch.setattr(pm_module, "DEBUG_MODE", True)
+
+    assert pm_module.send_email("psn_monitor: test", "body", "", True) == 0
+
+    printed = capsys.readouterr().out
+    assert "SMTP connect smtp.example.test:587 (starttls=True, timeout 15s, user monitor@example.test)" in printed
+    assert "* Email delivered to alerts@example.test: psn_monitor: test" in printed
+
+
+# Verifies a failed delivery is not reported as delivered
+def test_a_failed_delivery_is_not_reported_as_delivered(pm_module, monkeypatch, capsys):
+    monkeypatch.setattr(pm_module, "VERBOSE_MODE", True)
+
+    # Refuses the connection the way an unreachable relay would
+    def refuse(*args, **kwargs):
+        raise smtplib.SMTPConnectError(421, "service not available")
+
+    monkeypatch.setattr(pm_module.smtplib, "SMTP", refuse)
+
+    assert pm_module.send_email("psn_monitor: test", "body", "", True) == 1
+    assert "Email delivered" not in capsys.readouterr().out

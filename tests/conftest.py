@@ -150,6 +150,10 @@ def deterministic_globals(monkeypatch):
     monkeypatch.setattr(pm, "DOTENV_FILE", "", raising=False)
     monkeypatch.setattr(pm, "DISABLE_LOGGING", True, raising=False)
     monkeypatch.setattr(pm, "CLEAR_SCREEN", False, raising=False)
+    # Startup assigns these directly rather than through a fixture, so without a reset a run with --debug or
+    # --verbose would leave both modes on for every later test
+    monkeypatch.setattr(pm, "VERBOSE_MODE", False, raising=False)
+    monkeypatch.setattr(pm, "DEBUG_MODE", False, raising=False)
     # load_dotenv writes into os.environ and nothing removes it again, so a test that loads a dotenv would
     # otherwise leak its secrets into every later test through the exported-environment lookup at startup
     for secret in pm.SECRET_KEYS:

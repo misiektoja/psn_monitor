@@ -122,9 +122,10 @@ def test_chain_walk_starts_at_the_reported_error(pm_module):
     assert list(pm_module.iter_exc_chain(wrapper))[0] is wrapper
 
 
-# Builds a response double carrying only the redirect location header
+# Builds a response double shaped like the redirect the PSN OAuth endpoint returns
 class FakeRedirect:
-    def __init__(self, location=None):
+    def __init__(self, location=None, status_code=302):
+        self.status_code = status_code
         self.headers = {} if location is None else {"location": location}
 
 
