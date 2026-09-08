@@ -12,7 +12,7 @@ It asks for the account to monitor, how often to check it, your [npsso code](#ps
 
 Durations accept `120`, `2m`, `1.5h`, `1h 30m` or `1d`.
 
-Your npsso code is checked against PlayStation Network before it is saved, so you find out immediately if it was copied incompletely. Any answer setup cannot use is offered again, whether you left it empty or the service refused it. Declining keeps every answer you have already given rather than restarting: an unusable webhook URL switches webhook alerts off and an unanswered mail server setting switches email alerts off.
+Your npsso code is checked against PlayStation Network before it is saved, so you find out immediately if it was copied incompletely. Any answer setup cannot use is offered again, whether you left it empty or the service refused it. Declining keeps every answer you have already given rather than restarting: an unusable webhook URL switches webhook alerts off and an unanswered mail server setting switches email alerts off. Email setup signs in to the mail server before saving, so a wrong password or an unreachable host is caught during setup instead of at the first alert. No email is sent. A refused sign-in offers the mail server questions again, and if the server was only unreachable the answers are kept so `--doctor` can check them later.
 
 Nothing is written until you choose **Save settings**. A final summary lists every answer and lets you go back and change one section without losing the others, and discarding asks a second time. An existing configuration file is backed up first. At the end it offers to run the [preflight checks](troubleshooting.md#doctor-preflight) and to start monitoring.
 

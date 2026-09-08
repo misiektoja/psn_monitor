@@ -13,6 +13,12 @@ SMTP_SECRET = "aVeryLongSmtpPassword123"
 WEBHOOK_URL = "https://discord.com/api/webhooks/123456789/aVeryLongWebhookTokenValue"
 
 
+@pytest.fixture(autouse=True)
+# Keeps the wizard's mail server sign-in check offline, so a scripted run never opens a connection
+def accepted_smtp_sign_in(monkeypatch):
+    monkeypatch.setattr(monitor, "_wizard_verify_smtp", lambda values, password: None)
+
+
 # Replays scripted answers the way a terminal does, echoing each prompt so the transcript is what a user sees
 class ScriptedTerminal:
     def __init__(self, *script, secrets=None):
@@ -56,7 +62,7 @@ def happy_path(target=USER_ID, persist="", save="1", doctor="n", monitor_now="n"
         "smtp.example.test", "587", "y", "monitor@example.test", "monitor@example.test", "alerts@example.test",
         "1",                           # the recommended notification preset
         "n",                           # no webhook alerts
-        "y", "", "", "y",              # keep the log, no CSV, default status file, coloured output
+        "y", "", "",                   # keep the log, no CSV, default status file
         save, doctor, monitor_now,
     )
 
@@ -446,3 +452,67 @@ def test_a_pasted_ntfy_authorization_scheme_can_be_abandoned(tmp_path):
     env = (tmp_path / ".env").read_text(encoding="utf-8")
     assert 'WEBHOOK_URL="https://ntfy.sh/private-topic"' in env
     assert "NTFY_ACCESS_TOKEN" not in env
+
+
+# The mail server answers the wizard asks for before the hidden password prompt
+EMAIL_ANSWERS = ("smtp.example.test", "587", "y", "monitor@example.test", "monitor@example.test", "alerts@example.test")
+
+
+# Verifies the wizard signs in with exactly the answers just given, so a wrong password is caught during setup
+def test_the_wizard_signs_in_with_the_collected_mail_server(monkeypatch, capsys):
+    attempts = []
+    monkeypatch.setattr(monitor, "_wizard_verify_smtp", lambda values, password: attempts.append((values, password)) or None)
+
+    assert run_wizard(ScriptedTerminal(*happy_path())) == 0
+
+    assert len(attempts) == 1
+    values, password = attempts[0]
+    assert values == {"SMTP_HOST": "smtp.example.test", "SMTP_PORT": 587, "SMTP_SSL": True, "SMTP_USER": "monitor@example.test", "SENDER_EMAIL": "monitor@example.test", "RECEIVER_EMAIL": "alerts@example.test"}
+    assert password == SMTP_SECRET
+    assert "The mail server accepted the sign-in. No email was sent." in capsys.readouterr().out
+
+
+# Verifies a refused sign-in offers the mail server questions again rather than saving settings that cannot work
+def test_a_refused_mail_server_sign_in_offers_another_attempt(monkeypatch, capsys):
+    advice = monitor.make_recovery_advice("smtp.authentication", "The mail server rejected the sign-in", "Use an app password", False, "535 authentication failed")
+    results = [advice, None]
+    monkeypatch.setattr(monitor, "_wizard_verify_smtp", lambda values, password: results.pop(0))
+    answers = list(happy_path())
+    terminal = ScriptedTerminal(*answers[:5], *EMAIL_ANSWERS, "y", *EMAIL_ANSWERS, *answers[11:])
+
+    assert run_wizard(terminal) == 0
+
+    output = capsys.readouterr().out
+    assert "The mail server rejected the sign-in: 535 authentication failed" in output
+    assert "To fix: Use an app password" in output
+    assert terminal.asked("Try entering the mail server settings again?")
+    assert not results
+
+
+# Verifies declining the retry keeps the answers, since being offline is the usual reason a correct setup fails here
+def test_declining_the_sign_in_retry_keeps_the_mail_server_settings(tmp_path, monkeypatch, capsys):
+    advice = monitor.make_recovery_advice("smtp.connection", "The SMTP server could not be reached", "Check SMTP_HOST", True)
+    monkeypatch.setattr(monitor, "_wizard_verify_smtp", lambda values, password: advice)
+    answers = list(happy_path())
+    terminal = ScriptedTerminal(*answers[:11], "n", *answers[11:])
+
+    assert run_wizard(terminal) == 0
+
+    assert "The settings were kept without being checked. Run --doctor to check the sign-in again." in capsys.readouterr().out
+    values = monitor.parse_config_content((tmp_path / "psn_monitor.conf").read_text(encoding="utf-8"), "psn_monitor.conf")
+    assert values["SMTP_HOST"] == "smtp.example.test"
+    assert values["SMTP_USER"] == "monitor@example.test"
+
+
+# Verifies giving up on a refused sign-in switches every email alert off rather than saving settings that cannot work
+def test_abandoning_a_refused_sign_in_switches_email_off(tmp_path, monkeypatch, capsys):
+    advice = monitor.make_recovery_advice("smtp.authentication", "The mail server rejected the sign-in", "Use an app password", False, "535 authentication failed")
+    monkeypatch.setattr(monitor, "_wizard_verify_smtp", lambda values, password: advice)
+    answers = list(happy_path())
+    terminal = ScriptedTerminal(*answers[:11], "n", *answers[12:])
+
+    assert run_wizard(terminal) == 0
+
+    assert "Email notifications stay off until the mail server accepts the settings." in capsys.readouterr().out
+    values = monitor.parse_config_content((tmp_path / "psn_monitor.conf").read_text(encoding="utf-8"), "psn_monitor.conf")
+    assert all(values[name] is False for name in monitor.WIZARD_EMAIL_NOTIFICATION_KEYS)

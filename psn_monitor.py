@@ -4705,6 +4705,10 @@ class WizardSetupState:
         self.persist_target = True
 
 
+# The mail server settings the wizard collects, and how long its sign-in check waits for the server
+WIZARD_SMTP_CONFIG_KEYS = ("SMTP_HOST", "SMTP_PORT", "SMTP_SSL", "SMTP_USER", "SENDER_EMAIL", "RECEIVER_EMAIL")
+WIZARD_SMTP_TIMEOUT = 5
+
 # The email alert settings the wizard offers, in the order the questions are asked
 WIZARD_EMAIL_NOTIFICATION_KEYS = ("ACTIVE_INACTIVE_NOTIFICATION", "GAME_CHANGE_NOTIFICATION", "ERROR_NOTIFICATION")
 
@@ -4716,9 +4720,9 @@ WIZARD_SECTIONS = (
     ("Target", "Target", "Change the PlayStation account that is monitored.", ("PSN_USER_ID",), ()),
     ("Polling", "Polling intervals", "Change how often PlayStation Network is checked.", ("PSN_CHECK_INTERVAL", "PSN_ACTIVE_CHECK_INTERVAL"), ()),
     ("Authentication", "Authentication", "Enter the NPSSO code again.", (), ("PSN_NPSSO",)),
-    ("Email", "Email notifications", "Change SMTP details and which events are mailed.", ("SMTP_HOST", "SMTP_PORT", "SMTP_SSL", "SMTP_USER", "SENDER_EMAIL", "RECEIVER_EMAIL") + WIZARD_EMAIL_NOTIFICATION_KEYS, ("SMTP_PASSWORD",)),
+    ("Email", "Email notifications", "Change SMTP details and which events are mailed.", WIZARD_SMTP_CONFIG_KEYS + WIZARD_EMAIL_NOTIFICATION_KEYS, ("SMTP_PASSWORD",)),
     ("Webhook", "Webhook notifications", "Change the Discord or ntfy destination and which events are sent.", ("WEBHOOK_ENABLED", "WEBHOOK_PROVIDER") + WIZARD_WEBHOOK_NOTIFICATION_KEYS, ("WEBHOOK_URL", "NTFY_ACCESS_TOKEN")),
-    ("Output", "Output files", "Change the log, CSV and status file destinations and the coloured output.", ("DISABLE_LOGGING", "CSV_FILE", "PSN_STATUS_FILE", "COLORED_OUTPUT"), ()),
+    ("Output", "Output files", "Change the log, CSV and status file destinations.", ("DISABLE_LOGGING", "CSV_FILE", "PSN_STATUS_FILE"), ()),
 )
 
 
@@ -4743,7 +4747,7 @@ def _wizard_collect_target_section(state, initial_target=None, input_func=None):
             print(f"  {exc}")
             continue
         break
-    state.persist_target = _wizard_ask_yes_no("Save this account in the generated config?", default=state.persist_target, input_func=input_func)
+    state.persist_target = _wizard_ask_yes_no("Persist this target in the generated config?", default=state.persist_target, input_func=input_func)
     _wizard_apply_target(state)
 
 
@@ -4789,25 +4793,32 @@ def _wizard_collect_email_section(state, input_func=None, getpass_func=None):
     if not _wizard_ask_yes_no("Configure email notifications?", default=False, input_func=input_func):
         _wizard_disable_email(state)
         return
-    state.config_values["SMTP_HOST"] = _wizard_ask_text("SMTP host", default=_wizard_default(state.config_values.get("SMTP_HOST")), required=True, input_func=input_func)
-    if _wizard_email_answer_missing(state, "SMTP_HOST"):
-        return
-    state.config_values["SMTP_PORT"] = _wizard_ask_positive_int("SMTP port", int(state.config_values.get("SMTP_PORT") or 587), input_func=input_func)
-    state.config_values["SMTP_SSL"] = _wizard_ask_yes_no("Enable TLS/SSL for SMTP?", default=True, input_func=input_func)
-    state.config_values["SMTP_USER"] = _wizard_ask_text("SMTP username", default=_wizard_default(state.config_values.get("SMTP_USER")), required=True, input_func=input_func)
-    if _wizard_email_answer_missing(state, "SMTP_USER"):
-        return
-    state.config_values["SENDER_EMAIL"] = _wizard_ask_text("Sender email", default=_wizard_default(state.config_values.get("SENDER_EMAIL")), required=True, input_func=input_func)
-    if _wizard_email_answer_missing(state, "SENDER_EMAIL"):
-        return
-    state.config_values["RECEIVER_EMAIL"] = _wizard_ask_text("Receiver email", default=_wizard_default(state.config_values.get("RECEIVER_EMAIL")), required=True, input_func=input_func)
-    if _wizard_email_answer_missing(state, "RECEIVER_EMAIL"):
-        return
-    password = _wizard_ask_secret("SMTP password", getpass_func=getpass_func)
-    if password:
-        state.secret_updates["SMTP_PASSWORD"] = password
+    while True:
+        state.config_values["SMTP_HOST"] = _wizard_ask_text("SMTP host", default=_wizard_default(state.config_values.get("SMTP_HOST")), required=True, input_func=input_func)
+        if _wizard_email_answer_missing(state, "SMTP_HOST"):
+            return
+        state.config_values["SMTP_PORT"] = _wizard_ask_positive_int("SMTP port", int(state.config_values.get("SMTP_PORT") or 587), input_func=input_func)
+        state.config_values["SMTP_SSL"] = _wizard_ask_yes_no("Enable TLS/SSL for SMTP?", default=bool(state.config_values.get("SMTP_SSL", True)), input_func=input_func)
+        state.config_values["SMTP_USER"] = _wizard_ask_text("SMTP username", default=_wizard_default(state.config_values.get("SMTP_USER")), required=True, input_func=input_func)
+        if _wizard_email_answer_missing(state, "SMTP_USER"):
+            return
+        state.config_values["SENDER_EMAIL"] = _wizard_ask_text("Sender email", default=_wizard_default(state.config_values.get("SENDER_EMAIL")), required=True, input_func=input_func)
+        if _wizard_email_answer_missing(state, "SENDER_EMAIL"):
+            return
+        state.config_values["RECEIVER_EMAIL"] = _wizard_ask_text("Receiver email", default=_wizard_default(state.config_values.get("RECEIVER_EMAIL")), required=True, input_func=input_func)
+        if _wizard_email_answer_missing(state, "RECEIVER_EMAIL"):
+            return
+        password = _wizard_ask_secret("SMTP password", getpass_func=getpass_func)
+        if password:
+            state.secret_updates["SMTP_PASSWORD"] = password
+        outcome = _wizard_smtp_sign_in_accepted({name: state.config_values[name] for name in WIZARD_SMTP_CONFIG_KEYS}, password, input_func=input_func)
+        if outcome is None:
+            _wizard_disable_email(state)
+            return
+        if outcome:
+            break
     preset = _wizard_ask_choice("Which email notifications should be enabled?", [
-        ("Status, games and errors, recommended", "Online and offline changes, game changes and monitoring errors."),
+        ("Status and errors, recommended", "Online and offline changes, game changes and monitoring errors."),
         ("Every supported event", "Enables all email notification types."),
         ("Custom", "Choose each notification type separately."),
     ], input_func=input_func)
@@ -4822,6 +4833,42 @@ def _wizard_collect_email_section(state, input_func=None, getpass_func=None):
         )
         selected = {name: _wizard_ask_yes_no(question, default=False, input_func=input_func) for name, question in questions}
     state.config_values.update(selected)
+
+
+# Signs in to the collected mail server without sending anything, so a refused login is caught during setup
+def _wizard_verify_smtp(values, password):
+    names = WIZARD_SMTP_CONFIG_KEYS + ("SMTP_PASSWORD",)
+    previous = {name: globals()[name] for name in names}
+    try:
+        globals().update(values)
+        # A blank answer keeps the password already stored, which is the one the sign-in must then prove
+        smtp_sign_in(password or previous["SMTP_PASSWORD"], timeout=WIZARD_SMTP_TIMEOUT)
+        return None
+    except RecoveryError as exc:
+        return exc.advice
+    except Exception as exc:
+        return classify_recovery_error(exc, context="smtp")
+    finally:
+        globals().update(previous)
+
+
+# Reports the outcome of the sign-in check: True to continue, False to ask again, None to switch email off
+def _wizard_smtp_sign_in_accepted(values, password, input_func=None):
+    print("  Checking the sign-in with the mail server ...")
+    advice = _wizard_verify_smtp(values, password)
+    if advice is None:
+        print("  The mail server accepted the sign-in. No email was sent.")
+        return True
+    print(f"  {advice.summary}: {advice.detail}" if advice.detail else f"  {advice.summary}")
+    print(f"  To fix: {advice.fix}")
+    if _wizard_offer_retry("mail server settings", input_func=input_func):
+        return False
+    if advice.retryable:
+        # Being offline is the usual reason a correct setup fails here, so the answers are kept rather than discarded
+        print("  The settings were kept without being checked. Run --doctor to check the sign-in again.")
+        return True
+    print("  Email notifications stay off until the mail server accepts the settings.")
+    return None
 
 
 # Switches every email alert off together, so an abandoned answer cannot leave half a mail server configured
@@ -4841,21 +4888,21 @@ def _wizard_email_answer_missing(state, key):
 
 # Asks whether to send webhook alerts and collects only the settings that choice needs
 def _wizard_collect_webhook_section(state, input_func=None, getpass_func=None):
-    if not _wizard_ask_yes_no("Configure webhook notifications (Discord, ntfy)?", default=bool(state.config_values.get("WEBHOOK_ENABLED")), input_func=input_func):
+    if not _wizard_ask_yes_no("Set up webhook alerts (Discord, ntfy etc.)?", default=bool(state.config_values.get("WEBHOOK_ENABLED")), input_func=input_func):
         _wizard_disable_webhook(state)
         return
-    choice = _wizard_ask_choice("Which service should receive the alerts?", [
-        ("Discord", "Sends an embed to one Discord channel webhook."),
-        ("ntfy", "Sends a native notification to one ntfy topic."),
+    choice = _wizard_ask_choice("Which webhook service should receive alerts?", [
+        ("Discord", "Sends a Discord embed to one channel webhook."),
+        ("ntfy", "Sends a native notification to one ntfy topic URL."),
     ], input_func=input_func)
     provider = "discord" if choice == 0 else "ntfy"
     state.config_values["WEBHOOK_PROVIDER"] = provider
     if provider == "discord":
         print("  In Discord: Edit Channel > Integrations > Webhooks > New Webhook > Copy Webhook URL.")
     else:
-        print("  In ntfy: pick a hard-to-guess topic. Paste its name for ntfy.sh, or the complete HTTPS URL of a self-hosted server.")
+        print("  In ntfy: choose a hard-to-guess topic. Paste its name for ntfy.sh or use the complete HTTPS URL for a self-hosted server.")
     while True:
-        entered = _wizard_ask_secret("Discord webhook URL" if provider == "discord" else "ntfy topic URL or ntfy.sh topic name", getpass_func=getpass_func)
+        entered = _wizard_ask_secret("Paste the Discord webhook URL" if provider == "discord" else "Paste the ntfy topic URL or ntfy.sh topic name", getpass_func=getpass_func)
         webhook_url = normalize_ntfy_topic_url(entered) if provider == "ntfy" else str(entered).strip()
         if validate_webhook_url(webhook_url):
             state.secret_updates["WEBHOOK_URL"] = webhook_url
@@ -4867,27 +4914,27 @@ def _wizard_collect_webhook_section(state, input_func=None, getpass_func=None):
                 return
             continue
         if provider == "ntfy":
-            print("  Enter a complete HTTPS ntfy topic URL, or a topic name of up to 64 letters, digits, hyphens or underscores.")
+            print("  Enter a complete HTTPS ntfy topic URL or a topic name containing up to 64 letters, numbers, dashes or underscores.")
         else:
-            print("  That does not look like a complete HTTPS webhook URL. Copy it again from Discord.")
+            print("  That does not look like a complete HTTPS webhook URL. Copy it from the webhook service and try again.")
         if not _wizard_offer_retry("webhook URL", input_func=input_func):
             _wizard_disable_webhook(state)
             return
     if provider == "ntfy" and _wizard_ask_yes_no("Authenticate this ntfy topic with a separate access token?", default=False, input_func=input_func):
         while True:
-            token = _wizard_ask_secret("ntfy access token", getpass_func=getpass_func)
+            token = _wizard_ask_secret("Paste the ntfy access token only", getpass_func=getpass_func)
             if not token or ("\r" not in token and "\n" not in token and not token.casefold().startswith(("bearer ", "basic "))):
                 if token:
                     state.secret_updates["NTFY_ACCESS_TOKEN"] = token
                 break
-            print("  Paste the access token on its own, without a Bearer or Basic prefix.")
+            print("  Paste only the access token without a Bearer or Basic prefix.")
             if not _wizard_offer_retry("ntfy access token", input_func=input_func):
                 break
     state.config_values["WEBHOOK_ENABLED"] = True
-    preset = _wizard_ask_choice("Which webhook notifications should be enabled?", [
-        ("Status, games and errors, recommended", "Online and offline changes, game changes and monitoring errors."),
-        ("Every supported event", "Enables all webhook notification types."),
-        ("Custom", "Choose each notification type separately."),
+    preset = _wizard_ask_choice("Which webhook alerts should be sent?", [
+        ("Status and errors, recommended", "Online and offline changes, game changes and monitoring errors."),
+        ("Every supported alert", "Enables all webhook alert types."),
+        ("Custom", "Choose each webhook alert separately."),
     ], input_func=input_func)
     if preset in (0, 1):
         selected = {name: True for name in WIZARD_WEBHOOK_NOTIFICATION_KEYS}
@@ -4911,10 +4958,9 @@ def _wizard_disable_webhook(state):
 
 # Collects the files monitoring would write
 def _wizard_collect_output_section(state, input_func=None):
-    state.config_values["DISABLE_LOGGING"] = not _wizard_ask_yes_no("Write the normal per-user log file?", default=not bool(state.config_values.get("DISABLE_LOGGING")), input_func=input_func)
+    state.config_values["DISABLE_LOGGING"] = not _wizard_ask_yes_no("Write the normal per-target log file?", default=not bool(state.config_values.get("DISABLE_LOGGING")), input_func=input_func)
     state.config_values["CSV_FILE"] = _wizard_ask_text("Optional CSV output path (blank disables it)", default=str(state.config_values.get("CSV_FILE") or ""), input_func=input_func)
     state.config_values["PSN_STATUS_FILE"] = _wizard_ask_text("Optional status file path (blank uses the default next to the tool)", default=str(state.config_values.get("PSN_STATUS_FILE") or ""), input_func=input_func)
-    state.config_values["COLORED_OUTPUT"] = _wizard_ask_yes_no("Use coloured terminal output?", default=bool(state.config_values.get("COLORED_OUTPUT", True)), input_func=input_func)
 
 
 # Runs one editable section again after resetting only the keys it owns
@@ -4984,7 +5030,6 @@ def _wizard_print_setup_summary(state):
         ("Output log", "disabled" if state.config_values.get("DISABLE_LOGGING") else "enabled"),
         ("CSV output", state.config_values.get("CSV_FILE") or "disabled"),
         ("Status file", state.config_values.get("PSN_STATUS_FILE") or "default"),
-        ("Coloured output", "enabled" if state.config_values.get("COLORED_OUTPUT", True) else "disabled"),
         ("Config destination", state.config_path),
         ("Dotenv destination", state.env_path),
         ("Install method", install_method_display_name()),

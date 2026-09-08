@@ -157,17 +157,16 @@ def test_the_welcome_screen_transcript_holds_the_output_contract(tmp_path):
 # Answers one complete wizard run that saves, keyed on the prompt each answer belongs to
 WIZARD_SCRIPT = [
     ("PlayStation online ID to monitor", b"misiektoja"),
-    ("Save this account in the generated config?", b""),
+    ("Persist this target in the generated config?", b""),
     ("Polling interval while the user is offline", b""),
     ("Polling interval while the user is online", b""),
     ("NPSSO code:", b""),
     ("Continue without the NPSSO code?", b"y"),
     ("Configure email notifications?", b"n"),
-    ("Configure webhook notifications", b"n"),
-    ("Write the normal per-user log file?", b"y"),
+    ("Set up webhook alerts (Discord, ntfy etc.)?", b"n"),
+    ("Write the normal per-target log file?", b"y"),
     ("Optional CSV output path", b""),
     ("Optional status file path", b""),
-    ("Use coloured terminal output?", b""),
     ("Choose [1-3]:", b"1"),
     ("Run doctor now?", b"n"),
 ]
