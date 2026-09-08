@@ -262,3 +262,20 @@ def test_the_startup_summary_offers_the_flags_then_reports_them(pm_module, monke
     assert "Debug mode:" in with_verbose
     # The concise view stays short, and asking for the full one is what adds the rest
     assert without_flags.count("\n* ") < with_verbose.count("\n* ")
+
+
+# Verifies the settings count is a debug trace rather than a verbose line, since it says nothing a user acts on
+def test_the_config_settings_count_is_a_debug_only_trace(pm_module, tmp_path, monkeypatch, capsys):
+    config = tmp_path / "psn_monitor.conf"
+    config.write_text("CLEAR_SCREEN = False\nDISABLE_LOGGING = True\n", encoding="utf-8")
+    namespace = {}
+
+    monkeypatch.setattr(pm_module, "VERBOSE_MODE", True)
+    monkeypatch.setattr(pm_module, "DEBUG_MODE", False)
+    pm_module.load_config_file(config, namespace=namespace)
+    assert "settings from the configuration file" not in capsys.readouterr().out
+
+    monkeypatch.setattr(pm_module, "VERBOSE_MODE", False)
+    monkeypatch.setattr(pm_module, "DEBUG_MODE", True)
+    pm_module.load_config_file(config, namespace=namespace)
+    assert "Configuration applied" in capsys.readouterr().out

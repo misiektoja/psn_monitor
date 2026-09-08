@@ -2822,7 +2822,6 @@ def load_config_file(config_path, namespace=None, report_errors=True, advice_out
         parsed_values = parse_config_content(content, str(config_path), retired_settings)
         selected_namespace.update(parsed_values)
         debug_print("Configuration applied", path=config_path, settings=len(parsed_values), names=", ".join(sorted(parsed_values)) or "none")
-        verbose_print(f"Loaded {len(parsed_values)} settings from the configuration file")
         if retired_settings and report_errors:
             print(f"* Note: {describe_retired_settings(retired_settings, chr(39) + str(config_path) + chr(39))}")
         return True
