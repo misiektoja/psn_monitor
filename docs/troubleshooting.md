@@ -46,9 +46,16 @@ Two flags make the tool explain what it is doing. They are independent, so you c
 psn_monitor <psn_user_id> --verbose --debug
 ```
 
-* `VERBOSE_MODE`, `--verbose`: rare operational events, such as which configuration and dotenv files are in use, the resolved time zone, whether an email was actually delivered and when a run recovers after a series of failed checks
+* `VERBOSE_MODE`, `--verbose`: operational events, such as how many settings the configuration file supplied, whether an email was actually delivered, when a run recovers after a series of failed checks, one line per completed check so a quiet run still shows the loop is alive, and what a liveness banner means. It also expands the startup summary, which is where the configuration file, dotenv file, time zone and the source of each secret are named
 * `DEBUG_MODE`, `--debug`: technical diagnostics, such as every PSN API call, the classification and text of each failure, how long the tool will wait before the next check and why, every read and write of the status and CSV files and where each secret was resolved from
 
-Debug lines are prefixed with `[DEBUG HH:MM:SS]`. Both modes redact every secret, including your npsso code, SMTP password, webhook URL and ntfy access token, and report a secret by name and source rather than by value. The npsso code also reports its length, because a code truncated while copying is the usual reason it stops working. Your SMTP password reports only that it is set.
+Debug lines are prefixed with `[DEBUG HH:MM:SS]`, then name the operation and list its details as comma-separated `key=value` fields, matching the sibling monitors:
+
+```
+[DEBUG 00:03:02] Connectivity check: url=https://psn.example/probe, timeout=7s
+[DEBUG 00:03:02] Connectivity check: url=https://psn.example/probe, outcome=OK
+```
+
+Every outbound call reports `outcome=OK` or `outcome=failed` with an `error=` field. Both modes redact every secret, including your npsso code, SMTP password, webhook URL and ntfy access token, and report a secret by name and source rather than by value. The npsso code also reports its length, because a code truncated while copying is the usual reason it stops working. Your SMTP password reports only that it is set.
 
 Both flags take effect before the configuration file is read, so they still work when the problem you are chasing is the configuration file itself. A flag you type always wins over `VERBOSE_MODE` or `DEBUG_MODE` in the configuration file.

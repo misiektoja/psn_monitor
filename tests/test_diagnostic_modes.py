@@ -4,6 +4,7 @@ Each coverage test drives the real code path with the failure injected rather th
 calling the printers directly, so an uninstrumented path fails the test.
 """
 
+import re
 import sys
 
 import pytest
@@ -85,8 +86,8 @@ def test_debug_reports_the_connectivity_check(pm_module, monkeypatch, both_modes
     assert REAL_CHECK_INTERNET("https://psn.example/probe", 7) is False
 
     output = capsys.readouterr().out
-    assert "HTTP GET https://psn.example/probe (connectivity check, timeout 7s)" in output
-    assert "HTTP GET https://psn.example/probe failed: ConnectionError" in output
+    assert "Connectivity check: url=https://psn.example/probe, timeout=7s" in output
+    assert "Connectivity check: url=https://psn.example/probe, outcome=failed, error=ConnectionError" in output
 
 
 # Verifies a PSN call that fails inside the monitoring loop is named along with how it was classified
@@ -97,8 +98,8 @@ def test_debug_reports_the_presence_call_and_its_failure(pm_module, psn_session,
 
     output = capsys.readouterr().out
     assert f"PSNAWP session init for PSN user '{USER_ID}'" in output
-    assert f"Starting check #1 for '{USER_ID}', PSN API get_presence()" in output
-    assert "classified as 'network.unavailable' under the transient retry policy: ConnectionError: connection reset by peer" in output
+    assert f"Starting check: check=#1, user={USER_ID}, operation=PSN API get_presence()" in output
+    assert "recovery_code=network.unavailable, policy=transient, outcome=failed, error=ConnectionError: connection reset by peer" in output
 
 
 # Verifies an exception the tool swallows on purpose still leaves a trace under debug
@@ -143,7 +144,7 @@ def test_debug_reports_a_failed_file_write(pm_module, psn_session, fake_clock, b
 
     run_monitor(pm_module, str(unwritable))
 
-    assert f"CSV file '{unwritable}' could not be initialized: IsADirectoryError" in capsys.readouterr().out
+    assert f"CSV initialization: path={unwritable}, outcome=failed, error=IsADirectoryError" in capsys.readouterr().out
 
 
 # Verifies every wait names how long it is and why, so a stalled run can be explained from the transcript
@@ -153,10 +154,10 @@ def test_debug_reports_each_sleep_with_its_interval_and_reason(pm_module, psn_se
     run_monitor(pm_module)
 
     output = capsys.readouterr().out
-    assert "Sleeping 3 minutes before the first check (status: offline)" in output
-    assert "Sleeping 15 seconds after a transient failure (streak: 1)" in output
-    assert f"Check #2 done for '{USER_ID}'" in output
-    assert "next check in 3 minutes" in output
+    assert "Waiting: interval=3 minutes, reason=before the first check, status=offline" in output
+    assert "Waiting: interval=15 seconds, reason=transient failure, streak=1" in output
+    assert f"Completed check: check=#2, user={USER_ID}" in output
+    assert "next=3 minutes" in output
 
 
 # Verifies recovering from a run of failures is reported, since nothing else marks the end of a streak
@@ -177,11 +178,11 @@ def test_debug_reports_the_config_load_and_the_secret_source(pm_module, monkeypa
     run_main(pm_module, monkeypatch, ["--config-file", str(config), "--debug", USER_ID])
 
     output = capsys.readouterr().out
-    assert f"Config file '{config}' applied 2 settings: PSN_CHECK_INTERVAL, PSN_NPSSO" in output
-    assert "Secret PSN_NPSSO is set, 17 chars, resolved from configuration file" in output
+    assert f"Configuration applied: path={config}, settings=2, names=PSN_CHECK_INTERVAL, PSN_NPSSO" in output
+    assert "Secret resolution: name=PSN_NPSSO, source=configuration file, value=set, 17 chars" in output
     # A password the user chose is reported as present only, since debug output is what bug reports carry
-    assert "Secret SMTP_PASSWORD is set, resolved from" in output
-    assert f"Secret SMTP_PASSWORD is set, {len(pm_module.SMTP_PASSWORD)} chars" not in output
+    assert "Secret resolution: name=SMTP_PASSWORD, source=" in output and "value=set" in output
+    assert f"value=set, {len(pm_module.SMTP_PASSWORD)} chars" not in output
 
 
 # Verifies a secret supplied on the command line is reported as such, without any part of its value
@@ -189,7 +190,7 @@ def test_debug_never_prints_the_credential_it_reports(pm_module, monkeypatch, mo
     run_main(pm_module, monkeypatch, ["--debug", "-n", "aVeryLongNpssoValue1234567890", USER_ID])
 
     output = capsys.readouterr().out
-    assert "PSN_NPSSO taken from the command line (set, 29 chars)" in output
+    assert "Secret resolution: name=PSN_NPSSO, source=command line, value=set, 29 chars" in output
     assert "aVeryLongNpssoValue1234567890" not in output
 
 
@@ -215,7 +216,7 @@ def test_the_debug_flag_applies_before_the_config_file_is_read(pm_module, monkey
 
     assert run_main(pm_module, monkeypatch, ["--config-file", str(config), "--debug", USER_ID]) == 1
 
-    assert f"Config file '{config}' rejected: Config file" in capsys.readouterr().out
+    assert f"Configuration rejected: path={config}, reason=Config file" in capsys.readouterr().out
 
 
 # Verifies turning one mode on does not turn the other on
@@ -229,9 +230,10 @@ def test_the_two_modes_are_independent(pm_module, monkeypatch, monitor_calls, ca
     debug_only = capsys.readouterr().out
 
     assert "[DEBUG " not in verbose_only
-    assert "* Local timezone resolved to" in verbose_only
     assert "[DEBUG " in debug_only
-    assert "* Local timezone resolved to" not in debug_only
+    # The startup summary reports each mode separately, so one flag must never switch the other on
+    assert re.search(r"\* Verbose mode:\s+True", verbose_only) and re.search(r"\* Debug mode:\s+False", verbose_only)
+    assert re.search(r"\* Verbose mode:\s+False", debug_only) and re.search(r"\* Debug mode:\s+True", debug_only)
 
 
 # Verifies neither mode prints anything on a run that exercises the paths both of them instrument
@@ -243,7 +245,7 @@ def test_neither_mode_prints_anything_when_both_are_off(pm_module, psn_session, 
     output = capsys.readouterr().out
     assert "[DEBUG " not in output
     assert "Recovered after" not in output
-    assert "Sleeping " not in output
+    assert "Waiting:" not in output
 
 
 # Verifies the startup summary points at the flags while they are off, and reports them once they are on

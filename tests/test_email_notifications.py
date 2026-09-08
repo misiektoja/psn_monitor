@@ -177,7 +177,7 @@ def test_the_delivery_outcome_is_reported_not_only_the_attempt(pm_module, monkey
     assert pm_module.send_email("psn_monitor: test", "body", "", True) == 0
 
     printed = capsys.readouterr().out
-    assert "SMTP connect smtp.example.test:587 (starttls=True, timeout 15s, user monitor@example.test)" in printed
+    assert "SMTP delivery: host=smtp.example.test, port=587, starttls=True, timeout=15s, user=monitor@example.test" in printed
     assert "* Email delivered to alerts@example.test: psn_monitor: test" in printed
 
 

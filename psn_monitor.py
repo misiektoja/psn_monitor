@@ -478,7 +478,7 @@ def probe_npsso_auth_error(npsso):
         from psnawp_api.core.authenticator import Authenticator
         from psnawp_api.utils.endpoints import BASE_PATH, API_PATH
     except Exception as diag_exc:
-        debug_print(f"Auth probe unavailable, PSNAWP internals could not be imported: {type(diag_exc).__name__}: {diag_exc}")
+        debug_print("Auth probe unavailable, PSNAWP internals could not be imported", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
         return None
     try:
         md = Authenticator.AUTH_METADATA
@@ -512,9 +512,9 @@ def probe_npsso_auth_error(npsso):
             "turnOnTrustedBrowser": "true",
             "ui": "pr",
         }
-        debug_print(f"HTTP GET {BASE_PATH['base_uri']}{API_PATH['oauth_code']} (auth probe, timeout 15s)")
+        debug_print("Auth probe", url=f"{BASE_PATH['base_uri']}{API_PATH['oauth_code']}", timeout="15s")
         resp = req.get(f"{BASE_PATH['base_uri']}{API_PATH['oauth_code']}", headers=headers, params=params, allow_redirects=False, timeout=15, verify=VERIFY_SSL)
-        debug_print(f"Auth probe returned HTTP {resp.status_code}")
+        debug_print("Auth probe", status=resp.status_code)
         loc = resp.headers.get("location", "")
         if not loc:
             return None
@@ -529,7 +529,7 @@ def probe_npsso_auth_error(npsso):
             return ("PSN Terms of Service / User Agreement must be re-accepted. Log into your account at https://my.account.sony.com or in the PlayStation App to accept the updated Terms of Service and try again.")
         return f"PSN auth rejected (error={err or 'n/a'} error_code={err_code or 'n/a'} error_description={err_desc or 'n/a'})"
     except Exception as diag_exc:
-        debug_print(f"Auth probe against the PSN OAuth endpoint failed: {type(diag_exc).__name__}: {diag_exc}")
+        debug_print("Auth probe against the PSN OAuth endpoint failed", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
         return None
 
 
@@ -707,7 +707,7 @@ def recovery_exception_types():
         types["timeout"].append(RequestsTimeout)
         types["unavailable"].extend((RequestsConnectionError, RequestsSSLError, RequestsChunkedEncodingError))
     except Exception as diag_exc:
-        debug_print(f"requests exception types unavailable, transient error detection is reduced: {type(diag_exc).__name__}: {diag_exc}")
+        debug_print("requests exception types unavailable, transient error detection is reduced", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
     try:
         from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError, PSNAWPForbiddenError, PSNAWPInvalidTokenError, PSNAWPNotFoundError, PSNAWPTooManyRequestsError, PSNAWPUnauthorizedError
         types["auth"].extend((PSNAWPAuthenticationError, PSNAWPUnauthorizedError, PSNAWPInvalidTokenError))
@@ -715,7 +715,7 @@ def recovery_exception_types():
         types["forbidden"].append(PSNAWPForbiddenError)
         types["rate_limited"].append(PSNAWPTooManyRequestsError)
     except Exception as diag_exc:
-        debug_print(f"PSNAWP exception types unavailable, PSN errors fall back to text matching: {type(diag_exc).__name__}: {diag_exc}")
+        debug_print("PSNAWP exception types unavailable, PSN errors fall back to text matching", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
     return {name: tuple(values) for name, values in types.items()}
 
 
@@ -975,9 +975,16 @@ def secret_fingerprint(value, key=None):
     return f"set, {len(value)} chars" if key in FIXED_LENGTH_SECRET_KEYS else "set"
 
 
+# Renders one diagnostic line as an operation followed by comma-separated key=value fields, dropping unset ones
+def format_diagnostic_line(operation, fields):
+    rendered = ", ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
+    return f"{operation}: {rendered}" if rendered else str(operation)
+
+
 # Prints a technical diagnostic line, shown only when debug mode is on
-def debug_print(message):
+def debug_print(_operation, **fields):
     if DEBUG_MODE:
+        message = format_diagnostic_line(_operation, fields)
         print(f"[DEBUG {datetime.now().strftime('%H:%M:%S')}] {sanitize_error_text(message)}")
 
 
@@ -1123,7 +1130,7 @@ def create_timestamped_backup(destination, attempts=100):
             try:
                 os.unlink(str(backup_path))
             except OSError as cleanup_error:
-                debug_print(f"Could not remove the failed backup '{backup_path}': {cleanup_error}")
+                debug_print(f"Could not remove the failed backup '{backup_path}'", outcome="failed", error=f"{type(cleanup_error).__name__}: {cleanup_error}")
             raise
         debug_print(f"Backed up '{destination_path}' to '{backup_path}'")
         return str(backup_path)
@@ -1728,19 +1735,19 @@ def psn_client(npsso=None):
     try:
         client.authenticator.request_builder.session.verify = VERIFY_SSL
     except AttributeError as diag_exc:
-        debug_print(f"TLS verification could not be applied to the PSNAWP session: {diag_exc}")
+        debug_print("TLS verification could not be applied to the PSNAWP session", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
     return client
 
 
 # Checks internet connectivity
 def check_internet(url=CHECK_INTERNET_URL, timeout=CHECK_INTERNET_TIMEOUT):
-    debug_print(f"HTTP GET {url} (connectivity check, timeout {timeout}s)")
+    debug_print("Connectivity check", url=url, timeout=f"{timeout}s")
     try:
         _ = req.get(url, timeout=timeout, verify=VERIFY_SSL)
-        debug_print(f"HTTP GET {url} succeeded")
+        debug_print("Connectivity check", url=url, outcome="OK")
         return True
     except req.RequestException as e:
-        debug_print(f"HTTP GET {url} failed: {type(e).__name__}: {e}")
+        debug_print("Connectivity check", url=url, outcome="failed", error=f"{type(e).__name__}: {e}")
         report_recovery_error(e, context="startup", detail=f"The connectivity check to {url} failed: {e}")
         return False
 
@@ -1755,7 +1762,7 @@ def clear_screen(enabled=True):
         else:
             os.system('clear')
     except Exception as e:
-        debug_print(f"Clearing the screen failed: {type(e).__name__}: {e}")
+        debug_print("Clearing the screen failed", outcome="failed", error=f"{type(e).__name__}: {e}")
         print("* Cannot clear the screen contents")
 
 
@@ -1801,7 +1808,7 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
         try:
             timestamp1 = isoparse(timestamp1)
         except Exception as diag_exc:
-            debug_print(f"Cannot parse the first timestamp as a date, timespan reported as empty: {type(diag_exc).__name__}: {diag_exc}")
+            debug_print("Cannot parse the first timestamp as a date, timespan reported as empty", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
             return ""
 
     if isinstance(timestamp1, int):
@@ -1823,7 +1830,7 @@ def calculate_timespan(timestamp1, timestamp2, show_weeks=True, show_hours=True,
         try:
             timestamp2 = isoparse(timestamp2)
         except Exception as diag_exc:
-            debug_print(f"Cannot parse the second timestamp as a date, timespan reported as empty: {type(diag_exc).__name__}: {diag_exc}")
+            debug_print("Cannot parse the second timestamp as a date, timespan reported as empty", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
             return ""
 
     if isinstance(timestamp2, int):
@@ -1927,7 +1934,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
     subject = plain_text(subject)
     body = plain_text(body)
 
-    debug_print(f"SMTP connect {SMTP_HOST}:{SMTP_PORT} (starttls={bool(use_ssl)}, timeout {smtp_timeout}s, user {SMTP_USER})")
+    debug_print("SMTP delivery", host=SMTP_HOST, port=SMTP_PORT, starttls=bool(use_ssl), timeout=f"{smtp_timeout}s", user=SMTP_USER)
     try:
         if use_ssl:
             ssl_context = ssl.create_default_context()
@@ -1958,7 +1965,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         return 1
     # Reported separately from the "Sending email notification" line, which only records the attempt
     verbose_print(f"Email delivered to {RECEIVER_EMAIL}: {subject}")
-    debug_print(f"SMTP delivery finished for {RECEIVER_EMAIL}")
+    debug_print("SMTP delivery", recipient=RECEIVER_EMAIL, outcome="OK")
     return 0
 
 
@@ -2083,7 +2090,7 @@ def webhook_retry_after_seconds(response):
     try:
         payload = response.json()
     except Exception as diag_exc:
-        debug_print(f"Webhook retry response has no JSON body: {type(diag_exc).__name__}: {diag_exc}")
+        debug_print("Webhook retry response has no JSON body", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
         payload = None
     if isinstance(payload, dict):
         candidates.append(payload.get("retry_after"))
@@ -2097,7 +2104,7 @@ def webhook_retry_after_seconds(response):
                 retry_at = parsedate_to_datetime(str(candidate))
                 seconds = (retry_at - datetime.now(retry_at.tzinfo)).total_seconds()
             except Exception as diag_exc:
-                debug_print(f"Cannot parse the webhook Retry-After value: {type(diag_exc).__name__}: {diag_exc}")
+                debug_print("Cannot parse the webhook Retry-After value", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
                 continue
         return max(0.0, min(seconds, WEBHOOK_MAX_RETRY_AFTER_SECONDS))
     return WEBHOOK_FALLBACK_RETRY_SECONDS
@@ -2317,7 +2324,7 @@ def send_webhook(title, description, notification_type="status", force=False, sl
     for attempt in range(WEBHOOK_MAX_ATTEMPTS):
         attempt_number = attempt + 1
         try:
-            debug_print(f"Webhook delivery through {provider} to {webhook_destination_host()}, attempt {attempt_number}/{WEBHOOK_MAX_ATTEMPTS} with a {WEBHOOK_TIMEOUT_SECONDS}s timeout")
+            debug_print("Webhook delivery", channel=provider, host=webhook_destination_host(), attempt=f"{attempt_number}/{WEBHOOK_MAX_ATTEMPTS}", timeout=f"{WEBHOOK_TIMEOUT_SECONDS}s")
             if provider == "ntfy":
                 response = post_webhook_request(data=ntfy_message.encode("utf-8"), params={"title": ntfy_title}, headers=request_headers)
             elif isinstance(discord_payload, str):
@@ -2326,7 +2333,7 @@ def send_webhook(title, description, notification_type="status", force=False, sl
                 response = post_webhook_request(json=discord_payload, headers=request_headers)
             # A rate limit and a server fault are the only answers worth repeating, and only once
             retryable = response.status_code == 429 or 500 <= response.status_code <= 599
-            debug_print(f"Webhook delivery through {provider}, attempt {attempt_number}/{WEBHOOK_MAX_ATTEMPTS} returned HTTP {response.status_code} (retryable: {retryable})")
+            debug_print("Webhook delivery", channel=provider, attempt=f"{attempt_number}/{WEBHOOK_MAX_ATTEMPTS}", status=response.status_code, retryable=retryable)
             if 200 <= response.status_code <= 299:
                 verbose_print(f"Webhook delivered through {provider}: {webhook_values['title']}")
                 return 0
@@ -2335,15 +2342,15 @@ def send_webhook(title, description, notification_type="status", force=False, sl
                 print_webhook_error(last_error)
                 return 1
             delay = webhook_retry_after_seconds(response) if response.status_code == 429 else WEBHOOK_FALLBACK_RETRY_SECONDS
-            debug_print(f"Waiting {delay:.1f}s before webhook attempt {attempt_number + 1}/{WEBHOOK_MAX_ATTEMPTS}")
+            debug_print("Webhook delivery", channel=provider, retry_in=f"{delay:.1f}s", next_attempt=f"{attempt_number + 1}/{WEBHOOK_MAX_ATTEMPTS}")
             sleep_func(delay)
         except req.RequestException as exc:
             last_error = exc
-            debug_print(f"Webhook delivery through {provider}, attempt {attempt_number}/{WEBHOOK_MAX_ATTEMPTS} failed: {type(exc).__name__}: {exc}")
+            debug_print("Webhook delivery", channel=provider, attempt=f"{attempt_number}/{WEBHOOK_MAX_ATTEMPTS}", outcome="failed", error=f"{type(exc).__name__}: {exc}")
             if attempt_number == WEBHOOK_MAX_ATTEMPTS:
                 print_webhook_error(exc)
                 return 1
-            debug_print(f"Waiting {WEBHOOK_FALLBACK_RETRY_SECONDS:.1f}s before webhook attempt {attempt_number + 1}/{WEBHOOK_MAX_ATTEMPTS}")
+            debug_print("Webhook delivery", channel=provider, retry_in=f"{WEBHOOK_FALLBACK_RETRY_SECONDS:.1f}s", next_attempt=f"{attempt_number + 1}/{WEBHOOK_MAX_ATTEMPTS}")
             sleep_func(WEBHOOK_FALLBACK_RETRY_SECONDS)
     print_webhook_error(last_error)
     return 1
@@ -2373,9 +2380,9 @@ def init_csv_file(csv_file_name):
                 writer = csv.DictWriter(f, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
                 writer.writeheader()
     except Exception as e:
-        debug_print(f"CSV file '{csv_file_name}' could not be initialized: {type(e).__name__}: {e}")
+        debug_print("CSV initialization", path=csv_file_name, outcome="failed", error=f"{type(e).__name__}: {e}")
         raise RuntimeError(f"Could not initialize CSV file '{csv_file_name}': {e}")
-    debug_print(f"CSV file '{csv_file_name}' is ready for writing")
+    debug_print("CSV initialization", path=csv_file_name, outcome="OK")
 
 
 # Writes CSV entry
@@ -2387,9 +2394,9 @@ def write_csv_entry(csv_file_name, timestamp, status, game_name):
             csvwriter.writerow({'Date': timestamp, 'Status': status, 'Game name': plain_text(game_name)})
 
     except Exception as e:
-        debug_print(f"CSV write to '{csv_file_name}' failed: {type(e).__name__}: {e}")
+        debug_print("CSV write", path=csv_file_name, outcome="failed", error=f"{type(e).__name__}: {e}")
         raise RuntimeError(f"Failed to write to CSV file '{csv_file_name}': {e}")
-    debug_print(f"CSV entry written to '{csv_file_name}': {status} | {game_name or 'no game'}")
+    debug_print("CSV write", path=csv_file_name, status=status, game=game_name or None, outcome="OK")
 
 
 # Returns current local time without timezone info (naive)
@@ -2413,7 +2420,7 @@ def convert_iso_str_to_datetime(dt_str):
             utc_dt = pytz.utc.localize(utc_dt)
         return utc_dt.astimezone(pytz.timezone(LOCAL_TIMEZONE))
     except Exception as diag_exc:
-        debug_print(f"Cannot parse ISO timestamp '{dt_str}': {type(diag_exc).__name__}: {diag_exc}")
+        debug_print(f"Cannot parse ISO timestamp '{dt_str}'", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
         return None
 
 
@@ -2436,7 +2443,7 @@ def get_date_from_ts(ts):
         try:
             ts = isoparse(ts)
         except Exception as diag_exc:
-            debug_print(f"Cannot parse timestamp '{ts}' for the full date format: {type(diag_exc).__name__}: {diag_exc}")
+            debug_print(f"Cannot parse timestamp '{ts}' for the full date format", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
             return ""
 
     if isinstance(ts, datetime):
@@ -2473,7 +2480,7 @@ def get_short_date_from_ts(ts, show_year=False, show_hour=True, show_weekday=Tru
         try:
             ts = isoparse(ts)
         except Exception as diag_exc:
-            debug_print(f"Cannot parse timestamp '{ts}' for the short date format: {type(diag_exc).__name__}: {diag_exc}")
+            debug_print(f"Cannot parse timestamp '{ts}' for the short date format", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
             return ""
 
     if isinstance(ts, datetime):
@@ -2513,7 +2520,7 @@ def get_hour_min_from_ts(ts, show_seconds=False):
         try:
             ts = isoparse(ts)
         except Exception as diag_exc:
-            debug_print(f"Cannot parse timestamp '{ts}' for the time format: {type(diag_exc).__name__}: {diag_exc}")
+            debug_print(f"Cannot parse timestamp '{ts}' for the time format", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
             return ""
 
     if isinstance(ts, datetime):
@@ -2651,7 +2658,7 @@ def reload_secrets_signal_handler(sig, frame):
             if val is not None and val != old_val:
                 globals()[secret] = val
                 SECRET_SOURCES[secret] = "dotenv file"
-                debug_print(f"{secret} reloaded from '{env_path}' ({secret_fingerprint(val, secret)})")
+                debug_print("Secret reload", name=secret, path=env_path, value=secret_fingerprint(val, secret))
                 print(f"* Reloaded {secret} from {env_path}")
 
     print_cur_ts("Timestamp:\t\t\t")
@@ -2678,7 +2685,7 @@ def find_config_file(cli_path=None):
     ]
 
     for p in candidates:
-        debug_print(f"Looking for a config file at '{p}'")
+        debug_print("Looking for a config file", path=p)
         if p.is_file():
             return str(p)
     return None
@@ -2778,7 +2785,8 @@ def load_config_file(config_path, namespace=None, report_errors=True, advice_out
         # Parsed as data rather than executed, so a config file picked up from the working directory cannot run code
         parsed_values = parse_config_content(content, str(config_path), retired_settings)
         selected_namespace.update(parsed_values)
-        debug_print(f"Config file '{config_path}' applied {len(parsed_values)} settings: {', '.join(sorted(parsed_values)) or 'none'}")
+        debug_print("Configuration applied", path=config_path, settings=len(parsed_values), names=", ".join(sorted(parsed_values)) or "none")
+        verbose_print(f"Loaded {len(parsed_values)} settings from the configuration file")
         if retired_settings and report_errors:
             print(f"* Note: {describe_retired_settings(retired_settings, chr(39) + str(config_path) + chr(39))}")
         return True
@@ -2796,7 +2804,7 @@ def load_config_file(config_path, namespace=None, report_errors=True, advice_out
         detail = f"Config file '{config_path}' contains unsupported content: {exc}"
     except Exception as exc:
         detail = f"Config file '{config_path}' failed with {type(exc).__name__}: {exc}"
-    debug_print(f"Config file '{config_path}' rejected: {detail}")
+    debug_print("Configuration rejected", path=config_path, reason=detail)
     advice = classify_recovery_error(context="config.invalid", detail=detail)
     if advice_out is not None:
         advice_out.append(advice)
@@ -2844,7 +2852,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
     try:
         from psnawp_api.models.trophies import PlatformType as PT  # 3.x
     except Exception as diag_exc:
-        debug_print(f"PSNAWP PlatformType is unavailable, falling back to string platform names: {type(diag_exc).__name__}: {diag_exc}")
+        debug_print("PSNAWP PlatformType is unavailable, falling back to string platform names", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
         PT = None  # fallback to string platforms later
 
     def _get(obj, *names, default=None):
@@ -2906,7 +2914,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                     try:
                         val = getattr(obj, attr)
                     except Exception as diag_exc:
-                        debug_print(f"Cannot read attribute '{attr}' while looking for a title name: {type(diag_exc).__name__}: {diag_exc}")
+                        debug_print(f"Cannot read attribute '{attr}' while looking for a title name", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
                         continue
                     if isinstance(val, str) and val.strip():
                         return val.strip()
@@ -2921,7 +2929,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                 if name:
                     break
         except Exception as diag_exc:
-            debug_print(f"PSN API trophy_groups() failed for {npcomm}: {type(diag_exc).__name__}: {diag_exc}")
+            debug_print(f"PSN API trophy_groups() failed for {npcomm}: {type(diag_exc).__name__}", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
         # B) per-title summary
         if not name:
@@ -2929,7 +2937,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                 summ = psn_user.trophy_summary(np_communication_id=npcomm, platform=platform)
                 name = _first_name_like(summ)
             except Exception as diag_exc:
-                debug_print(f"PSN API trophy_summary() failed for {npcomm}: {type(diag_exc).__name__}: {diag_exc}")
+                debug_print(f"PSN API trophy_summary() failed for {npcomm}: {type(diag_exc).__name__}", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
         # C) scan titles
         if not name:
@@ -2941,7 +2949,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                         if name:
                             break
             except Exception as diag_exc:
-                debug_print(f"PSN API trophy_titles() failed while resolving the name of {npcomm}: {type(diag_exc).__name__}: {diag_exc}")
+                debug_print(f"PSN API trophy_titles() failed while resolving the name of {npcomm}: {type(diag_exc).__name__}", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
         if not name:
             name = npcomm  # last resort
@@ -2957,7 +2965,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
     try:
         titles_iter = psn_user.trophy_titles(limit=title_limit)
     except Exception as diag_exc:
-        debug_print(f"PSN API trophy_titles() failed, no trophy titles to scan: {type(diag_exc).__name__}: {diag_exc}")
+        debug_print("PSN API trophy_titles() failed, no trophy titles to scan", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
         titles_iter = []
 
     for tt in titles_iter:
@@ -2975,7 +2983,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                     trophy_group_id="all",
                 )
             except Exception as diag_exc:
-                debug_print(f"PSN API trophies() failed for {npcomm} on platform {plat}: {type(diag_exc).__name__}: {diag_exc}")
+                debug_print(f"PSN API trophies() failed for {npcomm} on platform {plat}: {type(diag_exc).__name__}", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
                 continue
 
             got_any_for_title = False
@@ -3010,12 +3018,12 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
     try:
         items.sort(key=lambda x: x[0], reverse=True)
     except Exception as diag_exc:
-        debug_print(f"Trophy list could not be sorted by earn date, falling back to a tolerant sort: {type(diag_exc).__name__}: {diag_exc}")
+        debug_print("Trophy list could not be sorted by earn date, falling back to a tolerant sort", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
         def _ts(dt):
             try:
                 return int(dt.timestamp())
             except Exception as diag_exc:
-                debug_print(f"Cannot read the earn timestamp of a trophy, sorting it last: {type(diag_exc).__name__}: {diag_exc}")
+                debug_print("Cannot read the earn timestamp of a trophy, sorting it last", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
                 return -1
         items.sort(key=lambda x: _ts(x[0]), reverse=True)
 
@@ -3024,7 +3032,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
             ts = int(dt.timestamp())
             dt_fmt = get_date_from_ts(ts)
         except Exception as diag_exc:
-            debug_print(f"Cannot format the earn date of a trophy: {type(diag_exc).__name__}: {diag_exc}")
+            debug_print("Cannot format the earn date of a trophy", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
             dt_fmt = "n/a"
         print(f"- {dt_fmt} | {game} | {ttype} | {tname}")
 
@@ -3141,7 +3149,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
                 elif status and status != "offline" and status == last_status:
                     status_ts_old = last_status_ts
         except Exception as diag_exc:
-            debug_print(f"Cannot reconcile the saved status with the PSN profile, falling back to the last online timestamp: {type(diag_exc).__name__}: {diag_exc}")
+            debug_print("Cannot reconcile the saved status with the PSN profile, falling back to the last online timestamp", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
             if lastonline_ts and status == "offline":
                 status_ts_old = lastonline_ts
     else:
@@ -3195,13 +3203,13 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
             pass
 
     except Exception as diag_exc:
-        debug_print(f"Cannot read the friendship relation from the PSN profile: {type(diag_exc).__name__}: {diag_exc}")
+        debug_print("Cannot read the friendship relation from the PSN profile", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
     try:
         print(f"\nProfile URL:\t\t\t{share.get('shareUrl')}")
         # print(f"Profile QR image:\t\t{share.get('shareImageUrl')}")
     except Exception as diag_exc:
-        debug_print(f"Cannot read the shareable profile link from the PSN profile: {type(diag_exc).__name__}: {diag_exc}")
+        debug_print("Cannot read the shareable profile link from the PSN profile", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
     if status == "offline" and status_ts_old > 0:
         last_status_dt_str = get_date_from_ts(status_ts_old)
@@ -3215,7 +3223,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
                 if last_status_read and last_status_read[1] == status:
                     print(f"* User is {str(status).upper()} for:\t\t{calculate_timespan(now_local(), int(last_status_read[0]), show_seconds=False)}")
             except Exception as diag_exc:
-                debug_print(f"Cannot read the saved status file '{psn_last_status_file}': {type(diag_exc).__name__}: {diag_exc}")
+                debug_print(f"Cannot read the saved status file '{psn_last_status_file}'", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
     # Show trophy summary and last earned trophies only if requested
     if include_trophies:
@@ -3232,14 +3240,14 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
                 f"({et.platinum + et.gold + et.silver + et.bronze} total)"
             )
         except Exception as diag_exc:
-            debug_print(f"PSN API trophy_summary() failed, trophy level is not shown: {type(diag_exc).__name__}: {diag_exc}")
+            debug_print("PSN API trophy_summary() failed, trophy level is not shown", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
         num_trophies = 5
         try:
             print(f"\n* Getting list of last {num_trophies} earned trophies ...\n")
             print_last_earned_trophies(psn_user, max_items=num_trophies, title_limit=15)
         except Exception as diag_exc:
-            debug_print(f"Cannot list the last earned trophies: {type(diag_exc).__name__}: {diag_exc}")
+            debug_print("Cannot list the last earned trophies", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
     # Show recently played games only if requested
     if show_recent_games:
@@ -3268,7 +3276,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
                                     return f"{d}d {time_part}"
                                 return f"{d}d"
                     except (ValueError, IndexError) as diag_exc:
-                        debug_print(f"Cannot compact the duration '{s}', keeping the original text: {type(diag_exc).__name__}: {diag_exc}")
+                        debug_print(f"Cannot compact the duration '{s}', keeping the original text", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
                         return s  # fallback to original if parsing fails
                 return s
 
@@ -3308,7 +3316,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
                 import shutil
                 term_width = shutil.get_terminal_size(fallback=(100, 24)).columns
             except Exception as diag_exc:
-                debug_print(f"Cannot detect the terminal width, falling back to 100 columns: {type(diag_exc).__name__}: {diag_exc}")
+                debug_print("Cannot detect the terminal width, falling back to 100 columns", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
                 term_width = 100
 
             w_num = 3
@@ -3351,7 +3359,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
                     )
                     print(row)
         except Exception as diag_exc:
-            debug_print(f"Cannot render the recently played games table: {type(diag_exc).__name__}: {diag_exc}")
+            debug_print("Cannot render the recently played games table", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
     if game_name:
         launchplatform_str = ""
@@ -3575,13 +3583,13 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             pass
 
     except Exception as diag_exc:
-        debug_print(f"Cannot read the friendship relation from the PSN profile: {type(diag_exc).__name__}: {diag_exc}")
+        debug_print("Cannot read the friendship relation from the PSN profile", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
     try:
         print(f"\nProfile URL:\t\t\t{share.get('shareUrl')}")
         # print(f"Profile QR image:\t\t{share.get('shareImageUrl')}")
     except Exception as diag_exc:
-        debug_print(f"Cannot read the shareable profile link from the PSN profile: {type(diag_exc).__name__}: {diag_exc}")
+        debug_print("Cannot read the shareable profile link from the PSN profile", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
     if status != "offline" and game_name:
         launchplatform_str = ""
@@ -3635,7 +3643,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 target.close()
                 debug_print(f"Closed the PSNAWP {label}")
             except Exception as diag_exc:
-                debug_print(f"Closing the PSNAWP {label} failed: {type(diag_exc).__name__}: {diag_exc}")
+                debug_print(f"Closing the PSNAWP {label} failed", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
         try:
             # Where psnawp keeps the requests session, the same attribute psn_client() uses to apply the TLS setting
@@ -3647,7 +3655,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             for attr in ("session", "_session", "http", "_http", "client", "_client"):
                 _close(getattr(obj, attr, None), f"'{attr}' session")
         except Exception as diag_exc:
-            debug_print(f"Closing PSNAWP sessions failed: {type(diag_exc).__name__}: {diag_exc}")
+            debug_print("Closing PSNAWP sessions failed", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
     def get_sleep_interval():
         return PSN_ACTIVE_CHECK_INTERVAL if status and status != "offline" else PSN_CHECK_INTERVAL
@@ -3661,7 +3669,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         try:
             _close_psnawp_sessions(psnawp)
         except Exception as diag_exc:
-            debug_print(f"Closing the old PSNAWP session before recreating it failed: {type(diag_exc).__name__}: {diag_exc}")
+            debug_print("Closing the old PSNAWP session before recreating it failed", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
         try:
             psnawp = psn_client()
             psn_user = psnawp.user(online_id=psn_user_id)
@@ -3669,12 +3677,12 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             verbose_print("Recreated the PSNAWP session")
             return True
         except Exception as diag_exc:
-            debug_print(f"Recreating the PSNAWP session failed: {type(diag_exc).__name__}: {diag_exc}")
+            debug_print("Recreating the PSNAWP session failed", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
             return False
 
     sleep_interval = get_sleep_interval()
 
-    debug_print(f"Sleeping {display_time(sleep_interval)} before the first check (status: {status or 'unknown'})")
+    debug_print("Waiting", interval=display_time(sleep_interval), reason="before the first check", status=status or "unknown")
     time.sleep(sleep_interval)
 
     check_number = 0
@@ -3689,7 +3697,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             try:
                 _close_psnawp_sessions(psnawp)
             except Exception as diag_exc:
-                debug_print(f"Closing the old PSNAWP session after the NPSSO change failed: {type(diag_exc).__name__}: {diag_exc}")
+                debug_print("Closing the old PSNAWP session after the NPSSO change failed", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
             try:
                 psnawp = psn_client()
                 psn_user = psnawp.user(online_id=psn_user_id)
@@ -3713,7 +3721,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         if platform.system() != 'Windows':
             signal.signal(signal.SIGALRM, timeout_handler)
             signal.alarm(FUNCTION_TIMEOUT)
-        debug_print(f"Starting check #{check_number} for '{psn_user_id}', PSN API get_presence() with a {FUNCTION_TIMEOUT}s alarm timeout")
+        debug_print("Starting check", check=f"#{check_number}", user=psn_user_id, operation="PSN API get_presence()", timeout=f"{FUNCTION_TIMEOUT}s")
         try:
             psn_user_presence = psn_user.get_presence()
             parsed = parse_presence(psn_user_presence)
@@ -3733,7 +3741,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 signal.alarm(0)
             report_recovery_error(e, context="monitor", detail=f"psn_user.get_presence() did not answer within {display_time(FUNCTION_TIMEOUT)}", tracker=recovery_hints, retry_note=f"retrying in {display_time(FUNCTION_TIMEOUT)}")
             print_cur_ts("Timestamp:\t\t\t")
-            debug_print(f"Sleeping {display_time(FUNCTION_TIMEOUT)} after check #{check_number} timed out")
+            debug_print("Waiting", interval=display_time(FUNCTION_TIMEOUT), reason=f"check #{check_number} timed out")
             time.sleep(FUNCTION_TIMEOUT)
             continue
 
@@ -3743,7 +3751,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
             advice = classify_recovery_error(e, context="monitor", probe_auth=True)
             kind = recovery_poll_kind(advice)
-            debug_print(f"Check #{check_number} failed, classified as '{advice.code}' under the {kind} retry policy: {type(e).__name__}: {e}")
+            debug_print("Check", check=f"#{check_number}", recovery_code=advice.code, policy=kind, outcome="failed", error=f"{type(e).__name__}: {e}")
 
             # Local file descriptor exhaustion cannot be recovered inside this process
             if kind == "exhausted":
@@ -3772,7 +3780,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
             if error_streak >= policy["report_after"]:
                 print_cur_ts("Timestamp:\t\t\t")
-            debug_print(f"Sleeping {display_time(sleep_interval)} after a {kind} failure (streak: {error_streak})")
+            debug_print("Waiting", interval=display_time(sleep_interval), reason=f"{kind} failure", streak=error_streak)
             time.sleep(sleep_interval)
             continue
 
@@ -3925,11 +3933,13 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         alive_counter += 1
 
         if LIVENESS_CHECK_COUNTER and alive_counter >= LIVENESS_CHECK_COUNTER and (status == "offline" or not status):
+            verbose_print(f"Monitoring healthy for {psn_user_id}. The user is still offline with no activity change")
             print_cur_ts("Liveness check, timestamp:\t")
             alive_counter = 0
 
         sleep_interval = get_sleep_interval()
-        debug_print(f"Check #{check_number} done for '{psn_user_id}', status: {status or 'unknown'}, game: {game_name or 'none'}, next check in {display_time(sleep_interval)}")
+        debug_print("Completed check", check=f"#{check_number}", user=psn_user_id, status=status or "unknown", game=game_name or None, next=display_time(sleep_interval))
+        verbose_print(f"Monitoring check #{check_number} completed for {psn_user_id}")
         time.sleep(sleep_interval)
 
 
@@ -5000,7 +5010,7 @@ def _wizard_apply_saved_values(state, env_path=None):
 
             load_dotenv(str(env_path), override=True)
         except Exception as exc:
-            debug_print(f"Reading '{env_path}' back after setup failed: {exc}")
+            debug_print(f"Reading '{env_path}' back after setup failed", outcome="failed", error=f"{type(exc).__name__}: {exc}")
     for key in SECRET_KEYS:
         value = os.getenv(key)
         if value is not None:
@@ -5256,7 +5266,7 @@ def smtp_sign_in(password, timeout=15):
         settings_advice = validate_smtp_settings()
         if settings_advice is not None:
             raise RecoveryError(settings_advice)
-        debug_print(f"SMTP sign-in check {SMTP_HOST}:{SMTP_PORT} (starttls={bool(SMTP_SSL)}, timeout {timeout}s, user {SMTP_USER})")
+        debug_print("SMTP sign-in check", host=SMTP_HOST, port=SMTP_PORT, starttls=bool(SMTP_SSL), timeout=f"{timeout}s", user=SMTP_USER)
         connection = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=timeout)
         if SMTP_SSL:
             connection.starttls(context=ssl.create_default_context())
@@ -5266,7 +5276,7 @@ def smtp_sign_in(password, timeout=15):
             try:
                 connection.quit()
             except Exception as quit_error:
-                debug_print(f"Closing the SMTP connection failed: {quit_error}")
+                debug_print("Closing the SMTP connection failed", outcome="failed", error=f"{type(quit_error).__name__}: {quit_error}")
     except RecoveryError:
         raise
     except Exception as exc:
@@ -5749,7 +5759,7 @@ def main():
     # A PSN ID given on the command line always wins over the saved one
     if not args.psn_user_id and PSN_USER_ID:
         args.psn_user_id = PSN_USER_ID
-        debug_print(f"PSN user ID taken from the config file: {args.psn_user_id}")
+        debug_print("PSN user ID resolved", source="configuration file", value=args.psn_user_id)
 
     # Evaluated after the config file is read, so a saved PSN ID starts monitoring instead of being welcomed
     if len(sys.argv) == 1 and not args.psn_user_id:
@@ -5803,10 +5813,8 @@ def main():
 
     apply_webhook_cli_overrides(args, parser)
 
-    verbose_print(f"Configuration file in use is {cfg_path or 'none'}")
-    verbose_print(f"Dotenv file in use is {env_path or 'none'}")
     for secret in SECRET_KEYS:
-        debug_print(f"Secret {secret} is {secret_fingerprint(globals().get(secret), secret)}, resolved from {SECRET_SOURCES.get(secret, 'nowhere')}")
+        debug_print("Secret resolution", name=secret, source=SECRET_SOURCES.get(secret, "nowhere"), value=secret_fingerprint(globals().get(secret), secret))
 
     local_tz = None
     if LOCAL_TIMEZONE == "Auto":
@@ -5814,7 +5822,7 @@ def main():
             try:
                 local_tz = get_localzone()
             except Exception as diag_exc:
-                debug_print(f"Local timezone auto-detection failed: {type(diag_exc).__name__}: {diag_exc}")
+                debug_print("Local timezone auto-detection failed", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
         if local_tz and is_valid_timezone(str(local_tz)):
             LOCAL_TIMEZONE = str(local_tz)
             LOCAL_TIMEZONE_STATE = "auto"
@@ -5834,8 +5842,6 @@ def main():
             sys.exit(1)
         # The report still stamps timestamps, so it falls back rather than stopping before the diagnosis
         LOCAL_TIMEZONE = "UTC"
-
-    verbose_print(f"Local timezone resolved to {LOCAL_TIMEZONE}")
 
     if doctor_mode:
         sys.exit(run_doctor(args.psn_user_id, cfg_path, env_path, config_advice, timezone_advice))
@@ -5894,7 +5900,7 @@ def main():
     if args.npsso_key:
         PSN_NPSSO = args.npsso_key
         SECRET_SOURCES["PSN_NPSSO"] = "command line"
-        debug_print(f"PSN_NPSSO taken from the command line ({secret_fingerprint(PSN_NPSSO, 'PSN_NPSSO')})")
+        debug_print("Secret resolution", name="PSN_NPSSO", source="command line", value=secret_fingerprint(PSN_NPSSO, "PSN_NPSSO"))
 
     if not PSN_NPSSO or PSN_NPSSO == "your_psn_npsso_code":
         report_recovery_error(context="secret.missing", detail="PSN_NPSSO (-n / --npsso_key) value is empty or incorrect")
@@ -5948,7 +5954,7 @@ def main():
         log_path.parent.mkdir(parents=True, exist_ok=True)
         FINAL_LOG_PATH = str(log_path)
         sys.stdout = Logger(FINAL_LOG_PATH)
-        debug_print(f"Logging output to '{FINAL_LOG_PATH}'")
+        debug_print("Logging output", path=FINAL_LOG_PATH)
     else:
         FINAL_LOG_PATH = None
 
