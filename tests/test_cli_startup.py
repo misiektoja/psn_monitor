@@ -50,9 +50,17 @@ def test_version_is_printed_and_exits(pm_module, monkeypatch, capsys):
 
 
 # Verifies running without arguments shows the help text and fails, instead of silently doing nothing
-def test_bare_invocation_shows_help(pm_module, monkeypatch, capsys):
+def test_bare_invocation_shows_the_welcome_screen(pm_module, monkeypatch, capsys):
     assert run_main(pm_module, monkeypatch, []) == 1
-    assert "usage: psn_monitor" in capsys.readouterr().err
+
+    output = capsys.readouterr().out
+    # Three commands a newcomer can act on, each on its own indented line, then the two aligned footers
+    assert "For <psn_user_id>, use the" in output
+    assert "Quickest start (already configured):" in output
+    assert "Check setup before monitoring:" in output
+    assert "Show profile details and exit:" in output
+    assert "Full options: " in output
+    assert f"Guide:        {pm_module.QUICK_START_GUIDE_URL}" in output
 
 
 # Verifies the generated config template is complete and is accepted by the tool's own parser
@@ -256,9 +264,11 @@ def test_startup_banner_reports_the_effective_settings(pm_module, monkeypatch, m
     assert run_main(pm_module, monkeypatch, ["-c", "600", "-k", "30", USER_ID]) == 0
 
     output = capsys.readouterr().out
-    assert "* PSN polling intervals:\t[offline: 10 minutes] [online: 30 seconds]" in output
-    assert "* Local timezone:\t\tUTC" in output
+    assert "* Polling intervals:" in output
+    assert "[offline: 10 minutes] [online: 30 seconds]" in output
     assert f"Monitoring user with PSN ID {USER_ID}" in output
+    # The time zone is a full-view row, so the concise banner leaves it out
+    assert "Local timezone:" not in output
 
 
 # Verifies the log file is created next to the working directory and named after the monitored user
@@ -338,7 +348,9 @@ def test_config_file_in_the_working_directory_is_used(pm_module, monkeypatch, mo
     assert run_main(pm_module, monkeypatch, [USER_ID]) == 0
 
     assert pm_module.PSN_CHECK_INTERVAL == 900
-    assert f"* Configuration file:\t\t{config}" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "* Config:" in output
+    assert str(config) in output
 
 
 # Verifies the source of an exported secret is recorded, which is what makes a stale export visible later

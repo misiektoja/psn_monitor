@@ -273,6 +273,8 @@ import importlib.util
 import shlex
 import shutil
 import subprocess
+import textwrap
+from collections import namedtuple
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -381,6 +383,10 @@ DIAGNOSTICS_GUIDE_URL = f"{GUIDE_BASE_URL}#verbose-and-debug-output"
 
 # Installs this tool can be running from. There is no container image, so no container method is detected
 INSTALL_METHODS = ("pip", "manual")
+
+# How the positional target may be written. Reused by the welcome screen and by the recovery advice, because
+# three hand-written phrasings of the same list is what these tools drift into
+PSN_TARGET_FORMS = "PlayStation online ID, not the account e-mail or the real name"
 
 
 # Returns whether this process was started from the packaged entry point or from a downloaded script
@@ -540,7 +546,7 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         return make_recovery_advice("secret.missing", safe_detail or "A required credential is missing", recovery_fix_with_guide(npsso_recovery_fix(), SECRETS_GUIDE_URL), False, safe_detail)
 
     if context == "target.missing":
-        return make_recovery_advice("target.missing", safe_detail or "No PlayStation ID was given", recovery_fix_with_guide(f"Pass the PlayStation ID of the account to watch: {tool_command_prefix()} <psn_user_id>", QUICK_START_GUIDE_URL), False, safe_detail)
+        return make_recovery_advice("target.missing", safe_detail or "No PlayStation ID was given", recovery_fix_with_guide(f"Pass the account to watch: {tool_command_prefix()} <psn_user_id>. Use the {PSN_TARGET_FORMS}", QUICK_START_GUIDE_URL), False, safe_detail)
 
     if context == "smtp.settings":
         return make_recovery_advice("smtp.invalid", f"The SMTP settings are incorrect: {safe_detail}" if safe_detail else "The SMTP settings are incorrect", recovery_fix_with_guide(f"Check SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SENDER_EMAIL and RECEIVER_EMAIL then run: {tool_command('--send-test-email')}", SMTP_GUIDE_URL), False, safe_detail)
@@ -566,7 +572,7 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         if types["rate_limited"] and isinstance(current, types["rate_limited"]):
             return make_recovery_advice("psn.rate_limited", "PlayStation Network is rate limiting this account", recovery_fix_with_guide("Raise PSN_CHECK_INTERVAL and PSN_ACTIVE_CHECK_INTERVAL, or run fewer instances against the same account, then restart", INTERVALS_GUIDE_URL), True, safe_detail)
         if types["not_found"] and isinstance(current, types["not_found"]):
-            return make_recovery_advice("target.not_found", "PlayStation Network does not know that PlayStation ID", recovery_fix_with_guide("Check the spelling of the PlayStation ID. It is the online ID, not the account e-mail or the real name", QUICK_START_GUIDE_URL), False, safe_detail)
+            return make_recovery_advice("target.not_found", "PlayStation Network does not know that PlayStation ID", recovery_fix_with_guide(f"Check the spelling. Use the {PSN_TARGET_FORMS}", QUICK_START_GUIDE_URL), False, safe_detail)
         if types["forbidden"] and isinstance(current, types["forbidden"]):
             return make_recovery_advice("target.not_visible", "That PlayStation profile does not share its activity with this account", recovery_fix_with_guide("Ask the monitored user to set Privacy Settings, Personal Info | Messaging, Online Status and Now Playing to 'Friends only' or 'Anyone', and add this account as a friend if they chose 'Friends only'", PRIVACY_GUIDE_URL), False, safe_detail)
         if types["auth"] and isinstance(current, types["auth"]):
@@ -839,6 +845,11 @@ def truncate_string_per_line(message, truncate_width, tabsize=8):
     return "\n".join(truncated_lines)
 
 
+# Returns the file the tool saves the last seen status to, so a restart resumes from it
+def resolve_status_file(psn_user_id):
+    return f"psn_{psn_user_id}_last_status.json"
+
+
 # Returns the log file path for one monitored user, without creating anything
 def resolve_log_path(psn_user_id):
     log_path = Path(os.path.expanduser(PSN_LOGFILE))
@@ -928,6 +939,19 @@ class Logger(object):
         self.terminal.write(message)
         self.terminal.flush()
         self.logfile.flush()
+
+    # Writes text the log file should keep but the terminal has already shown, or does not need
+    def log_only(self, message):
+        self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", sanitize_terminal_text(message)).expandtabs(8)))
+        self.logfile.flush()
+
+    # Writes text meant for the reader at the terminal, which the log file has its own version of
+    def terminal_only(self, message):
+        message = sanitize_terminal_text(message)
+        if TRUNCATE_CHARS:
+            message = truncate_string_per_line(message, TRUNCATE_CHARS)
+        self.terminal.write(message)
+        self.terminal.flush()
 
     def flush(self):
         self.terminal.flush()
@@ -1898,7 +1922,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
     print_ok()
     print()
 
-    psn_last_status_file = f"psn_{psn_user_id}_last_status.json"
+    psn_last_status_file = resolve_status_file(psn_user_id)
     status_ts_old = int(time.time())
 
     if os.path.isfile(psn_last_status_file):
@@ -2255,7 +2279,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         status_online_start_ts = status_ts_old
         status_online_start_ts_old = status_online_start_ts
 
-    psn_last_status_file = f"psn_{psn_user_id}_last_status.json"
+    psn_last_status_file = resolve_status_file(psn_user_id)
     last_status_read = []
     last_status_ts = 0
     last_status = ""
@@ -3072,6 +3096,98 @@ def run_doctor(psn_user_id=None, config_path=None, env_path=None, config_advice=
     return 1 if any(check.status == "FAIL" for check in report.checks) else 0
 
 
+# One startup summary setting, routed independently to the concise view, the full view and the log file
+StartupSummaryRow = namedtuple("StartupSummaryRow", ["label", "value", "concise", "full", "log"])
+StartupSummaryRow.__new__.__defaults__ = (False, True, True)
+
+
+# Reports whether the reader asked for the complete startup summary rather than the concise one
+def full_startup_summary_enabled():
+    return bool(VERBOSE_MODE or DEBUG_MODE)
+
+
+# Returns the email alert rollup, naming what is switched on rather than printing three separate booleans
+def startup_notification_state():
+    enabled = [name for name, on in (("status changes", ACTIVE_INACTIVE_NOTIFICATION), ("game changes", GAME_CHANGE_NOTIFICATION), ("errors", ERROR_NOTIFICATION)) if on]
+    return "On (" + ", ".join(enabled) + ")" if enabled else "Off"
+
+
+# Builds every summary row, deciding per row whether it belongs in the concise view, the full view and the log
+def build_startup_summary(psn_user_id=None, config_path=None, env_path=None, log_path=None):
+    supplied = doctor_secret_sources()
+    from_dotenv = sorted(supplied.get("dotenv file", ()))
+    from_environment = sorted(supplied.get("environment", ()))
+    output_state = str(log_path) if log_path else "Terminal only (logging disabled)"
+    return [
+        StartupSummaryRow("Polling intervals", f"[offline: {display_time(PSN_CHECK_INTERVAL)}] [online: {display_time(PSN_ACTIVE_CHECK_INTERVAL)}]", concise=True),
+        StartupSummaryRow("Notifications (email)", startup_notification_state(), concise=True),
+        StartupSummaryRow("Output", output_state, concise=True, full=False, log=False),
+        StartupSummaryRow("Output logging", str(log_path) if log_path else "Disabled"),
+        StartupSummaryRow("ASCII log separators", f"{ascii_log_separators_enabled()} (mode: {ASCII_LOG_SEPARATORS})"),
+        StartupSummaryRow("Status file", resolve_status_file(psn_user_id) if psn_user_id else "None"),
+        StartupSummaryRow("Config", str(config_path) if config_path else "None", concise=True),
+        StartupSummaryRow("Dotenv", str(env_path) if env_path else "None", concise=True),
+        StartupSummaryRow("Install method", install_method_display_name()),
+        StartupSummaryRow("Secrets from dotenv", ", ".join(from_dotenv) if from_dotenv else "None"),
+        StartupSummaryRow("Secrets from environment", ", ".join(from_environment) if from_environment else "None"),
+        StartupSummaryRow("Local timezone", LOCAL_TIMEZONE),
+        # Each optional feature earns a concise row only once it is actually switched on
+        StartupSummaryRow("Liveness output", display_time(LIVENESS_CHECK_INTERVAL) if LIVENESS_CHECK_INTERVAL else "Disabled", concise=bool(LIVENESS_CHECK_INTERVAL)),
+        StartupSummaryRow("CSV output", CSV_FILE or "Disabled", concise=bool(CSV_FILE)),
+        StartupSummaryRow("Terminal truncation", f"{TRUNCATE_CHARS} chars" if TRUNCATE_CHARS else "Disabled", concise=bool(TRUNCATE_CHARS)),
+        StartupSummaryRow("Verbose mode", str(VERBOSE_MODE), concise=bool(VERBOSE_MODE)),
+        StartupSummaryRow("Debug mode", str(DEBUG_MODE), concise=bool(DEBUG_MODE)),
+        # Points at the two modes for a reader who does not know they exist, so the full view drops it
+        StartupSummaryRow("More details", "use --verbose or --debug", concise=True, full=False, log=False),
+    ]
+
+
+# Formats one summary row with an aligned value column, wrapping only the rollup that grows long
+def format_startup_summary_row(row):
+    prefix = f"* {(row.label + ':'):<30}"
+    if row.label == "Notifications (email)":
+        return textwrap.fill(str(row.value), width=100, initial_indent=prefix, subsequent_indent=" " * len(prefix), break_long_words=False, break_on_hyphens=False) + "\n"
+    return f"{prefix}{row.value}\n"
+
+
+# Prints the summary, showing the concise rows unless the full view was asked for. The log file always keeps
+# the complete set, so a bug report made from a log carries every effective setting whatever the terminal showed
+def emit_startup_summary(rows, show_full=False, stream=None):
+    destination = sys.stdout if stream is None else stream
+    # A stream that does not split its output has no log file to hold the full view, so those writes go nowhere
+    write_log = getattr(destination, "log_only", lambda line: None)
+    write_terminal = getattr(destination, "terminal_only", None)
+    if write_terminal is None:
+        write_terminal = destination.write
+    for row in rows:
+        line = format_startup_summary_row(row)
+        if row.full and row.log:
+            write_log(line)
+        if row.full if show_full else row.concise:
+            write_terminal(line)
+    write_log("\n")
+    write_terminal("\n")
+    destination.flush()
+
+
+# Prints one labelled command on its own indented line, the shared shape across these tools
+def print_labelled_command(label, command, suffix=""):
+    print(label)
+    print(f"    {command}{suffix}\n")
+
+
+# Prints the commands a newcomer needs next, instead of an argparse usage error nobody can act on
+def print_welcome_screen():
+    prefix = tool_command_prefix()
+    print(f"For <psn_user_id>, use the {PSN_TARGET_FORMS}.\n")
+    print_labelled_command("Quickest start (already configured):", f"{prefix} <psn_user_id>")
+    print_labelled_command("Check setup before monitoring:", f"{prefix} --doctor <psn_user_id>")
+    print_labelled_command("Show profile details and exit:", f"{prefix} -i <psn_user_id>")
+    print(f"Full options: {prefix} --help")
+    print(f"\nGuide:        {QUICK_START_GUIDE_URL}\n")
+    return 1
+
+
 def main():
     global CLI_CONFIG_PATH, DOTENV_FILE, LOCAL_TIMEZONE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, stdout_bck
 
@@ -3264,7 +3380,7 @@ def main():
         dest="verbose_mode",
         action="store_true",
         default=None,
-        help="Show rare operational events and the settings the tool resolved"
+        help="Show rare operational events and the complete startup summary"
     )
     opts.add_argument(
         "--debug",
@@ -3280,8 +3396,7 @@ def main():
     apply_diagnostic_cli_overrides(args)
 
     if len(sys.argv) == 1:
-        parser.print_help(sys.stderr)
-        sys.exit(1)
+        sys.exit(print_welcome_screen())
 
     if args.config_file:
         CLI_CONFIG_PATH = os.path.expanduser(args.config_file)
@@ -3473,23 +3588,10 @@ def main():
         GAME_CHANGE_NOTIFICATION = False
         ERROR_NOTIFICATION = False
 
-    print(f"* PSN polling intervals:\t[offline: {display_time(PSN_CHECK_INTERVAL)}] [online: {display_time(PSN_ACTIVE_CHECK_INTERVAL)}]")
-    print(f"* Email notifications:\t\t[online/offline status changes = {ACTIVE_INACTIVE_NOTIFICATION}] [game changes = {GAME_CHANGE_NOTIFICATION}]\n*\t\t\t\t[errors = {ERROR_NOTIFICATION}]")
-    print(f"* Liveness check:\t\t{bool(LIVENESS_CHECK_INTERVAL)}" + (f" ({display_time(LIVENESS_CHECK_INTERVAL)})" if LIVENESS_CHECK_INTERVAL else ""))
-    print(f"* CSV logging enabled:\t\t{bool(CSV_FILE)}" + (f" ({CSV_FILE})" if CSV_FILE else ""))
-    print(f"* Output logging enabled:\t{not DISABLE_LOGGING}" + (f" ({FINAL_LOG_PATH})" if not DISABLE_LOGGING else ""))
-    print(f"* ASCII log separators:\t\t{ascii_log_separators_enabled()} (mode: {ASCII_LOG_SEPARATORS})")
-    print(f"* Terminal truncation:\t\t{bool(TRUNCATE_CHARS)}" + (f" ({TRUNCATE_CHARS} chars)" if TRUNCATE_CHARS else ""))
-    print(f"* Configuration file:\t\t{cfg_path}")
-    print(f"* Dotenv file:\t\t\t{env_path or 'None'}")
-    print(f"* Local timezone:\t\t{LOCAL_TIMEZONE}")
-    if VERBOSE_MODE or DEBUG_MODE:
-        print(f"* Verbose mode:\t\t\t{VERBOSE_MODE}")
-        print(f"* Debug mode:\t\t\t{DEBUG_MODE}")
-    else:
-        print("* More details:\t\t\tuse --verbose or --debug")
+    emit_startup_summary(build_startup_summary(args.psn_user_id, cfg_path, env_path, FINAL_LOG_PATH), full_startup_summary_enabled())
 
-    out = f"\nMonitoring user with PSN ID {args.psn_user_id}"
+    # The summary block already ended with one blank line, so this heading starts at the cursor
+    out = f"Monitoring user with PSN ID {args.psn_user_id}"
     print(out)
     print("─" * len(out))
 

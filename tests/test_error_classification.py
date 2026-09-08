@@ -251,7 +251,6 @@ CLASSIFIER_EXEMPTIONS = {
     "Couldn't find the pytz library": "raised at import, while a dependency the classifier itself needs is missing",
     "Couldn't find the PSNAWP library": "raised at import, while a dependency the classifier itself needs is missing",
     "sanitize_error_text(message)": "the debug and verbose printers, whose content the redactor guard covers",
-    "[errors = {ERROR_NOTIFICATION}]": "the startup summary, which reports a setting rather than a failure",
     "Cannot clear the screen contents": "a cosmetic notice with nothing for the operator to recover from",
     "Rebuilt the PSNAWP session after": "reports the recovery action taken, printed under the classified advice",
 }

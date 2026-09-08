@@ -57,6 +57,7 @@ pip install psn_monitor
    * [Email Notifications](#email-notifications)
    * [CSV Export](#csv-export)
    * [Check Intervals](#check-intervals)
+   * [Startup Summary](#startup-summary)
    * [Preflight Checks](#doctor-preflight)
    * [Error Messages and Recovery](#error-messages-and-recovery)
    * [Verbose and Debug Output](#verbose-and-debug-output)
@@ -140,6 +141,8 @@ To get the list of all supported command-line arguments / flags:
 ```sh
 psn_monitor --help
 ```
+
+Run it without arguments to see the few commands worth starting with, including how to check your setup before monitoring.
 
 <a id="configuration"></a>
 ## Configuration
@@ -410,6 +413,24 @@ psn_monitor <psn_user_id> -k 30 -c 120
 
 * `PSN_ACTIVE_CHECK_INTERVAL`, `-k`: check interval when the user is online (seconds)
 * `PSN_CHECK_INTERVAL`, `-c`: check interval when the user is offline (seconds)
+
+<a id="startup-summary"></a>
+### Startup Summary
+
+Monitoring mode prints the settings that are actually in effect before the first check:
+
+```
+* Polling intervals:            [offline: 3 minutes] [online: 1 minute]
+* Notifications (email):        On (status changes, game changes, errors)
+* Output:                       psn_monitor_misiektoja.log
+* Config:                       psn_monitor.conf
+* Dotenv:                       .env
+* More details:                 use --verbose or --debug
+```
+
+`--verbose` or `--debug` replaces this with the complete list: the log file, the status file, the CSV file, the install method, which secrets came from the dotenv file and which from the environment, the resolved time zone, the liveness interval, the truncation width and the two flags themselves.
+
+The log file always receives the complete list, whichever view the terminal was shown, so a log attached to a bug report carries every effective setting.
 
 <a id="doctor-preflight"></a>
 ### Preflight Checks

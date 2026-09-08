@@ -251,7 +251,9 @@ def test_the_startup_summary_offers_the_flags_then_reports_them(pm_module, monke
     run_main(pm_module, monkeypatch, ["--verbose", "-n", "npsso-test-value", USER_ID])
     with_verbose = capsys.readouterr().out
 
-    assert "* More details:\t\t\tuse --verbose or --debug" in without_flags
+    assert "use --verbose or --debug" in without_flags
     assert "* More details:" not in with_verbose
-    assert "* Verbose mode:\t\t\tTrue" in with_verbose
-    assert "* Debug mode:\t\t\tFalse" in with_verbose
+    assert "Verbose mode:" in with_verbose
+    assert "Debug mode:" in with_verbose
+    # The concise view stays short, and asking for the full one is what adds the rest
+    assert without_flags.count("\n* ") < with_verbose.count("\n* ")

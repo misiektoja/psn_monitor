@@ -30,7 +30,7 @@ and again before anything is published to PyPI.
 | File | Area under test |
 | --- | --- |
 | `conftest.py` | Import setup, deterministic globals and the PSN, SMTP and clock test doubles |
-| `test_cli_startup.py` | Command line handling, config and dotenv loading, startup validation, logging setup and the effective-settings banner |
+| `test_cli_startup.py` | Command line handling, config and dotenv loading, startup validation and logging setup |
 | `test_config_loading.py` | Declarative config parsing and refusal of executable config content |
 | `test_csv_output.py` | The CSV history file, its header, its rows and its error reporting |
 | `test_diagnostic_modes.py` | What `--verbose` and `--debug` report, and which setting wins when both a flag and the config file are present |
@@ -42,6 +42,7 @@ and again before anything is published to PyPI.
 | `test_presence_parsing.py` | Presence payload parsing, platform labels and title normalization |
 | `test_repository_contracts.py` | Governance documents, issue templates, action pinning, release gating and the CI contract |
 | `test_repository_metadata.py` | Governance files, citation, funding, line endings, the declared editor style, the pinned linter and release integrity |
+| `test_startup_summary.py` | The startup summary rows, which view each one appears in, what the log file keeps and the welcome screen |
 | `test_runtime_controls.py` | Signal-driven toggles, interval changes, secret reload and the log output filter |
 | `test_time_formatting.py` | Durations, timespans, timestamp formats and timezone handling |
 | `test_user_info.py` | The one-shot profile report, trophies and recently played games |
