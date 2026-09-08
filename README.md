@@ -243,6 +243,17 @@ psn_monitor --send-test-email
 
 It is recommended to store secrets like `PSN_NPSSO` or `SMTP_PASSWORD` as either an environment variable or in a dotenv file.
 
+The tool can write them for you, so a secret never appears in your shell history or in `ps` output:
+
+```sh
+psn_monitor --set-npsso
+psn_monitor --set-smtp-password
+```
+
+Both ask for the value with the input hidden, check it against the live service before saving anything, then write it to your dotenv file with permissions that allow only you to read it. `--set-npsso` signs in to PlayStation Network and reports which account the code belongs to. `--set-smtp-password` signs in to your mail server without sending anything. If the check fails, nothing is written, so a working setup is never replaced by a broken one. Replacing a value that is already saved is confirmed first, and an existing `export PSN_NPSSO=...` line is rewritten in place rather than having a second assignment appended below it. Both commands need an interactive terminal.
+
+Use `--env-file` to choose which file they write to.
+
 Set environment variables using `export` on **Linux/Unix/macOS/WSL** systems:
 
 ```sh

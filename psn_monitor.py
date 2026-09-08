@@ -283,6 +283,7 @@ except ModuleNotFoundError:
 import importlib.util
 import shlex
 import shutil
+import getpass
 import subprocess
 import tempfile
 import textwrap
@@ -437,7 +438,7 @@ RECOVERY_CODES = frozenset({
     "psn.malformed_response", "psn.rate_limited", "resource.exhausted",
     "target.missing", "target.not_found", "target.not_visible",
     "smtp.invalid", "smtp.authentication", "smtp.connection",
-    "file.exists", "file.unreadable", "file.unwritable", "unknown",
+    "file.exists", "file.unreadable", "file.unwritable", "secret.entry", "unknown",
 })
 
 # How the monitoring loop retries each category. Anything absent falls back to the unknown policy
@@ -559,6 +560,9 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
 
     if context == "target.missing":
         return make_recovery_advice("target.missing", safe_detail or "No PlayStation ID was given", recovery_fix_with_guide(f"Pass the account to watch: {tool_command_prefix()} <psn_user_id>. Use the {PSN_TARGET_FORMS}", QUICK_START_GUIDE_URL), False, safe_detail)
+
+    if context == "secret.entry":
+        return make_recovery_advice("secret.entry", safe_detail or "The value was not entered, so nothing was written", recovery_fix_with_guide("Run the command again from an interactive terminal and enter the value when prompted", SECRETS_GUIDE_URL), False, safe_detail)
 
     if context == "file.exists":
         return make_recovery_advice("file.exists", safe_detail or "The destination file already exists", recovery_fix_with_guide("Re-run with --force to replace it after a timestamped backup, or write to a different path", CONFIG_GUIDE_URL), False, safe_detail)
@@ -3282,6 +3286,179 @@ def print_welcome_screen():
     return 1
 
 
+
+# Where the NPSSO code is read from, printed before the hidden prompt so nobody has to hunt for it
+NPSSO_SOURCE_URL = "https://ca.account.sony.com/api/v1/ssocookie"
+
+
+# Matches one dotenv assignment, tolerating the export prefix used when the same file is also sourced by a shell
+def match_dotenv_assignment(line, key):
+    return re.match(rf"^(\s*(?:export\s+)?){re.escape(key)}\s*=", str(line))
+
+
+# Renders one quoted dotenv assignment, keeping the export prefix of the line it replaces
+def render_dotenv_assignment(key, value, prefix=""):
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'{prefix}{key}="{escaped}"'
+
+
+# Reports whether one dotenv file already assigns the requested key
+def dotenv_contains_key(path, key):
+    target = Path(path).expanduser()
+    if not target.is_file():
+        return False
+    return any(match_dotenv_assignment(line, key) for line in target.read_text(encoding="utf-8").splitlines())
+
+
+# Replaces one dotenv assignment in place, leaving every other line and every comment untouched
+def update_dotenv_value(path, key, value):
+    target = Path(path).expanduser()
+    if not target.parent.is_dir():
+        raise FileNotFoundError(f"The directory for '{target}' does not exist")
+    existing = target.read_text(encoding="utf-8") if target.is_file() else ""
+    lines = []
+    replaced = False
+    for line in existing.splitlines():
+        match = match_dotenv_assignment(line, key)
+        if match and not replaced:
+            # An already exported line is rewritten in place. Appending a second assignment would leave the
+            # old credential on disk, with only the load order deciding which one wins
+            lines.append(render_dotenv_assignment(key, value, match.group(1)))
+            replaced = True
+            continue
+        if match:
+            continue
+        lines.append(line)
+    if not replaced:
+        lines.append(render_dotenv_assignment(key, value))
+    # Written through a temporary file, so an interrupted write cannot leave the file without its secrets.
+    # No backup is taken here: a copy of the credential being replaced is the one thing not worth keeping
+    write_file_atomically(target, "\n".join(lines) + "\n")
+    verbose_print(f"Saved {key} in '{target}'")
+    return str(target)
+
+
+# Returns the dotenv file a one-shot secret command writes to, refusing the disabled setting
+def resolve_secret_env_path(env_file, flag):
+    selected = env_file if env_file else DOTENV_FILE
+    if selected and str(selected).casefold() == "none":
+        raise RecoveryError(classify_recovery_error(context="secret.entry", detail=f"{flag} needs a dotenv file to write to, so it cannot be used with 'none'"))
+    return Path(os.path.expanduser(str(selected))) if selected else Path.cwd() / ".env"
+
+
+# Validates one NPSSO code against PlayStation Network, returning the account it signs in as
+def validate_npsso_code(npsso):
+    candidate = str(npsso or "").strip()
+    if not candidate or candidate == "your_psn_npsso_code":
+        raise RecoveryError(classify_recovery_error(context="secret.entry", detail="No NPSSO code was entered, so the dotenv file was not changed"))
+    if "\r" in candidate or "\n" in candidate:
+        raise RecoveryError(classify_recovery_error(context="secret.entry", detail="The NPSSO code contains a line break, so the dotenv file was not changed"))
+    try:
+        return PSNAWP(candidate).me().online_id
+    except Exception as exc:
+        raise RecoveryError(classify_recovery_error(exc, context="startup"), exc) from None
+
+
+# Signs in to the configured SMTP server with one candidate password, without sending a message
+def smtp_sign_in(password, timeout=15):
+    global SMTP_PASSWORD
+
+    candidate = str(password or "")
+    if not candidate.strip() or candidate == "your_smtp_password":
+        raise RecoveryError(classify_recovery_error(context="secret.entry", detail="No SMTP password was entered, so the dotenv file was not changed"))
+    previous_password = SMTP_PASSWORD
+    SMTP_PASSWORD = candidate
+    try:
+        settings_advice = validate_smtp_settings()
+        if settings_advice is not None:
+            raise RecoveryError(settings_advice)
+        debug_print(f"SMTP sign-in check {SMTP_HOST}:{SMTP_PORT} (starttls={bool(SMTP_SSL)}, timeout {timeout}s, user {SMTP_USER})")
+        connection = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=timeout)
+        if SMTP_SSL:
+            connection.starttls(context=ssl.create_default_context())
+        try:
+            connection.login(SMTP_USER, candidate)
+        finally:
+            try:
+                connection.quit()
+            except Exception as quit_error:
+                debug_print(f"Closing the SMTP connection failed: {quit_error}")
+    except RecoveryError:
+        raise
+    except Exception as exc:
+        raise RecoveryError(classify_recovery_error(exc, context="smtp", detail=f"Signing in to {SMTP_HOST} as {SMTP_USER} failed: {exc}"), exc) from None
+    finally:
+        SMTP_PASSWORD = previous_password
+    return SMTP_USER
+
+
+# Prints the commands to run next, with the file paths this run was given so they can be pasted as they are
+def print_secret_next_steps(env_path, config_path=None, psn_user_id=None):
+    paths = []
+    if config_path:
+        paths.extend(("--config-file", str(config_path)))
+    paths.extend(("--env-file", str(env_path)))
+    target = psn_user_id or "<psn_user_id>"
+    print()
+    print_labelled_command("Check setup again:", tool_command("--doctor", target, *paths))
+    print_labelled_command("Once the checks pass, start monitoring:", tool_command(target, *paths))
+
+
+# Collects one secret through a hidden prompt, validates it against the live service and writes it only then
+def run_set_secret(key, flag, guidance, prompt_text, validator, describe_success, env_file=None, config_path=None, psn_user_id=None, interactive=None, input_func=None, getpass_func=None):
+    global DEBUG_MODE
+
+    destination = resolve_secret_env_path(env_file, flag)
+    terminal_is_interactive = sys.stdin.isatty() if interactive is None else bool(interactive)
+    if not terminal_is_interactive:
+        raise RecoveryError(classify_recovery_error(context="secret.entry", detail=f"{flag} needs an interactive terminal so the value stays hidden"))
+
+    ask = input if input_func is None else input_func
+    if dotenv_contains_key(destination, key):
+        try:
+            confirmed = str(ask(f"{key} is already set in '{destination}'. Replace it? [y/N]: ")).strip().casefold() in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            confirmed = False
+        if not confirmed:
+            raise RecoveryError(classify_recovery_error(context="secret.entry", detail=f"{key} was left as it is and the dotenv file was not changed"))
+
+    print(guidance)
+    hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
+    # The entered value must not reach the debug stream, which is the one place it would be printed verbatim
+    previous_debug_mode = DEBUG_MODE
+    DEBUG_MODE = False
+    try:
+        entered = hidden_prompt(prompt_text)
+    except (EOFError, KeyboardInterrupt):
+        print()
+        raise RecoveryError(classify_recovery_error(context="secret.entry", detail=f"{key} entry was cancelled and the dotenv file was not changed")) from None
+    finally:
+        DEBUG_MODE = previous_debug_mode
+
+    print(f"* Checking the entered value before writing it to '{destination}' ...")
+    outcome = validator(entered)
+    try:
+        update_dotenv_value(destination, key, str(entered).strip())
+    except Exception as exc:
+        raise RecoveryError(classify_recovery_error(exc, context="file.unwritable", detail=f"Cannot save {key} to '{destination}': {exc}"), exc) from None
+
+    print(f"* {describe_success(outcome)}")
+    print(f"* Updated '{destination}', readable only by you")
+    print_secret_next_steps(destination, config_path, psn_user_id)
+    return str(destination)
+
+
+# Stores one validated NPSSO code in the dotenv file, so it never has to be typed on a command line
+def run_set_npsso(env_file=None, config_path=None, psn_user_id=None, interactive=None, input_func=None, getpass_func=None):
+    return run_set_secret("PSN_NPSSO", "--set-npsso", f"* Sign in at https://my.playstation.com then copy the npsso value from: {NPSSO_SOURCE_URL}", "Enter the NPSSO code (input hidden): ", validate_npsso_code, lambda account: f"PlayStation Network accepted the code, signed in as {account}", env_file, config_path, psn_user_id, interactive, input_func, getpass_func)
+
+
+# Stores one SMTP password in the dotenv file after the mail server has actually accepted it
+def run_set_smtp_password(env_file=None, config_path=None, psn_user_id=None, interactive=None, input_func=None, getpass_func=None):
+    return run_set_secret("SMTP_PASSWORD", "--set-smtp-password", f"* The password is checked by signing in to {SMTP_HOST} as {SMTP_USER}. Nothing is sent", "Enter the SMTP password (input hidden): ", smtp_sign_in, lambda user: f"The mail server accepted the password for {user}", env_file, config_path, psn_user_id, interactive, input_func, getpass_func)
+
+
 def main():
     global CLI_CONFIG_PATH, DOTENV_FILE, PSN_STATUS_FILE, LOCAL_TIMEZONE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, stdout_bck
 
@@ -3389,6 +3566,13 @@ def main():
     )
 
     # Notifications
+    creds.add_argument(
+        "--set-npsso",
+        dest="set_npsso",
+        action="store_true",
+        help="Enter an NPSSO code privately, check it against PSN and save it to the dotenv file"
+    )
+
     notify = parser.add_argument_group("Notifications")
     notify.add_argument(
         "-a", "--notify-active-inactive",
@@ -3419,6 +3603,13 @@ def main():
     )
 
     # User information
+    notify.add_argument(
+        "--set-smtp-password",
+        dest="set_smtp_password",
+        action="store_true",
+        help="Enter the SMTP password privately, check it against the mail server and save it to the dotenv file"
+    )
+
     info = parser.add_argument_group("User information")
     info.add_argument(
         "-i", "--info",
@@ -3627,6 +3818,22 @@ def main():
 
     if not check_internet():
         sys.exit(1)
+
+    if args.set_npsso:
+        try:
+            run_set_npsso(env_file=env_path, config_path=cfg_path, psn_user_id=args.psn_user_id)
+        except Exception as exc:
+            print_recovery_advice(classify_recovery_error(exc, context="secret.entry"))
+            sys.exit(1)
+        sys.exit(0)
+
+    if args.set_smtp_password:
+        try:
+            run_set_smtp_password(env_file=env_path, config_path=cfg_path, psn_user_id=args.psn_user_id)
+        except Exception as exc:
+            print_recovery_advice(classify_recovery_error(exc, context="secret.entry"))
+            sys.exit(1)
+        sys.exit(0)
 
     if args.send_test_email:
         print("* Sending test email notification ...\n")

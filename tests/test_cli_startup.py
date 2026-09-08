@@ -506,3 +506,26 @@ def test_generate_config_without_a_filename_prints_the_template(pm_module, monke
     assert run_main(pm_module, monkeypatch, ["--generate-config"]) == 0
 
     assert "PSN_CHECK_INTERVAL" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("flag", ["--set-npsso", "--set-smtp-password"])
+# Verifies a one-shot secret command refuses rather than reading a secret from a pipe that anyone can log
+def test_setting_a_secret_needs_a_terminal(pm_module, monkeypatch, capsys, flag):
+    assert run_main(pm_module, monkeypatch, [flag]) == 1
+
+    output = capsys.readouterr().out
+    assert "interactive terminal" in output
+    # The command works on its own, so it must not fail for the missing PSN ID first
+    assert "No PlayStation ID was given" not in output
+
+
+# Verifies the saved secret goes to the dotenv file the run was told to use
+def test_setting_a_secret_writes_to_the_selected_dotenv_file(pm_module, monkeypatch, isolated_working_directory, psn_session, capsys):
+    env_file = isolated_working_directory / "secrets.env"
+    monkeypatch.setattr(pm_module.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(pm_module.getpass, "getpass", lambda prompt: "a-fresh-npsso-code")
+
+    assert run_main(pm_module, monkeypatch, ["--env-file", str(env_file), "--set-npsso"]) == 0
+
+    assert env_file.read_text(encoding="utf-8") == 'PSN_NPSSO="a-fresh-npsso-code"\n'
+    assert "a-fresh-npsso-code" not in capsys.readouterr().out
