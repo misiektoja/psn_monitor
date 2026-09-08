@@ -529,7 +529,7 @@ def probe_npsso_auth_error(npsso):
             return ("PSN Terms of Service / User Agreement must be re-accepted. Log into your account at https://my.account.sony.com or in the PlayStation App to accept the updated Terms of Service and try again.")
         return f"PSN auth rejected (error={err or 'n/a'} error_code={err_code or 'n/a'} error_description={err_desc or 'n/a'})"
     except Exception as diag_exc:
-        debug_print("Auth probe against the PSN OAuth endpoint failed", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+        debug_print("Auth probe against the PSN OAuth endpoint", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
         return None
 
 
@@ -1763,7 +1763,7 @@ def clear_screen(enabled=True):
         else:
             os.system('clear')
     except Exception as e:
-        debug_print("Clearing the screen failed", outcome="failed", error=f"{type(e).__name__}: {e}")
+        debug_print("Clearing the screen", outcome="failed", error=f"{type(e).__name__}: {e}")
         print("* Cannot clear the screen contents")
 
 
@@ -3656,7 +3656,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             for attr in ("session", "_session", "http", "_http", "client", "_client"):
                 _close(getattr(obj, attr, None), f"'{attr}' session")
         except Exception as diag_exc:
-            debug_print("Closing PSNAWP sessions failed", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+            debug_print("Closing PSNAWP sessions", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
     def get_sleep_interval():
         return PSN_ACTIVE_CHECK_INTERVAL if status and status != "offline" else PSN_CHECK_INTERVAL
@@ -3670,7 +3670,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         try:
             _close_psnawp_sessions(psnawp)
         except Exception as diag_exc:
-            debug_print("Closing the old PSNAWP session before recreating it failed", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+            debug_print("Closing the old PSNAWP session before recreating it", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
         try:
             psnawp = psn_client()
             psn_user = psnawp.user(online_id=psn_user_id)
@@ -3678,7 +3678,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             verbose_print("Recreated the PSNAWP session")
             return True
         except Exception as diag_exc:
-            debug_print("Recreating the PSNAWP session failed", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+            debug_print("Recreating the PSNAWP session", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
             return False
 
     sleep_interval = get_sleep_interval()
@@ -3698,7 +3698,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             try:
                 _close_psnawp_sessions(psnawp)
             except Exception as diag_exc:
-                debug_print("Closing the old PSNAWP session after the NPSSO change failed", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+                debug_print("Closing the old PSNAWP session after the NPSSO change", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
             try:
                 psnawp = psn_client()
                 psn_user = psnawp.user(online_id=psn_user_id)
@@ -5277,7 +5277,7 @@ def smtp_sign_in(password, timeout=15):
             try:
                 connection.quit()
             except Exception as quit_error:
-                debug_print("Closing the SMTP connection failed", outcome="failed", error=f"{type(quit_error).__name__}: {quit_error}")
+                debug_print("Closing the SMTP connection", outcome="failed", error=f"{type(quit_error).__name__}: {quit_error}")
     except RecoveryError:
         raise
     except Exception as exc:
@@ -5823,7 +5823,7 @@ def main():
             try:
                 local_tz = get_localzone()
             except Exception as diag_exc:
-                debug_print("Local timezone auto-detection failed", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+                debug_print("Local timezone auto-detection", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
         if local_tz and is_valid_timezone(str(local_tz)):
             LOCAL_TIMEZONE = str(local_tz)
             LOCAL_TIMEZONE_STATE = "auto"
