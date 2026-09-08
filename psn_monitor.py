@@ -14,6 +14,7 @@ python-dateutil
 pytz
 tzlocal (optional)
 python-dotenv (optional)
+wcwidth (optional, needed by TRUNCATE_CHARS feature)
 """
 
 VERSION = "1.8.4"
@@ -122,6 +123,13 @@ DISABLE_LOGGING = False
 #   "Off"  - preserve Unicode separators in logs
 ASCII_LOG_SEPARATORS = "Auto"
 
+# Max characters per line when printing to screen to avoid line wrapping
+# Does not affect log file output
+# Set to 999 to auto-detect terminal width
+# Applies only when DISABLE_LOGGING is False
+# Can also be set via the --truncate flag
+TRUNCATE_CHARS = 0
+
 # Width of horizontal line
 HORIZONTAL_LINE = 113
 
@@ -162,6 +170,7 @@ DOTENV_FILE = ""
 PSN_LOGFILE = ""
 DISABLE_LOGGING = False
 ASCII_LOG_SEPARATORS = "Auto"
+TRUNCATE_CHARS = 0
 HORIZONTAL_LINE = 0
 CLEAR_SCREEN = False
 PSN_ACTIVE_CHECK_SIGNAL_VALUE = 0
@@ -173,6 +182,13 @@ DEFAULT_CONFIG_FILENAME = "psn_monitor.conf"
 
 # List of secret keys to load from env/config
 SECRET_KEYS = ("PSN_NPSSO", "SMTP_PASSWORD")
+
+# Records where each secret was finally resolved from, filled in as the documented precedence is applied.
+# The winning source cannot be reconstructed afterwards, because the same key may sit in several places
+SECRET_SOURCES = {}
+
+# Secret keys that were already exported when the tool started, so a dotenv file cannot be credited for them
+EXPORTED_SECRET_KEYS = frozenset()
 
 # Default value for timeouts in alarm signal handler; in seconds
 FUNCTION_TIMEOUT = 15
@@ -393,6 +409,122 @@ def format_platform_display(platform_value):
     return PLATFORM_DISPLAY_NAMES.get(platform_key, platform_key.replace("_", " "))
 
 
+# A value shorter than this is an ordinary word at least as often as it is a secret, so replacing it wherever
+# it appears would corrupt the text it was added to protect. The assignment, cookie and header patterns below
+# still redact a short secret everywhere an error can realistically expose one
+MIN_REDACTABLE_SECRET_LENGTH = 12
+
+
+# Reports whether a secret holds a real value rather than being empty or one of the shipped placeholders
+def secret_is_set(value):
+    return isinstance(value, str) and bool(value.strip()) and not value.startswith("your_")
+
+
+# Returns every redactable secret value currently known to the process, longest first so overlaps redact fully
+def known_secret_values():
+    values = [value for key in SECRET_KEYS for value in (globals().get(key),) if secret_is_set(value) and len(value) >= MIN_REDACTABLE_SECRET_LENGTH]
+    return sorted(set(values), key=len, reverse=True)
+
+
+# Redacts credentials and secret-bearing assignments from arbitrary text before it is shown, logged or emailed
+def sanitize_error_text(value):
+    text = str(value or "")
+    for secret in known_secret_values():
+        text = text.replace(secret, "<redacted>")
+    patterns = (
+        (r"(?m)(\b(?:PSN_NPSSO|SMTP_PASSWORD)\b\s*=\s*).*$", r"\1<redacted>"),
+        (r"(?i)(authorization['\"]?\s*[:=]\s*['\"]?bearer\s+)[^\s,;'\"}]+", r"\1<redacted>"),
+        (r"(?i)(['\"]?(?:npsso|access_token|refresh_token|smtp_password)['\"]?\s*[:=]\s*['\"]?)[^\s,;'\"}]+", r"\1<redacted>"),
+    )
+    for pattern, replacement in patterns:
+        text = re.sub(pattern, replacement, text)
+    return text
+
+
+# Matches every ANSI escape sequence, used to keep colour codes out of files
+ANSI_ESCAPE_RE = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
+
+# The only escape sequence this tool emits is an SGR colour or style change, so it is the only one worth keeping
+SGR_SEQUENCE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+# Every other control character is dropped, keeping only tab and newline. A carriage return would let a PSN
+# supplied name overwrite an already printed line, and the rest can move the cursor, clear the screen or
+# retitle the terminal window
+TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+# Removes terminal control sequences that PSN-supplied text could use to drive the terminal, while leaving SGR
+# colour sequences intact so this tool's own colouring survives a pass through its own writers
+def sanitize_terminal_text(message):
+    if not isinstance(message, str) or not message:
+        return message
+    parts = []
+    position = 0
+    for match in SGR_SEQUENCE_RE.finditer(message):
+        parts.append(TERMINAL_CONTROL_RE.sub("", message[position:match.start()]))
+        parts.append(match.group(0))
+        position = match.end()
+    parts.append(TERMINAL_CONTROL_RE.sub("", message[position:]))
+    return "".join(parts)
+
+
+# Strips every escape sequence and control character, for text going to a file or an email rather than a terminal
+def plain_text(message):
+    if not isinstance(message, str) or not message:
+        return message
+    return TERMINAL_CONTROL_RE.sub("", ANSI_ESCAPE_RE.sub("", message))
+
+
+# Truncates each line to a display width, expanding tabs and counting double-width characters correctly
+def truncate_string_per_line(message, truncate_width, tabsize=8):
+    try:
+        from wcwidth import wcwidth
+    except ImportError:
+        return message
+
+    truncated_lines = []
+
+    for line in message.split("\n"):
+        expanded_line = line.expandtabs(tabsize)
+        current_width = 0
+        truncated = []
+        position = 0
+
+        while position < len(expanded_line):
+            # A colour sequence is copied through free of charge, so styling never eats into the visible width
+            escape = SGR_SEQUENCE_RE.match(expanded_line, position)
+            if escape:
+                truncated.append(escape.group(0))
+                position = escape.end()
+                continue
+            char = expanded_line[position]
+            char_width = wcwidth(char)
+            if char_width is None or char_width < 0:
+                char_width = 0
+            if current_width + char_width > truncate_width:
+                break
+            truncated.append(char)
+            current_width += char_width
+            position += 1
+
+        truncated_lines.append("".join(truncated))
+
+    return "\n".join(truncated_lines)
+
+
+# Resolves the configured and command line truncation width, expanding the terminal-width sentinel
+def resolve_truncate_chars(cli_value, configured_value, logging_disabled):
+    truncate_chars = configured_value if cli_value is None else cli_value
+    # Truncation shortens the terminal copy only, so without a log file the trimmed text would be lost for good
+    if logging_disabled:
+        return 0
+    if truncate_chars == 999:
+        terminal_size = shutil.get_terminal_size()
+        print(f"The detected terminal screen width is: {terminal_size.columns} characters\n")
+        return terminal_size.columns
+    return truncate_chars
+
+
 # Reports whether separator-only log lines should use ASCII on this system
 def ascii_log_separators_enabled():
     mode = str(ASCII_LOG_SEPARATORS).strip().lower()
@@ -408,20 +540,55 @@ def normalize_log_separators(message):
     return re.sub(r"(?m)^─+$", lambda match: match.group(0).replace("─", "-"), message)
 
 
+# Sanitizing stdout wrapper installed before the logging policy is known, so early output is covered too
+class TerminalStream(object):
+    # Stores the wrapped terminal stream
+    def __init__(self, stream):
+        self.terminal = stream
+
+    # Writes one sanitized message to the wrapped terminal
+    def write(self, message):
+        self.terminal.write(sanitize_terminal_text(message))
+        self.terminal.flush()
+
+    # Flushes the wrapped terminal
+    def flush(self):
+        self.terminal.flush()
+
+    # Forwards every remaining stream attribute to the wrapped terminal
+    def __getattr__(self, name):
+        return getattr(self.terminal, name)
+
+
+# Returns the underlying terminal behind any number of sanitizing stream wrappers
+def unwrap_terminal_stream(stream):
+    while isinstance(stream, TerminalStream):
+        stream = stream.terminal
+    return stream
+
+
 # Logger class to output messages to stdout and log file
 class Logger(object):
     def __init__(self, filename):
-        self.terminal = sys.stdout
+        # The early sanitizing stream is unwrapped so sanitizing happens exactly once. Writing through it would
+        # sanitize every line twice, and it would leave two layers to keep in step once colouring is added
+        self.terminal = unwrap_terminal_stream(sys.stdout)
         self.logfile = open(filename, "a", buffering=1, encoding="utf-8")
 
     def write(self, message):
+        message = sanitize_terminal_text(message)
+        # The log file stays plain text, so colour codes are stripped and tabs expanded before it is written
+        self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", message).expandtabs(8)))
+        # Truncation runs on the text as displayed, so escape sequences never count toward the visible width
+        if TRUNCATE_CHARS:
+            message = truncate_string_per_line(message, TRUNCATE_CHARS)
         self.terminal.write(message)
-        self.logfile.write(normalize_log_separators(message.expandtabs(8)))
         self.terminal.flush()
         self.logfile.flush()
 
     def flush(self):
-        pass
+        self.terminal.flush()
+        self.logfile.flush()
 
 
 # Class used to generate timeout exceptions
@@ -447,7 +614,7 @@ def check_internet(url=CHECK_INTERNET_URL, timeout=CHECK_INTERNET_TIMEOUT):
         _ = req.get(url, timeout=timeout)
         return True
     except req.RequestException as e:
-        print(f"* No connectivity, please check your network:\n\n{e}")
+        print(f"* No connectivity, please check your network:\n\n{sanitize_error_text(e)}")
         return False
 
 
@@ -612,6 +779,11 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         print("Error sending email - SMTP settings are incorrect (body and body_html cannot be empty at the same time)")
         return 1
 
+    # Game and profile names taken from PSN reach the message, so control sequences are removed before a mail
+    # client renders them. A terminal is not the only thing that acts on them
+    subject = plain_text(subject)
+    body = plain_text(body)
+
     try:
         if use_ssl:
             ssl_context = ssl.create_default_context()
@@ -638,7 +810,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         smtpObj.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, email_msg.as_string())
         smtpObj.quit()
     except Exception as e:
-        print(f"Error sending email: {e}")
+        print(f"Error sending email: {sanitize_error_text(e)}")
         return 1
     return 0
 
@@ -660,7 +832,7 @@ def write_csv_entry(csv_file_name, timestamp, status, game_name):
 
         with open(csv_file_name, 'a', newline='', buffering=1, encoding="utf-8") as csv_file:
             csvwriter = csv.DictWriter(csv_file, fieldnames=csvfieldnames, quoting=csv.QUOTE_NONNUMERIC)
-            csvwriter.writerow({'Date': timestamp, 'Status': status, 'Game name': game_name})
+            csvwriter.writerow({'Date': timestamp, 'Status': status, 'Game name': plain_text(game_name)})
 
     except Exception as e:
         raise RuntimeError(f"Failed to write to CSV file '{csv_file_name}': {e}")
@@ -920,6 +1092,7 @@ def reload_secrets_signal_handler(sig, frame):
             val = os.getenv(secret)
             if val is not None and val != old_val:
                 globals()[secret] = val
+                SECRET_SOURCES[secret] = "dotenv file"
                 print(f"* Reloaded {secret} from {env_path}")
 
     print_cur_ts("Timestamp:\t\t\t")
@@ -1273,7 +1446,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
         if hint:
             print(f"\n* Error: {hint}")
         else:
-            print(f"\n* Error: {e}")
+            print(f"\n* Error: {sanitize_error_text(e)}")
         sys.exit(1)
     print_ok()
 
@@ -1288,7 +1461,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
         fs = psn_user.friendship()
         share = psn_user.get_shareable_profile_link()
     except Exception as e:
-        print(f"\n* Error: {e}")
+        print(f"\n* Error: {sanitize_error_text(e)}")
         sys.exit(1)
     print_ok()
 
@@ -1297,7 +1470,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
         psn_user_presence = psn_user.get_presence()
         parse_presence(psn_user_presence)
     except Exception as e:
-        print(f"\n* Error: Cannot get presence for user {psn_user_id}: {e}")
+        print(f"\n* Error: Cannot get presence for user {psn_user_id}: {sanitize_error_text(e)}")
         sys.exit(1)
     print_ok()
 
@@ -1332,7 +1505,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
             launchplatform = gametitleinfolist[0].get("launchPlatform")
             launchplatform = str(launchplatform).upper()
     except Exception as e:
-        print(f"\n* Error: {e}")
+        print(f"\n* Error: {sanitize_error_text(e)}")
         sys.exit(1)
     print_ok()
     print()
@@ -1590,7 +1763,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         if csv_file_name:
             init_csv_file(csv_file_name)
     except Exception as e:
-        print(f"* Error: {e}")
+        print(f"* Error: {sanitize_error_text(e)}")
 
     print("Sneaking into PlayStation like a ninja ...\n")
 
@@ -1612,7 +1785,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         if hint:
             print(f"\n* Error: {hint}")
         else:
-            print(f"\n* Error: {e}")
+            print(f"\n* Error: {sanitize_error_text(e)}")
         sys.exit(1)
     print_ok()
 
@@ -1627,7 +1800,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         fs = psn_user.friendship()
         share = psn_user.get_shareable_profile_link()
     except Exception as e:
-        print(f"\n* Error: {e}")
+        print(f"\n* Error: {sanitize_error_text(e)}")
         sys.exit(1)
     print_ok()
 
@@ -1636,7 +1809,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         psn_user_presence = psn_user.get_presence()
         parse_presence(psn_user_presence)
     except Exception as e:
-        print(f"\n* Error: Cannot get presence for user {psn_user_id}: {e}")
+        print(f"\n* Error: Cannot get presence for user {psn_user_id}: {sanitize_error_text(e)}")
         sys.exit(1)
     print_ok()
 
@@ -1671,7 +1844,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             launchplatform = gametitleinfolist[0].get("launchPlatform")
             launchplatform = str(launchplatform).upper()
     except Exception as e:
-        print(f"\n* Error: {e}")
+        print(f"\n* Error: {sanitize_error_text(e)}")
         sys.exit(1)
     print_ok()
 
@@ -1694,7 +1867,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             with open(psn_last_status_file, 'r', encoding="utf-8") as f:
                 last_status_read = json.load(f)
         except Exception as e:
-            print(f"* Cannot load last status from '{psn_last_status_file}' file: {e}")
+            print(f"* Cannot load last status from '{psn_last_status_file}' file: {sanitize_error_text(e)}")
         if last_status_read:
             last_status_ts = last_status_read[0]
             last_status = last_status_read[1]
@@ -1727,13 +1900,13 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             with open(psn_last_status_file, 'w', encoding="utf-8") as f:
                 json.dump(last_status_to_save, f, indent=2)
         except Exception as e:
-            print(f"* Cannot save last status to '{psn_last_status_file}' file: {e}")
+            print(f"* Cannot save last status to '{psn_last_status_file}' file: {sanitize_error_text(e)}")
 
     try:
         if csv_file_name and (status != last_status):
             write_csv_entry(csv_file_name, now_local_naive(), status, game_name)
     except Exception as e:
-        print(f"* Error: {e}")
+        print(f"* Error: {sanitize_error_text(e)}")
 
     print(f"\nPlayStation ID:\t\t\t{psn_user_id}")
     print(f"PSN account ID:\t\t\t{accountid}")
@@ -1809,7 +1982,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             with open(psn_last_status_file, 'w', encoding="utf-8") as f:
                 json.dump(last_status_to_save, f, indent=2)
         except Exception as e:
-            print(f"* Cannot save last status to '{psn_last_status_file}' file: {e}")
+            print(f"* Cannot save last status to '{psn_last_status_file}' file: {sanitize_error_text(e)}")
 
     if status_ts_old != status_ts_old_bck:
         if status == "offline":
@@ -1887,7 +2060,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 print("* PSN_NPSSO updated - recreated PSNAWP session")
                 print_cur_ts("Timestamp:\t\t\t")
             except Exception as e:
-                print(f"* Warning: failed to recreate PSNAWP session after PSN_NPSSO update: {e}")
+                print(f"* Warning: failed to recreate PSNAWP session after PSN_NPSSO update: {sanitize_error_text(e)}")
                 if ERROR_NOTIFICATION and not email_sent:
                     m_subject = f"psn_monitor: failed to recreate PSNAWP session (user: {psn_user_id})"
                     m_body = f"Failed to recreate PSNAWP session after PSN_NPSSO update: {e}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
@@ -1961,7 +2134,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 if hint:
                     print(f"* PSN auth failed: {hint}")
                 else:
-                    print(f"* PSN authentication failed (NPSSO may be expired/invalid): {e}")
+                    print(f"* PSN authentication failed (NPSSO may be expired/invalid): {sanitize_error_text(e)}")
                     print("* Hint: update PSN_NPSSO in your .env and send SIGHUP to this process (or restart).")
                 if ERROR_NOTIFICATION and not email_sent:
                     m_subject = f"psn_monitor: PSN NPSSO key error! (user: {psn_user_id})"
@@ -1981,7 +2154,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 if hint:
                     print(f"* PSN returned a malformed response and auth probe reports: {hint}")
                 else:
-                    print(f"* PSN returned an unexpected response shape will recreate session: {e}")
+                    print(f"* PSN returned an unexpected response shape will recreate session: {sanitize_error_text(e)}")
                 if _recreate_session_rate_limited():
                     print("* Recreated PSNAWP session after malformed response")
                 if ERROR_NOTIFICATION and not email_sent and error_streak >= 3:
@@ -2007,7 +2180,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                     send_email(m_subject, m_body, "", SMTP_SSL)
                     email_sent = True
                 if error_streak >= 3:
-                    print(f"* Error (connection) retrying in {display_time(retry_delay)}: {e}")
+                    print(f"* Error (connection) retrying in {display_time(retry_delay)}: {sanitize_error_text(e)}")
                     print_cur_ts("Timestamp:\t\t\t")
                 time.sleep(retry_delay)
                 continue
@@ -2020,10 +2193,10 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 if hint:
                     print(f"* Error (unknown {error_streak} in a row) auth probe reports: {hint}")
                 else:
-                    print(f"* Error (unknown {error_streak} in a row) will recreate session: {e}")
+                    print(f"* Error (unknown {error_streak} in a row) will recreate session: {sanitize_error_text(e)}")
                 _recreate_session_rate_limited()
             else:
-                print(f"* Error retrying in {display_time(sleep_interval)}: {e}")
+                print(f"* Error retrying in {display_time(sleep_interval)}: {sanitize_error_text(e)}")
             if ERROR_NOTIFICATION and not email_sent and error_streak >= 5:
                 m_subject = f"psn_monitor: persistent unexpected errors (user: {psn_user_id})"
                 body_reason = hint if hint else f"Persistent unexpected errors ({error_streak} in a row). Last error: {e}"
@@ -2059,7 +2232,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 with open(psn_last_status_file, 'w', encoding="utf-8") as f:
                     json.dump(last_status_to_save, f, indent=2)
             except Exception as e:
-                print(f"* Cannot save last status to '{psn_last_status_file}' file: {e}")
+                print(f"* Cannot save last status to '{psn_last_status_file}' file: {sanitize_error_text(e)}")
 
             print(f"PSN user {psn_user_id} changed status from {status_old} to {status}")
             print(f"User was {status_old} for {calculate_timespan(int(status_ts), int(status_ts_old))} ({get_range_of_dates_from_tss(int(status_ts_old), int(status_ts), short=True)})")
@@ -2176,7 +2349,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 if csv_file_name:
                     write_csv_entry(csv_file_name, now_local_naive(), status, game_name)
             except Exception as e:
-                print(f"* Error: {e}")
+                print(f"* Error: {sanitize_error_text(e)}")
                 print_cur_ts("Timestamp:\t\t\t")
 
         status_old = status
@@ -2192,7 +2365,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
 
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, LOCAL_TIMEZONE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, stdout_bck
+    global CLI_CONFIG_PATH, DOTENV_FILE, LOCAL_TIMEZONE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, stdout_bck
 
     if "--generate-config" in sys.argv:
         config_content = CONFIG_BLOCK.strip("\n") + "\n"
@@ -2215,6 +2388,11 @@ def main():
         sys.exit(0)
 
     stdout_bck = sys.stdout
+
+    # Installed before the banner and before one-shot modes run, so PSN-supplied text printed by --info cannot
+    # drive the terminal either. The Logger installed later unwraps this again to keep sanitizing single-pass
+    if not isinstance(sys.stdout, TerminalStream):
+        sys.stdout = TerminalStream(sys.stdout)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -2360,6 +2538,13 @@ def main():
         default=None,
         help="Disable logging to psn_monitor_<psn_user_id>.log"
     )
+    opts.add_argument(
+        "--truncate",
+        dest="truncate",
+        metavar="N",
+        type=int,
+        help="Max characters per screen line (not log), use 999 to auto-detect terminal width, ignored if -d is set"
+    )
 
     args = parser.parse_args()
 
@@ -2385,6 +2570,14 @@ def main():
     else:
         if DOTENV_FILE:
             DOTENV_FILE = os.path.expanduser(DOTENV_FILE)
+
+    # Which secrets were already exported has to be captured before load_dotenv copies the file's values into
+    # os.environ, because afterwards the two sources are indistinguishable
+    EXPORTED_SECRET_KEYS = frozenset(secret for secret in SECRET_KEYS if os.getenv(secret) is not None)
+    SECRET_SOURCES.clear()
+    for secret in SECRET_KEYS:
+        if secret_is_set(globals().get(secret)):
+            SECRET_SOURCES[secret] = "configuration file"
 
     if DOTENV_FILE and DOTENV_FILE.lower() == 'none':
         env_path = None
@@ -2415,6 +2608,7 @@ def main():
         val = os.getenv(secret)
         if val is not None:
             globals()[secret] = val
+            SECRET_SOURCES[secret] = "environment" if secret in EXPORTED_SECRET_KEYS else "dotenv file"
 
     local_tz = None
     if LOCAL_TIMEZONE == "Auto":
@@ -2452,6 +2646,7 @@ def main():
 
     if args.npsso_key:
         PSN_NPSSO = args.npsso_key
+        SECRET_SOURCES["PSN_NPSSO"] = "command line"
 
     if not PSN_NPSSO or PSN_NPSSO == "your_psn_npsso_code":
         print("* Error: PSN_NPSSO (-n / --npsso_key) value is empty or incorrect")
@@ -2481,17 +2676,19 @@ def main():
             with open(CSV_FILE, 'a', newline='', buffering=1, encoding="utf-8") as _:
                 pass
         except Exception as e:
-            print(f"* Error, CSV file cannot be opened for writing: {e}")
+            print(f"* Error, CSV file cannot be opened for writing: {sanitize_error_text(e)}")
             sys.exit(1)
 
     try:
         ascii_log_separators_enabled()
     except ValueError as e:
-        print(f"* Error: {e}")
+        print(f"* Error: {sanitize_error_text(e)}")
         sys.exit(1)
 
     if args.disable_logging is True:
         DISABLE_LOGGING = True
+
+    TRUNCATE_CHARS = resolve_truncate_chars(args.truncate, TRUNCATE_CHARS, DISABLE_LOGGING)
 
     if not DISABLE_LOGGING:
         log_path = Path(os.path.expanduser(PSN_LOGFILE))
@@ -2527,6 +2724,7 @@ def main():
     print(f"* CSV logging enabled:\t\t{bool(CSV_FILE)}" + (f" ({CSV_FILE})" if CSV_FILE else ""))
     print(f"* Output logging enabled:\t{not DISABLE_LOGGING}" + (f" ({FINAL_LOG_PATH})" if not DISABLE_LOGGING else ""))
     print(f"* ASCII log separators:\t\t{ascii_log_separators_enabled()} (mode: {ASCII_LOG_SEPARATORS})")
+    print(f"* Terminal truncation:\t\t{bool(TRUNCATE_CHARS)}" + (f" ({TRUNCATE_CHARS} chars)" if TRUNCATE_CHARS else ""))
     print(f"* Configuration file:\t\t{cfg_path}")
     print(f"* Dotenv file:\t\t\t{env_path or 'None'}")
     print(f"* Local timezone:\t\t{LOCAL_TIMEZONE}")

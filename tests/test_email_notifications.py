@@ -137,3 +137,31 @@ def test_timeout_is_passed_to_the_smtp_client(pm_module, smtp_double):
     pm_module.send_email("subject", "body", "", True, smtp_timeout=5)
 
     assert smtp_double.last.timeout == 5
+
+
+# Verifies PSN-supplied names cannot carry terminal control sequences into a mail client
+def test_control_sequences_are_removed_from_the_delivered_message(pm_module, smtp_double):
+    assert pm_module.send_email("psn_monitor: Ghost\x1b[2J", "started playing Ghost\x07 of\r Tsushima", "", True) == 0
+
+    message = email.message_from_string(smtp_double.last.sent["message"])
+    subject = str(make_header(decode_header(message["Subject"])))
+    body = next(part for part in message.walk() if part.get_content_type() == "text/plain").get_payload(decode=True).decode("utf-8")
+    assert subject == "psn_monitor: Ghost"
+    assert body == "started playing Ghost of Tsushima"
+
+
+# Verifies a server that echoes the credential back cannot get it printed to the screen or the log
+def test_delivery_errors_do_not_leak_the_smtp_password(pm_module, monkeypatch, capsys):
+    monkeypatch.setattr(pm_module, "SMTP_PASSWORD", "aVeryLongSmtpPassword123")
+
+    # Rejects the login the way a relay quoting the offending credential would
+    def reject(*args, **kwargs):
+        raise smtplib.SMTPAuthenticationError(535, "rejected aVeryLongSmtpPassword123")
+
+    monkeypatch.setattr(pm_module.smtplib, "SMTP", reject)
+
+    assert pm_module.send_email("subject", "body", "", True) == 1
+
+    printed = capsys.readouterr().out
+    assert "aVeryLongSmtpPassword123" not in printed
+    assert "<redacted>" in printed

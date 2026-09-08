@@ -36,6 +36,7 @@ and again before anything is published to PyPI.
 | `test_email_notifications.py` | SMTP validation, the delivered message and failure handling |
 | `test_error_classification.py` | Polling error classification, file descriptor exhaustion and the NPSSO auth probe |
 | `test_monitoring_loop.py` | End-to-end monitoring runs: status and game changes, session state, CSV history, alerts and every error recovery path |
+| `test_output_safety.py` | Secret redaction, terminal control sequence removal, screen truncation and the single output layer |
 | `test_presence_parsing.py` | Presence payload parsing, platform labels and title normalization |
 | `test_repository_contracts.py` | Governance documents, issue templates, action pinning, release gating and the CI contract |
 | `test_repository_metadata.py` | Governance files, citation, funding, line endings, the declared editor style, the pinned linter and release integrity |

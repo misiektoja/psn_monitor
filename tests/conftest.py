@@ -154,7 +154,11 @@ def deterministic_globals(monkeypatch):
     # otherwise leak its secrets into every later test through the exported-environment lookup at startup
     for secret in pm.SECRET_KEYS:
         monkeypatch.delenv(secret, raising=False)
+    # Startup wraps sys.stdout in the sanitizing stream and a test that exits early never unwraps it, so the
+    # wrappers would otherwise stack up across the session
+    original_stdout = sys.stdout
     yield
+    sys.stdout = original_stdout
 
 
 # Collects every email the code under test tries to send instead of contacting an SMTP server

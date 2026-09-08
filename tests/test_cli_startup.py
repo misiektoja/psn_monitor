@@ -339,3 +339,57 @@ def test_config_file_in_the_working_directory_is_used(pm_module, monkeypatch, mo
 
     assert pm_module.PSN_CHECK_INTERVAL == 900
     assert f"* Configuration file:\t\t{config}" in capsys.readouterr().out
+
+
+# Verifies the source of an exported secret is recorded, which is what makes a stale export visible later
+def test_exported_secret_source_is_recorded(pm_module, monkeypatch, monitor_calls, isolated_working_directory):
+    pytest.importorskip("dotenv")
+    env_file = isolated_working_directory / "secrets.env"
+    env_file.write_text("PSN_NPSSO=npsso-from-dotenv\n", encoding="utf-8")
+    monkeypatch.setenv("PSN_NPSSO", "npsso-from-the-environment")
+
+    assert run_main(pm_module, monkeypatch, ["--env-file", str(env_file), USER_ID]) == 0
+
+    assert pm_module.SECRET_SOURCES["PSN_NPSSO"] == "environment"
+
+
+# Verifies a secret supplied only by the dotenv file is credited to the file rather than to the environment
+def test_dotenv_secret_source_is_recorded(pm_module, monkeypatch, monitor_calls, isolated_working_directory):
+    pytest.importorskip("dotenv")
+    env_file = isolated_working_directory / "secrets.env"
+    env_file.write_text("PSN_NPSSO=npsso-from-dotenv\n", encoding="utf-8")
+    monkeypatch.delenv("PSN_NPSSO", raising=False)
+
+    assert run_main(pm_module, monkeypatch, ["--env-file", str(env_file), USER_ID]) == 0
+
+    assert pm_module.SECRET_SOURCES["PSN_NPSSO"] == "dotenv file"
+
+
+# Verifies a secret that came from the config file is recorded as such
+def test_config_file_secret_source_is_recorded(pm_module, monkeypatch, monitor_calls, isolated_working_directory):
+    config = isolated_working_directory / "custom.conf"
+    config.write_text('PSN_NPSSO = "npsso-from-config"\n', encoding="utf-8")
+
+    assert run_main(pm_module, monkeypatch, ["--config-file", str(config), "--env-file", "none", USER_ID]) == 0
+
+    assert pm_module.SECRET_SOURCES["PSN_NPSSO"] == "configuration file"
+
+
+# Verifies the command line is recorded as the winning source, since it overrides every other one
+def test_command_line_secret_source_is_recorded(pm_module, monkeypatch, monitor_calls, isolated_working_directory):
+    pytest.importorskip("dotenv")
+    env_file = isolated_working_directory / "secrets.env"
+    env_file.write_text("PSN_NPSSO=npsso-from-dotenv\n", encoding="utf-8")
+
+    assert run_main(pm_module, monkeypatch, ["--env-file", str(env_file), "-n", "npsso-from-cli", USER_ID]) == 0
+
+    assert pm_module.SECRET_SOURCES["PSN_NPSSO"] == "command line"
+
+
+# Verifies the screen truncation width from the command line reaches the writer that applies it
+def test_truncation_width_from_the_command_line_reaches_the_writer(pm_module, monkeypatch, monitor_calls):
+    monkeypatch.setattr(pm_module, "DISABLE_LOGGING", False)
+
+    assert run_main(pm_module, monkeypatch, ["--truncate", "100", USER_ID]) == 0
+
+    assert pm_module.TRUNCATE_CHARS == 100

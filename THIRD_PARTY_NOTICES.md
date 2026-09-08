@@ -14,6 +14,7 @@ The distributed package contains no vendored third-party source. It declares the
 | [pytz](https://pypi.org/project/pytz/) | MIT | Timezone conversion for displayed and logged times |
 | [tzlocal](https://pypi.org/project/tzlocal/) | MIT | Local timezone detection |
 | [python-dotenv](https://pypi.org/project/python-dotenv/) | BSD-3-Clause | Reading secrets from `.env` |
+| [wcwidth](https://pypi.org/project/wcwidth/) | MIT | Measuring display width for `TRUNCATE_CHARS` |
 
 ## Build, test and lint dependencies
 
