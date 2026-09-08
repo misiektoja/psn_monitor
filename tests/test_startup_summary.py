@@ -348,3 +348,15 @@ def test_banner_dynamic_version_line(pm_module, monkeypatch, capsys):
     pm_module.print_startup_banner()
 
     assert capsys.readouterr().out == pm_module.STARTUP_BANNER + "\n" + (" " * 21) + "v9.9-test\n\n"
+
+
+# Verifies an unedited placeholder is never reported as a loaded secret, whichever layer recorded it
+def test_placeholder_secrets_are_not_reported_as_loaded(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "SECRET_SOURCES", {"WEBHOOK_URL": "dotenv file", "SMTP_PASSWORD": "configuration file"})
+    monkeypatch.setattr(pm_module, "WEBHOOK_URL", "your_webhook_url")
+    monkeypatch.setattr(pm_module, "SMTP_PASSWORD", "your_smtp_password")
+
+    reported = [name for names in pm_module.doctor_secret_sources().values() for name in names]
+
+    assert "WEBHOOK_URL" not in reported
+    assert "SMTP_PASSWORD" not in reported
