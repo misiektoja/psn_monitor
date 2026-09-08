@@ -5277,9 +5277,16 @@ def print_welcome_screen(input_func=None, interactive=None, config_file=None, en
     print_labelled_command("Show profile details and exit:", f"{prefix} -i <psn_user_id>")
     print(f"Full options: {colorize('section', prefix + ' --help')}")
     print(f"\nGuide:        {QUICK_START_GUIDE_URL}\n")
-    if terminal_is_interactive and _wizard_ask_yes_no("Run the guided setup wizard now?", default=True, input_func=input_func):
-        print()
-        return run_setup_wizard(config_file=config_file, env_file=env_file, input_func=input_func)
+    if terminal_is_interactive:
+        try:
+            start_setup = _wizard_ask_yes_no("Run the guided setup wizard now?", default=True, input_func=input_func)
+        except (EOFError, KeyboardInterrupt):
+            # This prompt sits outside the wizard, which handles its own interrupts
+            print("\n" + colorize("warning", "Setup cancelled."))
+            return 1
+        if start_setup:
+            print()
+            return run_setup_wizard(config_file=config_file, env_file=env_file, input_func=input_func)
     # Without a terminal there was nothing to answer, so a bare invocation stays the usage error it was
     return 0 if terminal_is_interactive else 1
 
