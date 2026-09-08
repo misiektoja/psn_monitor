@@ -5503,7 +5503,7 @@ def run_set_smtp_password(env_file=None, config_path=None, psn_user_id=None, int
 
 
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, PSN_STATUS_FILE, LOCAL_TIMEZONE, LOCAL_TIMEZONE_STATE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, COLORED_OUTPUT, WEBHOOK_ENABLED, stdout_bck
+    global CLI_CONFIG_PATH, DOTENV_FILE, PSN_STATUS_FILE, LOCAL_TIMEZONE, LOCAL_TIMEZONE_STATE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, COLORED_OUTPUT, WEBHOOK_ENABLED, stdout_bck, DEBUG_MODE
 
     if "--generate-config" in sys.argv:
         config_content = CONFIG_BLOCK.strip("\n") + "\n"
@@ -5554,7 +5554,12 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    clear_screen(CLEAR_SCREEN)
+    # Read straight from sys.argv because argparse has not run yet, and the screen is cleared before it does
+    if "--debug" in sys.argv:
+        DEBUG_MODE = True
+    if CLEAR_SCREEN and DEBUG_MODE:
+        debug_print("Terminal screen clear skipped because debug mode is active")
+    clear_screen(CLEAR_SCREEN and not DEBUG_MODE)
 
     print_startup_banner()
 
