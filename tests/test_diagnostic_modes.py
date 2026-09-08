@@ -97,7 +97,7 @@ def test_debug_reports_the_presence_call_and_its_failure(pm_module, psn_session,
     run_monitor(pm_module)
 
     output = capsys.readouterr().out
-    assert f"PSNAWP session init for PSN user '{USER_ID}'" in output
+    assert f"PSNAWP session init: user={USER_ID}" in output
     assert f"Starting check: check=#1, user={USER_ID}, operation=PSN API get_presence()" in output
     assert "recovery_code=network.unavailable, policy=transient, outcome=failed, error=ConnectionError: connection reset by peer" in output
 
@@ -106,7 +106,7 @@ def test_debug_reports_the_presence_call_and_its_failure(pm_module, psn_session,
 def test_debug_reports_a_swallowed_exception(pm_module, both_modes_on, capsys):
     assert pm_module.get_date_from_ts("not-a-real-timestamp") == ""
 
-    assert "Cannot parse timestamp 'not-a-real-timestamp' for the full date format" in capsys.readouterr().out
+    assert "Cannot parse timestamp: value=not-a-real-timestamp, format=full date" in capsys.readouterr().out
 
 
 # Verifies a feature that quietly turns itself off says so, instead of looking like it is working
@@ -132,8 +132,8 @@ def test_debug_reports_the_status_file_on_both_branches(pm_module, psn_session, 
     run_monitor(pm_module)
     second_run = capsys.readouterr().out
 
-    assert f"Saved status written to 'psn_{USER_ID}_last_status.json'" in first_run
-    assert f"Saved status read from 'psn_{USER_ID}_last_status.json'" in second_run
+    assert f"Saved status written: path=psn_{USER_ID}_last_status.json" in first_run
+    assert f"Saved status read: path=psn_{USER_ID}_last_status.json" in second_run
 
 
 # Verifies a file the tool cannot write is reported with the reason, not only as a generic error

@@ -558,7 +558,7 @@ def test_every_theme_part_is_used():
 @pytest.mark.parametrize("line", [
     "PSN user misiektoja changed status from offline to online",
     "* Fetching details for PlayStation user 'misiektoja'...",
-    "[DEBUG 20:15:03] PSN API get_presence() for 'misiektoja'",
+    "[DEBUG 20:15:03] PSN API get_presence(): user=misiektoja",
     "PlayStation ID:\t\t\tmisiektoja",
 ])
 def test_the_account_name_uses_the_name_colour_everywhere(colored, line):

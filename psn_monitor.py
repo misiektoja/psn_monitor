@@ -1130,9 +1130,9 @@ def create_timestamped_backup(destination, attempts=100):
             try:
                 os.unlink(str(backup_path))
             except OSError as cleanup_error:
-                debug_print(f"Could not remove the failed backup '{backup_path}'", outcome="failed", error=f"{type(cleanup_error).__name__}: {cleanup_error}")
+                debug_print("Could not remove the failed backup", path=backup_path, outcome="failed", error=f"{type(cleanup_error).__name__}: {cleanup_error}")
             raise
-        debug_print(f"Backed up '{destination_path}' to '{backup_path}'")
+        debug_print("File backed up", path=destination_path, backup=backup_path)
         return str(backup_path)
     raise OSError(f"Could not create a unique backup for '{destination_path}' after {attempts} attempts")
 
@@ -1323,7 +1323,8 @@ _LABEL_STYLES = (
 )
 
 # Pre-compiled regexes used for line-level colourisation
-_USER_TAG_RE = re.compile(r"((?:PSN user|PlayStation user|for user|by user|of user|Monitoring user):?)([\t ]+)((?!ID\b)[\w.-]+)")
+# The separator is a space in prose and an equals sign in the key=value diagnostic fields
+_USER_TAG_RE = re.compile(r"((?:PSN user|PlayStation user|for user|by user|of user|Monitoring user|\buser):?)([\t ]+|=)((?!ID\b)[\w.-]+)")
 
 # A quoted value right after "user" or "for" names the monitored account, the same value the "PlayStation ID:"
 # row reports. Every "for '<value>'" line this tool prints names either that account or a file
@@ -2420,7 +2421,7 @@ def convert_iso_str_to_datetime(dt_str):
             utc_dt = pytz.utc.localize(utc_dt)
         return utc_dt.astimezone(pytz.timezone(LOCAL_TIMEZONE))
     except Exception as diag_exc:
-        debug_print(f"Cannot parse ISO timestamp '{dt_str}'", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+        debug_print("Cannot parse ISO timestamp", value=dt_str, outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
         return None
 
 
@@ -2443,7 +2444,7 @@ def get_date_from_ts(ts):
         try:
             ts = isoparse(ts)
         except Exception as diag_exc:
-            debug_print(f"Cannot parse timestamp '{ts}' for the full date format", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+            debug_print("Cannot parse timestamp", value=ts, format="full date", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
             return ""
 
     if isinstance(ts, datetime):
@@ -2480,7 +2481,7 @@ def get_short_date_from_ts(ts, show_year=False, show_hour=True, show_weekday=Tru
         try:
             ts = isoparse(ts)
         except Exception as diag_exc:
-            debug_print(f"Cannot parse timestamp '{ts}' for the short date format", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+            debug_print("Cannot parse timestamp", value=ts, format="short date", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
             return ""
 
     if isinstance(ts, datetime):
@@ -2520,7 +2521,7 @@ def get_hour_min_from_ts(ts, show_seconds=False):
         try:
             ts = isoparse(ts)
         except Exception as diag_exc:
-            debug_print(f"Cannot parse timestamp '{ts}' for the time format", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+            debug_print("Cannot parse timestamp", value=ts, format="time", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
             return ""
 
     if isinstance(ts, datetime):
@@ -2914,7 +2915,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                     try:
                         val = getattr(obj, attr)
                     except Exception as diag_exc:
-                        debug_print(f"Cannot read attribute '{attr}' while looking for a title name", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+                        debug_print("Cannot read attribute while looking for a title name", attribute=attr, outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
                         continue
                     if isinstance(val, str) and val.strip():
                         return val.strip()
@@ -2929,7 +2930,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                 if name:
                     break
         except Exception as diag_exc:
-            debug_print(f"PSN API trophy_groups() failed for {npcomm}: {type(diag_exc).__name__}", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+            debug_print("PSN API trophy_groups()", npcomm=npcomm, outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
         # B) per-title summary
         if not name:
@@ -2937,7 +2938,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                 summ = psn_user.trophy_summary(np_communication_id=npcomm, platform=platform)
                 name = _first_name_like(summ)
             except Exception as diag_exc:
-                debug_print(f"PSN API trophy_summary() failed for {npcomm}: {type(diag_exc).__name__}", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+                debug_print("PSN API trophy_summary()", npcomm=npcomm, outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
         # C) scan titles
         if not name:
@@ -2949,7 +2950,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                         if name:
                             break
             except Exception as diag_exc:
-                debug_print(f"PSN API trophy_titles() failed while resolving the name of {npcomm}: {type(diag_exc).__name__}", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+                debug_print("PSN API trophy_titles()", npcomm=npcomm, context="resolving a title name", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
         if not name:
             name = npcomm  # last resort
@@ -2961,7 +2962,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
     items = []
 
     # 1) list titles (no special args for cross-version compat)
-    debug_print(f"PSN API trophy_titles(limit={title_limit})")
+    debug_print("PSN API trophy_titles()", limit=title_limit)
     try:
         titles_iter = psn_user.trophy_titles(limit=title_limit)
     except Exception as diag_exc:
@@ -2974,7 +2975,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
             continue
 
         for plat in _platforms_to_try(tt):
-            debug_print(f"PSN API trophies() for {npcomm} on platform {plat}")
+            debug_print("PSN API trophies()", npcomm=npcomm, platform=plat)
             try:
                 it = psn_user.trophies(
                     np_communication_id=npcomm,
@@ -2983,7 +2984,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                     trophy_group_id="all",
                 )
             except Exception as diag_exc:
-                debug_print(f"PSN API trophies() failed for {npcomm} on platform {plat}: {type(diag_exc).__name__}", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+                debug_print("PSN API trophies()", npcomm=npcomm, platform=plat, outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
                 continue
 
             got_any_for_title = False
@@ -3050,7 +3051,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
 
     print(f"* Fetching details for PlayStation user '{psn_user_id}'...\n")
 
-    debug_print(f"PSNAWP session init for PSN user '{psn_user_id}' with PSN_NPSSO {secret_fingerprint(PSN_NPSSO, 'PSN_NPSSO')}")
+    debug_print("PSNAWP session init", user=psn_user_id, npsso=secret_fingerprint(PSN_NPSSO, "PSN_NPSSO"))
     print_step("Authenticating with PSN...")
     try:
         psnawp = psn_client()
@@ -3061,7 +3062,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
         sys.exit(1)
     print_ok()
 
-    debug_print(f"PSN API profile(), friendship() and get_shareable_profile_link() for '{psn_user_id}'")
+    debug_print("PSN API profile(), friendship() and get_shareable_profile_link()", user=psn_user_id)
     print_step("Fetching profile info...")
     try:
         accountid = psn_user.account_id
@@ -3078,7 +3079,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
         sys.exit(1)
     print_ok()
 
-    debug_print(f"PSN API get_presence() for '{psn_user_id}'")
+    debug_print("PSN API get_presence()", user=psn_user_id)
     print_step("Fetching presence info...")
     try:
         psn_user_presence = psn_user.get_presence()
@@ -3134,7 +3135,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
         try:
             with open(psn_last_status_file, 'r', encoding="utf-8") as f:
                 last_status_read = json.load(f)
-            debug_print(f"Saved status read from '{psn_last_status_file}'")
+            debug_print("Saved status read", path=psn_last_status_file)
             if last_status_read:
                 last_status_ts = last_status_read[0]
                 last_status = last_status_read[1]
@@ -3223,13 +3224,13 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
                 if last_status_read and last_status_read[1] == status:
                     print(f"* User is {str(status).upper()} for:\t\t{calculate_timespan(now_local(), int(last_status_read[0]), show_seconds=False)}")
             except Exception as diag_exc:
-                debug_print(f"Cannot read the saved status file '{psn_last_status_file}'", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+                debug_print("Cannot read the saved status file", path=psn_last_status_file, outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
     # Show trophy summary and last earned trophies only if requested
     if include_trophies:
         try:
             print(f"\n* Getting trophy summary ...")
-            debug_print(f"PSN API trophy_summary() for '{psn_user_id}'")
+            debug_print("PSN API trophy_summary()", user=psn_user_id)
             ts = psn_user.trophy_summary()
             et = ts.earned_trophies
             prog = int(ts.progress) if ts.progress is not None else 0
@@ -3276,7 +3277,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
                                     return f"{d}d {time_part}"
                                 return f"{d}d"
                     except (ValueError, IndexError) as diag_exc:
-                        debug_print(f"Cannot compact the duration '{s}', keeping the original text", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+                        debug_print("Cannot compact the duration", value=s, fallback="original text", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
                         return s  # fallback to original if parsing fails
                 return s
 
@@ -3295,7 +3296,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
 
             recent_entries = []
             print(f"\n* Getting list of recently played games ...")
-            debug_print(f"PSN API title_stats(limit=10, page_size=50) for '{psn_user_id}'")
+            debug_print("PSN API title_stats()", user=psn_user_id, limit=10, page_size=50)
             for i, t in enumerate(psn_user.title_stats(limit=10, page_size=50), 1):
                 if not t:
                     continue
@@ -3401,7 +3402,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     def print_ok():
         print("OK")
 
-    debug_print(f"PSNAWP session init for PSN user '{psn_user_id}' with PSN_NPSSO {secret_fingerprint(PSN_NPSSO, 'PSN_NPSSO')}")
+    debug_print("PSNAWP session init", user=psn_user_id, npsso=secret_fingerprint(PSN_NPSSO, "PSN_NPSSO"))
     print_step("Authenticating with PSN...")
     try:
         psnawp = psn_client()
@@ -3412,7 +3413,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         sys.exit(1)
     print_ok()
 
-    debug_print(f"PSN API profile(), friendship() and get_shareable_profile_link() for '{psn_user_id}'")
+    debug_print("PSN API profile(), friendship() and get_shareable_profile_link()", user=psn_user_id)
     print_step("Fetching profile info...")
     try:
         accountid = psn_user.account_id
@@ -3429,7 +3430,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         sys.exit(1)
     print_ok()
 
-    debug_print(f"PSN API get_presence() for '{psn_user_id}'")
+    debug_print("PSN API get_presence()", user=psn_user_id)
     print_step("Fetching presence info...")
     try:
         psn_user_presence = psn_user.get_presence()
@@ -3495,7 +3496,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         try:
             with open(psn_last_status_file, 'r', encoding="utf-8") as f:
                 last_status_read = json.load(f)
-            debug_print(f"Saved status read from '{psn_last_status_file}'")
+            debug_print("Saved status read", path=psn_last_status_file)
         except Exception as e:
             report_recovery_error(e, context="file.unreadable", detail=f"Cannot load the last saved status from '{psn_last_status_file}': {e}")
         if last_status_read:
@@ -3525,7 +3526,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     if last_status_ts > 0 and status != last_status:
         try:
             save_last_status(psn_last_status_file, status_ts_old, status)
-            debug_print(f"Saved status written to '{psn_last_status_file}': {status}")
+            debug_print("Saved status written", path=psn_last_status_file, status=status)
         except Exception as e:
             report_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{psn_last_status_file}': {e}")
 
@@ -3604,7 +3605,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             status_ts_old = lastonline_ts
         try:
             save_last_status(psn_last_status_file, status_ts_old, status)
-            debug_print(f"Saved status written to '{psn_last_status_file}': {status}")
+            debug_print("Saved status written", path=psn_last_status_file, status=status)
         except Exception as e:
             report_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{psn_last_status_file}': {e}")
 
@@ -3641,9 +3642,9 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             already_closed.add(id(target))
             try:
                 target.close()
-                debug_print(f"Closed the PSNAWP {label}")
+                debug_print("Closed the PSNAWP session", label=label)
             except Exception as diag_exc:
-                debug_print(f"Closing the PSNAWP {label} failed", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+                debug_print("Closing the PSNAWP session", label=label, outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
         try:
             # Where psnawp keeps the requests session, the same attribute psn_client() uses to apply the TLS setting
@@ -3664,7 +3665,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         nonlocal psnawp, psn_user, last_recreate_ts
         now = int(time.time())
         if (now - last_recreate_ts) < recreate_cooldown:
-            debug_print(f"PSNAWP session recreation skipped, {display_time(recreate_cooldown - (now - last_recreate_ts))} left of the {display_time(recreate_cooldown)} cooldown")
+            debug_print("PSNAWP session recreation", outcome="skipped", cooldown_left=display_time(recreate_cooldown - (now - last_recreate_ts)), cooldown=display_time(recreate_cooldown))
             return False
         try:
             _close_psnawp_sessions(psnawp)
@@ -3807,7 +3808,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
             try:
                 save_last_status(psn_last_status_file, status_ts, status)
-                debug_print(f"Saved status written to '{psn_last_status_file}': {status}")
+                debug_print("Saved status written", path=psn_last_status_file, status=status)
             except Exception as e:
                 report_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{psn_last_status_file}': {e}")
 
@@ -5010,7 +5011,7 @@ def _wizard_apply_saved_values(state, env_path=None):
 
             load_dotenv(str(env_path), override=True)
         except Exception as exc:
-            debug_print(f"Reading '{env_path}' back after setup failed", outcome="failed", error=f"{type(exc).__name__}: {exc}")
+            debug_print("Reading the dotenv file back after setup", path=env_path, outcome="failed", error=f"{type(exc).__name__}: {exc}")
     for key in SECRET_KEYS:
         value = os.getenv(key)
         if value is not None:
