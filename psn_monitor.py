@@ -2717,6 +2717,9 @@ DOCTOR_GUIDE_URL = f"{GUIDE_BASE_URL}#doctor-preflight"
 
 DOCTOR_SECTIONS = ("Environment", "Configuration", "Authentication", "Target", "Notifications")
 
+# Delivery results are printed as they happen rather than inside a section, but they still count in the summary
+DOCTOR_DELIVERY_SECTION = "Optional delivery tests"
+
 DOCTOR_STATUSES = ("PASS", "WARN", "FAIL", "SKIP")
 
 # Imported without a guard, so the tool cannot start when one of these is missing
@@ -2988,8 +2991,8 @@ def render_doctor_notice():
     print("Running preflight checks. No files will be written. Interactive email tests run only after separate approval.\n")
 
 
-# Renders the whole report, with a fix line on the rows that are not a pass
-def render_doctor_report(report):
+# Renders the heading and every non-empty section, with a fix line on the rows that are not a pass
+def render_doctor_sections(report):
     # The install method is context rather than a check: it cannot fail, so it is stated once here
     # instead of occupying a result row that no marker describes. The raw key is what support reports use
     lines = ["Doctor", f"Detected install method: {detect_install_method()}"]
@@ -3004,7 +3007,7 @@ def render_doctor_report(report):
                 lines.append(f"  {check.detail}")
             if check.advice is not None and check.status in ("FAIL", "WARN"):
                 lines.append(f"To fix: {check.advice.fix}")
-    return sanitize_error_text("\n".join(lines) + render_doctor_summary(report.checks))
+    return sanitize_error_text("\n".join(lines))
 
 
 # Renders the one sentence that says whether the setup is usable, and where to read more
@@ -3017,7 +3020,7 @@ def render_doctor_summary(checks):
         sentence = f"  All critical checks passed with {warnings} warning(s). Review the warnings above."
     else:
         sentence = "  All checks passed. You are good to go!"
-    return "\n".join(("", "", "Summary", sentence, "", f"Guide: {DOCTOR_GUIDE_URL}"))
+    return "\n".join(("", "Summary", sentence, "", f"Guide: {DOCTOR_GUIDE_URL}"))
 
 
 # Asks one yes or no question, treating a closed or interrupted input as no
@@ -3044,11 +3047,13 @@ def offer_doctor_delivery_tests(report):
         return []
     print("\nOptional delivery tests\n")
     print("Doctor will not write files. Each approved test sends one real message.\n")
-    if not ask_yes_no("Send one test email now? This will deliver a real message"):
-        print("[SKIP] Test email was not sent")
-        return [make_doctor_check("Notifications", "SKIP", "Test email was not sent")]
-    delivered = send_email("psn_monitor: doctor test email", "This test email was sent after approval in --doctor. Your SMTP delivery settings work.", "", SMTP_SSL, smtp_timeout=5) == 0
-    check = make_doctor_check("Notifications", "PASS" if delivered else "FAIL", "Doctor test email delivered" if delivered else "Doctor test email delivery failed", "One real test email was sent after confirmation" if delivered else "The approved test email could not be delivered")
+    if ask_yes_no("Send one test email now? This will deliver a real message"):
+        delivered = send_email("psn_monitor: doctor test email", "This test email was sent after approval in --doctor. Your SMTP delivery settings work.", "", SMTP_SSL, smtp_timeout=5) == 0
+        check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "PASS" if delivered else "FAIL", "Doctor test email delivered" if delivered else "Doctor test email delivery failed", "One real test email was sent after confirmation" if delivered else "The approved test email could not be delivered")
+    else:
+        check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "SKIP", "Test email was not sent")
+    # Recorded on the report so the summary sentence and the exit code cannot disagree about the same run
+    report.checks.append(check)
     print(f"[{check.status}] {check.label}")
     return [check]
 
@@ -3061,9 +3066,10 @@ def run_doctor(psn_user_id=None, config_path=None, env_path=None, config_advice=
         report = build_doctor_report(psn_user_id, config_path, env_path, config_advice, timezone_advice, progress)
     finally:
         doctor_progress_clear()
-    print(render_doctor_report(report))
-    delivery_checks = offer_doctor_delivery_tests(report)
-    return 1 if any(check.status == "FAIL" for check in (*report.checks, *delivery_checks)) else 0
+    print(render_doctor_sections(report))
+    offer_doctor_delivery_tests(report)
+    print(render_doctor_summary(report.checks))
+    return 1 if any(check.status == "FAIL" for check in report.checks) else 0
 
 
 def main():
