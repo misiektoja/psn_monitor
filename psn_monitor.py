@@ -2392,26 +2392,29 @@ def main():
         try:
             from dotenv import load_dotenv, find_dotenv
 
+            # An exported variable wins over the file at startup, matching python-dotenv's own default, so a
+            # one-off secret or one injected by systemd or a container is not silently shadowed by the dotenv.
+            # The SIGHUP reload still overrides, because there the edited file is exactly what must take effect.
             if DOTENV_FILE:
                 env_path = DOTENV_FILE
                 if not os.path.isfile(env_path):
                     print(f"* Warning: dotenv file '{env_path}' does not exist\n")
                 else:
-                    load_dotenv(env_path, override=True)
+                    load_dotenv(env_path, override=False)
             else:
                 env_path = find_dotenv() or None
                 if env_path:
-                    load_dotenv(env_path, override=True)
+                    load_dotenv(env_path, override=False)
         except ImportError:
             env_path = DOTENV_FILE if DOTENV_FILE else None
             if env_path:
                 print(f"* Warning: Cannot load dotenv file '{env_path}' because 'python-dotenv' is not installed\n\nTo install it, run:\n    pip3 install python-dotenv\n\nOnce installed, re-run this tool\n")
 
-    if env_path:
-        for secret in SECRET_KEYS:
-            val = os.getenv(secret)
-            if val is not None:
-                globals()[secret] = val
+    # Environment variables are a documented alternative to a dotenv file, so they apply even when no file was loaded
+    for secret in SECRET_KEYS:
+        val = os.getenv(secret)
+        if val is not None:
+            globals()[secret] = val
 
     local_tz = None
     if LOCAL_TIMEZONE == "Auto":

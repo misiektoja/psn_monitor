@@ -120,6 +120,28 @@ def test_npsso_is_read_from_a_dotenv_file(pm_module, monkeypatch, monitor_calls,
     assert pm_module.PSN_NPSSO == "npsso-from-dotenv"
 
 
+# Verifies an exported secret wins over the dotenv file, so a one-off or injected value is not silently shadowed
+def test_exported_secret_overrides_the_dotenv_file(pm_module, monkeypatch, monitor_calls, isolated_working_directory):
+    pytest.importorskip("dotenv")
+    env_file = isolated_working_directory / "secrets.env"
+    env_file.write_text("PSN_NPSSO=npsso-from-dotenv\n", encoding="utf-8")
+    monkeypatch.setenv("PSN_NPSSO", "npsso-from-the-environment")
+
+    assert run_main(pm_module, monkeypatch, ["--env-file", str(env_file), USER_ID]) == 0
+
+    assert pm_module.PSN_NPSSO == "npsso-from-the-environment"
+
+
+# Verifies an exported secret applies with no dotenv file at all, since it is a documented alternative to one
+def test_exported_secret_applies_without_any_dotenv_file(pm_module, monkeypatch, monitor_calls, isolated_working_directory):
+    monkeypatch.setattr(pm_module, "PSN_NPSSO", "your_psn_npsso_code")
+    monkeypatch.setenv("PSN_NPSSO", "npsso-from-the-environment")
+
+    assert run_main(pm_module, monkeypatch, ["--env-file", "none", USER_ID]) == 0
+
+    assert pm_module.PSN_NPSSO == "npsso-from-the-environment"
+
+
 # Verifies a dotenv path that does not exist is reported but does not stop a run that has a token already
 def test_missing_dotenv_file_is_reported(pm_module, monkeypatch, monitor_calls, capsys, isolated_working_directory):
     pytest.importorskip("dotenv")
