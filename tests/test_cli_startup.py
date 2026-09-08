@@ -529,3 +529,23 @@ def test_setting_a_secret_writes_to_the_selected_dotenv_file(pm_module, monkeypa
 
     assert env_file.read_text(encoding="utf-8") == 'PSN_NPSSO="a-fresh-npsso-code"\n'
     assert "a-fresh-npsso-code" not in capsys.readouterr().out
+
+
+# Verifies --setup reaches the wizard with the files this run was told to use
+def test_setup_reaches_the_wizard_with_the_selected_files(pm_module, monkeypatch, isolated_working_directory):
+    seen = []
+    monkeypatch.setattr(pm_module, "run_setup_wizard", lambda **kwargs: seen.append(kwargs) or 0)
+
+    assert run_main(pm_module, monkeypatch, ["--setup", "--config-file", "custom.conf", USER_ID]) == 0
+
+    assert seen[0]["initial_target"] == USER_ID
+    assert seen[0]["config_file"] == "custom.conf"
+
+
+# Verifies a config path that does not exist yet is setup's destination rather than a reason to stop
+def test_setup_accepts_a_config_path_that_does_not_exist_yet(pm_module, monkeypatch, isolated_working_directory, capsys):
+    monkeypatch.setattr(pm_module, "run_setup_wizard", lambda **kwargs: 0)
+
+    assert run_main(pm_module, monkeypatch, ["--setup", "--config-file", "not-created-yet.conf"]) == 0
+
+    assert "does not exist" not in capsys.readouterr().out

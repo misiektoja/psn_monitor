@@ -124,6 +124,18 @@ If you installed manually, download the newest *[psn_monitor.py](https://raw.git
 <a id="quick-start"></a>
 ## Quick Start
 
+The quickest way to a working setup is the guided one:
+
+```sh
+psn_monitor --setup
+```
+
+It asks for the account to monitor, how often to check it, your [PSN npsso code](#psn-npsso-code) and whether to send email alerts, then writes a ready-to-run configuration. Nothing is written until you choose **Save settings**, and an existing configuration file is backed up first. Your npsso code is checked against PlayStation Network before it is saved, so you find out immediately if it was copied incompletely. At the end it offers to run the preflight checks and to start monitoring.
+
+The wizard needs an interactive terminal. Without one, use `--generate-config` and edit the file by hand.
+
+To set everything up yourself instead:
+
 - Grab your [PSN npsso code](#psn-npsso-code) and track the `psn_user_id` gaming activities:
 
 ```sh
@@ -142,7 +154,7 @@ To get the list of all supported command-line arguments / flags:
 psn_monitor --help
 ```
 
-Run it without arguments to see the few commands worth starting with, including how to check your setup before monitoring.
+Run it without arguments to see the few commands worth starting with, including the guided setup and how to check your setup before monitoring. On a terminal it also offers to start the guided setup right there.
 
 <a id="configuration"></a>
 ## Configuration

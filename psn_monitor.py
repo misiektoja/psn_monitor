@@ -3274,16 +3274,561 @@ def print_labelled_command(label, command, suffix=""):
     print(f"    {command}{suffix}\n")
 
 
+
+# A PlayStation online ID is 3 to 16 characters and never contains an at sign or a space
+PSN_ONLINE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,15}$")
+
+
+# Returns the online ID from whatever was pasted, naming the two mistakes that shape catches
+def normalize_psn_target(value):
+    text = str(value or "").strip().strip('"').strip("'")
+    if not text:
+        raise ValueError(f"Enter the {PSN_TARGET_FORMS}")
+    if "://" in text or text.startswith("www."):
+        text = text.rstrip("/").rsplit("/", 1)[-1].split("?")[0]
+    if "@" in text:
+        raise ValueError(f"That looks like an e-mail address. Use the {PSN_TARGET_FORMS}")
+    if not PSN_ONLINE_ID_RE.match(text):
+        raise ValueError("A PlayStation online ID is 3 to 16 characters, using letters, digits, hyphens and underscores")
+    return text
+
+
+# Parses the duration formats people actually type, returning whole seconds or None when nothing valid was given
+def parse_duration_input(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value) if value > 0 else None
+    if not isinstance(value, str):
+        return None
+    text = value.strip().casefold().replace(",", ".")
+    if not text:
+        return None
+    units = {"s": 1, "sec": 1, "secs": 1, "second": 1, "seconds": 1,
+             "m": 60, "min": 60, "mins": 60, "minute": 60, "minutes": 60,
+             "h": 3600, "hr": 3600, "hrs": 3600, "hour": 3600, "hours": 3600,
+             "d": 86400, "day": 86400, "days": 86400}
+    matches = re.findall(r"(\d+(?:\.\d+)?)\s*([a-z]*)", text)
+    # Anything the pattern did not consume is rejected, so "5x" or "abc" cannot read as a bare number
+    if not matches or re.sub(r"(\d+(?:\.\d+)?)\s*([a-z]*)", "", text).strip():
+        return None
+    total = 0.0
+    for amount, unit in matches:
+        if unit and unit not in units:
+            return None
+        total += float(amount) * units.get(unit, 1)
+    seconds = int(round(total))
+    return seconds if seconds > 0 else None
+
+
+# Returns a value fit to show as a prompt default, hiding the shipped placeholders
+def _wizard_default(value):
+    text = str(value or "")
+    return text if text and not text.startswith("your_") else ""
+
+
+# Prints the shared line telling the user how defaults and cancelling work
+def _wizard_print_default_guidance():
+    print("Press Enter to accept the shown default. Ctrl+C cancels.\n")
+
+
+# Reads one setup line. Cancelling propagates to the one handler in run_setup_wizard, which reports
+# that nothing was written
+def _wizard_input(prompt_text, input_func=None):
+    prompt = input if input_func is None else input_func
+    return prompt(prompt_text)
+
+
+# Asks one free-text question, returning the shown default when the answer is empty
+def _wizard_ask_text(question, default="", required=False, input_func=None):
+    suffix = f" [{default}]" if default else ""
+    while True:
+        answer = _wizard_input(f"{question}{suffix}: ", input_func=input_func).strip()
+        if not answer:
+            answer = default
+        if answer or not required:
+            return answer
+        print("  This value is required.")
+
+
+# Asks one yes or no question with a visible default
+def _wizard_ask_yes_no(question, default=True, input_func=None):
+    hint = "[Y/n]" if default else "[y/N]"
+    while True:
+        answer = _wizard_input(f"{question} {hint}: ", input_func=input_func).strip().casefold()
+        if not answer:
+            return default
+        if answer in ("y", "yes"):
+            return True
+        if answer in ("n", "no"):
+            return False
+        print("  Please answer 'y' or 'n'.")
+
+
+# Asks one numbered multiple-choice question and returns the chosen index
+def _wizard_ask_choice(question, options, default_index=0, input_func=None):
+    print()
+    print(question)
+    for index, (label, description) in enumerate(options, 1):
+        marker = " (default)" if index - 1 == default_index else ""
+        print(f"  {index}. {label}{marker}")
+        if description:
+            for line in description.splitlines():
+                print(f"     {line}")
+    while True:
+        answer = _wizard_input(f"Choose [1-{len(options)}]: ", input_func=input_func).strip()
+        if not answer:
+            return default_index
+        if answer.isdigit() and 1 <= int(answer) <= len(options):
+            return int(answer) - 1
+        print(f"  Enter a number between 1 and {len(options)}.")
+
+
+# Asks until the answer is a positive whole number or the default is accepted
+def _wizard_ask_positive_int(question, default, input_func=None):
+    while True:
+        answer = _wizard_ask_text(question, default=str(default), required=True, input_func=input_func)
+        try:
+            parsed = int(answer)
+        except ValueError:
+            parsed = 0
+        if parsed > 0:
+            return parsed
+        print("  Enter a positive whole number.")
+
+
+# Renders a duration as raw seconds plus a readable form, so the value that reaches the config stays visible
+def _wizard_format_duration(seconds):
+    remaining = int(seconds)
+    parts = []
+    for suffix, count in (("d", 86400), ("h", 3600), ("m", 60), ("s", 1)):
+        value, remaining = divmod(remaining, count)
+        if value:
+            parts.append(f"{value}{suffix}")
+    raw = f"{int(seconds)}s"
+    readable = " ".join(parts) or raw
+    return raw if readable == raw else f"{raw} - {readable}"
+
+
+# Asks one duration, accepting the formats people actually type
+def _wizard_ask_duration(question, default, input_func=None):
+    prompt_text = f"{question} [{_wizard_format_duration(default)}]: "
+    while True:
+        answer = _wizard_input(prompt_text, input_func=input_func).strip()
+        if not answer:
+            return default
+        seconds = parse_duration_input(answer)
+        if seconds is not None:
+            return seconds
+        print("  Enter a positive duration such as 120, 2m, 1.5h, 1h 30m or 1d.")
+
+
+# Asks one secret through a hidden prompt, so it never reaches the screen or the shell history
+def _wizard_ask_secret(question, getpass_func=None, required=False):
+    hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
+    while True:
+        value = str(hidden_prompt(f"{question}: ")).strip()
+        if value or not required:
+            return value
+        print("  This secret is required and cannot be empty.")
+
+
+# Renders one configuration file from the built-in template with the chosen values substituted in
+def generate_config_with_current_values(config_values):
+    tree = ast.parse(CONFIG_BLOCK, "<built-in-config>", "exec")
+    replacements = {}
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
+            continue
+        name = statement.targets[0].id
+        if name not in config_values:
+            continue
+        replacements[name] = (statement.lineno, getattr(statement, "end_lineno", statement.lineno), repr(config_values[name]))
+    lines = CONFIG_BLOCK.strip("\n").split("\n")
+    # The template keeps its own leading blank line, so template line numbers are one ahead of this list
+    offset = 1 if CONFIG_BLOCK.startswith("\n") else 0
+    skip_until = 0
+    output = []
+    for number, line in enumerate(lines, 1):
+        template_line = number + offset
+        if template_line < skip_until:
+            continue
+        replaced = next((name for name, (start, _end, _value) in replacements.items() if start == template_line), None)
+        if replaced is None:
+            output.append(line)
+            continue
+        start, end, rendered = replacements[replaced]
+        output.append(f"{replaced} = {rendered}")
+        skip_until = end + 1
+    return "\n".join(output) + "\n"
+
+
+# Holds every wizard answer until the user explicitly saves, so nothing is written during questioning
+class WizardSetupState:
+    # Starts from the values already in effect, which become both the defaults and the revert target
+    def __init__(self, config_path, env_path, baseline_values):
+        self.config_path = Path(config_path)
+        self.env_path = Path(env_path)
+        self.baseline_values = dict(baseline_values)
+        self.config_values = dict(baseline_values)
+        self.secret_updates = {}
+        self.target = ""
+        self.persist_target = True
+
+
+# The email alert settings the wizard offers, in the order the questions are asked
+WIZARD_EMAIL_NOTIFICATION_KEYS = ("ACTIVE_INACTIVE_NOTIFICATION", "GAME_CHANGE_NOTIFICATION", "ERROR_NOTIFICATION")
+
+# Each editable section: internal name, menu label and description, then the keys reverted when it is re-entered
+WIZARD_SECTIONS = (
+    ("Target", "Target", "Change the PlayStation account that is monitored.", ("PSN_USER_ID",), ()),
+    ("Polling", "Polling intervals", "Change how often PlayStation Network is checked.", ("PSN_CHECK_INTERVAL", "PSN_ACTIVE_CHECK_INTERVAL"), ()),
+    ("Authentication", "Authentication", "Enter the NPSSO code again.", (), ("PSN_NPSSO",)),
+    ("Email", "Email notifications", "Change SMTP details and which events are mailed.", ("SMTP_HOST", "SMTP_PORT", "SMTP_SSL", "SMTP_USER", "SENDER_EMAIL", "RECEIVER_EMAIL") + WIZARD_EMAIL_NOTIFICATION_KEYS, ("SMTP_PASSWORD",)),
+    ("Output", "Output files", "Change the log, CSV and status file destinations.", ("DISABLE_LOGGING", "CSV_FILE", "PSN_STATUS_FILE"), ()),
+)
+
+
+# Restores one section to the values setup started with and drops any secret it had queued
+def _wizard_reset_section(state, config_keys, secret_keys):
+    for key in config_keys:
+        if key in state.baseline_values:
+            state.config_values[key] = state.baseline_values[key]
+        else:
+            state.config_values.pop(key, None)
+    for key in secret_keys:
+        state.secret_updates.pop(key, None)
+
+
+# Asks which account to watch, accepting the online ID or a profile link and rejecting the e-mail mistake
+def _wizard_collect_target_section(state, initial_target=None, input_func=None):
+    while True:
+        answer = _wizard_ask_text("PlayStation online ID to monitor", default=str(initial_target or state.target or ""), required=True, input_func=input_func)
+        try:
+            state.target = normalize_psn_target(answer)
+        except ValueError as exc:
+            print(f"  {exc}")
+            continue
+        break
+    state.persist_target = _wizard_ask_yes_no("Save this account in the generated config?", default=state.persist_target, input_func=input_func)
+    _wizard_apply_target(state)
+
+
+# Mirrors the settled target into the config values, so an unsaved target is left out of the file
+def _wizard_apply_target(state):
+    state.config_values["PSN_USER_ID"] = state.target if state.persist_target and state.target else ""
+
+
+# Asks how often the tool checks, in whichever duration format the user prefers
+def _wizard_collect_polling_section(state, input_func=None):
+    state.config_values["PSN_CHECK_INTERVAL"] = _wizard_ask_duration("Polling interval while the user is offline (seconds or use s/m/h/d)", int(state.config_values.get("PSN_CHECK_INTERVAL") or PSN_CHECK_INTERVAL), input_func=input_func)
+    state.config_values["PSN_ACTIVE_CHECK_INTERVAL"] = _wizard_ask_duration("Polling interval while the user is online (seconds or use s/m/h/d)", int(state.config_values.get("PSN_ACTIVE_CHECK_INTERVAL") or PSN_ACTIVE_CHECK_INTERVAL), input_func=input_func)
+
+
+# Asks for the NPSSO code through a hidden prompt and checks it against PSN before accepting it
+def _wizard_collect_auth_section(state, input_func=None, getpass_func=None, validator=None):
+    print(f"* Sign in at https://my.playstation.com then copy the npsso value from: {NPSSO_SOURCE_URL}")
+    if secret_is_set(state.config_values.get("PSN_NPSSO")) and not _wizard_ask_yes_no("Replace the NPSSO code already configured?", default=False, input_func=input_func):
+        return
+    validate = validate_npsso_code if validator is None else validator
+    while True:
+        npsso = _wizard_ask_secret("NPSSO code", getpass_func=getpass_func)
+        if not npsso:
+            # Monitoring cannot run without it, so leaving it unset has to be a decision rather than a fallthrough
+            if _wizard_ask_yes_no("Continue without a code? Nothing can be monitored until one is set", default=False, input_func=input_func):
+                return
+            continue
+        try:
+            account = validate(npsso)
+        except RecoveryError as exc:
+            print(f"  {exc.advice.summary}. {exc.advice.fix}")
+            continue
+        state.secret_updates["PSN_NPSSO"] = npsso
+        print(f"  PlayStation Network accepted the code, signed in as {account}.")
+        return
+
+
+# Asks whether to send email alerts and collects only the settings that choice needs
+def _wizard_collect_email_section(state, input_func=None, getpass_func=None):
+    if not _wizard_ask_yes_no("Configure email notifications?", default=False, input_func=input_func):
+        for key in WIZARD_EMAIL_NOTIFICATION_KEYS:
+            state.config_values[key] = False
+        return
+    state.config_values["SMTP_HOST"] = _wizard_ask_text("SMTP host", default=_wizard_default(state.config_values.get("SMTP_HOST")), required=True, input_func=input_func)
+    state.config_values["SMTP_PORT"] = _wizard_ask_positive_int("SMTP port", int(state.config_values.get("SMTP_PORT") or 587), input_func=input_func)
+    state.config_values["SMTP_SSL"] = _wizard_ask_yes_no("Enable TLS/SSL for SMTP?", default=True, input_func=input_func)
+    state.config_values["SMTP_USER"] = _wizard_ask_text("SMTP username", default=_wizard_default(state.config_values.get("SMTP_USER")), required=True, input_func=input_func)
+    state.config_values["SENDER_EMAIL"] = _wizard_ask_text("Sender email", default=_wizard_default(state.config_values.get("SENDER_EMAIL")), required=True, input_func=input_func)
+    state.config_values["RECEIVER_EMAIL"] = _wizard_ask_text("Receiver email", default=_wizard_default(state.config_values.get("RECEIVER_EMAIL")), required=True, input_func=input_func)
+    password = _wizard_ask_secret("SMTP password", getpass_func=getpass_func)
+    if password:
+        state.secret_updates["SMTP_PASSWORD"] = password
+    preset = _wizard_ask_choice("Which email notifications should be enabled?", [
+        ("Status, games and errors, recommended", "Online and offline changes, game changes and monitoring errors."),
+        ("Every supported event", "Enables all email notification types."),
+        ("Custom", "Choose each notification type separately."),
+    ], input_func=input_func)
+    if preset in (0, 1):
+        selected = {name: True for name in WIZARD_EMAIL_NOTIFICATION_KEYS}
+    else:
+        print()
+        questions = (
+            ("ACTIVE_INACTIVE_NOTIFICATION", "Email when the user goes online or offline?"),
+            ("GAME_CHANGE_NOTIFICATION", "Email when the user starts, changes or stops a game?"),
+            ("ERROR_NOTIFICATION", "Email on monitoring errors?"),
+        )
+        selected = {name: _wizard_ask_yes_no(question, default=False, input_func=input_func) for name, question in questions}
+    state.config_values.update(selected)
+
+
+# Collects the files monitoring would write
+def _wizard_collect_output_section(state, input_func=None):
+    state.config_values["DISABLE_LOGGING"] = not _wizard_ask_yes_no("Write the normal per-user log file?", default=not bool(state.config_values.get("DISABLE_LOGGING")), input_func=input_func)
+    state.config_values["CSV_FILE"] = _wizard_ask_text("Optional CSV output path (blank disables it)", default=str(state.config_values.get("CSV_FILE") or ""), input_func=input_func)
+    state.config_values["PSN_STATUS_FILE"] = _wizard_ask_text("Optional status file path (blank uses the default next to the tool)", default=str(state.config_values.get("PSN_STATUS_FILE") or ""), input_func=input_func)
+
+
+# Runs one editable section again after resetting only the keys it owns
+def _wizard_edit_setup_section(state, input_func=None, getpass_func=None):
+    options = [(label, description) for _name, label, description, _config_keys, _secret_keys in WIZARD_SECTIONS]
+    options.append(("Return to summary", "Keep every current answer."))
+    choice = _wizard_ask_choice("Which setup section should be changed?", options, input_func=input_func)
+    if choice == len(WIZARD_SECTIONS):
+        return
+    name, _label, _description, config_keys, secret_keys = WIZARD_SECTIONS[choice]
+    _wizard_reset_section(state, config_keys, secret_keys)
+    if name == "Target":
+        state.target = ""
+    print()
+    collectors = {
+        "Target": lambda: _wizard_collect_target_section(state, input_func=input_func),
+        "Polling": lambda: _wizard_collect_polling_section(state, input_func=input_func),
+        "Authentication": lambda: _wizard_collect_auth_section(state, input_func=input_func, getpass_func=getpass_func),
+        "Email": lambda: _wizard_collect_email_section(state, input_func=input_func, getpass_func=getpass_func),
+        "Output": lambda: _wizard_collect_output_section(state, input_func=input_func),
+    }
+    collectors[name]()
+
+
+# Prints one aligned label and value block, so every summary row lines up
+def _wizard_print_summary_rows(rows):
+    width = max(len(label) for label, _ in rows) + 1
+    for label, value in rows:
+        print(f"  {(label + ':'):<{width}} {value}")
+
+
+# Shows everything that is about to be written, by name and never by secret value
+def _wizard_print_setup_summary(state):
+    email_labels = {"ACTIVE_INACTIVE_NOTIFICATION": "online/offline", "GAME_CHANGE_NOTIFICATION": "game", "ERROR_NOTIFICATION": "errors"}
+    enabled_email = [email_labels[name] for name in WIZARD_EMAIL_NOTIFICATION_KEYS if state.config_values.get(name)]
+    npsso_set = "PSN_NPSSO" in state.secret_updates or secret_is_set(state.config_values.get("PSN_NPSSO"))
+    rows = [
+        ("Target", state.target or "not set"),
+        ("Save target in config", "yes" if state.persist_target else "no"),
+        ("Polling interval while offline", _wizard_format_duration(int(state.config_values.get("PSN_CHECK_INTERVAL") or 0))),
+        ("Polling interval while online", _wizard_format_duration(int(state.config_values.get("PSN_ACTIVE_CHECK_INTERVAL") or 0))),
+        ("Authentication status", "complete" if npsso_set else "incomplete"),
+        ("Email", "enabled" if enabled_email else "disabled"),
+        ("Email notifications", ", ".join(enabled_email) if enabled_email else "none"),
+        ("Output log", "disabled" if state.config_values.get("DISABLE_LOGGING") else "enabled"),
+        ("CSV output", state.config_values.get("CSV_FILE") or "disabled"),
+        ("Status file", state.config_values.get("PSN_STATUS_FILE") or "default"),
+        ("Config destination", state.config_path),
+        ("Dotenv destination", state.env_path),
+        ("Install method", install_method_display_name()),
+    ]
+    print("\nSetup summary\n")
+    _wizard_print_summary_rows(rows)
+
+
+# Loops on the summary until the user saves or explicitly discards, so nothing is written by accident
+def _wizard_review_setup(state, input_func=None, getpass_func=None):
+    while True:
+        _wizard_print_setup_summary(state)
+        action = _wizard_ask_choice("What would you like to do?", [
+            ("Save settings", "Write the displayed settings to the selected files."),
+            ("Review or change settings", "Edit one section without losing the other answers."),
+            ("Discard answers and exit", "Leave the destination files unchanged."),
+        ], input_func=input_func)
+        if action == 0:
+            return True
+        if action == 1:
+            _wizard_edit_setup_section(state, input_func=input_func, getpass_func=getpass_func)
+            continue
+        print()
+        if _wizard_ask_yes_no("Discard all entered answers and exit?", default=False, input_func=input_func):
+            return False
+        print("  Setup answers retained.")
+
+
+# Prints where setup will write and which install method the printed commands are written for
+def _wizard_print_setup_destinations(config_path, env_path):
+    print(f"Detected install method: {install_method_display_name()}")
+    print(f"Configuration:           {config_path}")
+    print(f"Dotenv:                  {env_path}\n")
+
+
+# Puts the values setup just saved into effect, so doctor checks the written files instead of the earlier state
+def _wizard_apply_saved_values(state, env_path=None):
+    # Config values first: they carry the unset placeholders for every secret, which would otherwise
+    # overwrite the secrets applied below and make doctor report a working setup as unconfigured
+    globals().update(state.config_values)
+    if env_path:
+        try:
+            from dotenv import load_dotenv
+
+            load_dotenv(str(env_path), override=True)
+        except Exception as exc:
+            debug_print(f"Reading '{env_path}' back after setup failed: {exc}")
+    for key in SECRET_KEYS:
+        value = os.getenv(key)
+        if value is not None:
+            globals()[key] = value
+    # Secrets exported before startup keep winning here, exactly as they will when monitoring runs
+    for key, value in state.secret_updates.items():
+        if key not in EXPORTED_SECRET_KEYS and not secret_is_set(globals().get(key)):
+            globals()[key] = value
+
+
+# Builds the exact local command that starts this monitor, used when setup offers to launch it
+def _wizard_local_command_args(target=None, config_path=None, env_path=None):
+    executable = sys.executable or ("python" if platform.system() == "Windows" else "python3")
+    arguments = [executable, str(Path(__file__).resolve())]
+    if target:
+        arguments.append(str(target))
+    if config_path:
+        arguments.extend(["--config-file", str(config_path)])
+    if env_path:
+        arguments.extend(["--env-file", str(env_path)])
+    return arguments
+
+
+# Hands the terminal to the monitor, replacing this process where the platform allows it
+def _wizard_launch_monitor(arguments):
+    command = [str(argument) for argument in arguments]
+    if platform.system() == "Windows":
+        try:
+            return subprocess.run(command, check=False).returncode
+        except KeyboardInterrupt:
+            return 0
+    os.execv(command[0], command)
+    return 0
+
+
+# Runs the guided setup, holding every answer until the user saves
+def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input_func=None, getpass_func=None, interactive=None):
+    terminal_is_interactive = sys.stdin.isatty() if interactive is None else bool(interactive)
+    if not terminal_is_interactive:
+        print("The setup wizard needs an interactive terminal (TTY).")
+        print(f"Run --setup from an interactive shell, or write a config to edit by hand with: {tool_command('--generate-config', 'psn_monitor.conf')}")
+        print(f"Guide: {QUICK_START_GUIDE_URL}")
+        return 1
+
+    if env_file and str(env_file).casefold() == "none":
+        print("--setup needs a dotenv destination. Replace '--env-file none' with a writable path.")
+        return 1
+
+    config_path = Path(config_file).expanduser() if config_file else Path.cwd() / DEFAULT_CONFIG_FILENAME
+    env_path = Path(env_file).expanduser() if env_file else Path.cwd() / ".env"
+
+    print("Setup Wizard\n")
+    print("This asks a few questions and writes a ready-to-run configuration.")
+    _wizard_print_default_guidance()
+    print("Secrets go to the dotenv file. Non-secret settings go to the config file.\n")
+    _wizard_print_setup_destinations(config_path, env_path)
+
+    baseline_values = {name: value for name, value in globals().items() if name in _config_allowed_names()}
+    state = WizardSetupState(config_path, env_path, baseline_values)
+    state.config_values["DOTENV_FILE"] = str(env_path)
+
+    try:
+        _wizard_collect_target_section(state, initial_target, input_func=input_func)
+        print()
+        _wizard_collect_polling_section(state, input_func=input_func)
+        print()
+        _wizard_collect_auth_section(state, input_func=input_func, getpass_func=getpass_func)
+        print()
+        _wizard_collect_email_section(state, input_func=input_func, getpass_func=getpass_func)
+        print()
+        _wizard_collect_output_section(state, input_func=input_func)
+        saved = _wizard_review_setup(state, input_func=input_func, getpass_func=getpass_func)
+    except (EOFError, KeyboardInterrupt):
+        print("\nSetup cancelled. The destination files were not changed.")
+        return 1
+
+    if not saved:
+        print("Setup cancelled. The destination files were not changed.")
+        return 1
+
+    # Everything above only filled the state, so this is the first and only point anything reaches disk
+    try:
+        config_backup, _written = write_generated_config(state.config_path, generate_config_with_current_values(state.config_values), force=True)
+    except Exception as exc:
+        print_recovery_advice(classify_recovery_error(exc, context="file.unwritable", detail=f"Could not write the configuration to '{state.config_path}': {exc}"))
+        return 1
+    secrets_written = False
+    if state.secret_updates:
+        try:
+            update_dotenv_values(state.env_path, state.secret_updates)
+            secrets_written = True
+        except Exception as exc:
+            print_recovery_advice(classify_recovery_error(exc, context="file.unwritable", detail=f"Could not write the secrets to '{state.env_path}': {exc}"))
+            return 1
+
+    print("\nSaved files\n")
+    print(f"  Configuration: {state.config_path}")
+    if config_backup:
+        print(f"  Backup:        {config_backup}")
+    if secrets_written:
+        print(f"  Secrets:       {state.env_path}")
+
+    doctor_offered = bool(state.target)
+    doctor_exit = None
+    if doctor_offered:
+        print()
+    try:
+        if doctor_offered and _wizard_ask_yes_no("Run doctor now? It writes no files and offers real delivery tests only with separate approval.", default=True, input_func=input_func):
+            print()
+            _wizard_apply_saved_values(state, env_path=state.env_path if secrets_written else None)
+            doctor_exit = run_doctor(psn_user_id=state.target, config_path=str(state.config_path), env_path=str(state.env_path) if secrets_written else None)
+    except (EOFError, KeyboardInterrupt):
+        # The files are already written, so an interrupt here only skips the optional check
+        print()
+
+    env_arguments = ["--env-file", str(state.env_path)] if secrets_written else []
+    # A saved target is already in the config file, so the printed commands stay short
+    target_arguments = [] if state.persist_target or not state.target else [state.target]
+    paths = ["--config-file", str(state.config_path)] + env_arguments
+    print("\nNext steps\n")
+    print_labelled_command("Check setup again:", tool_command("--doctor", *target_arguments, *paths))
+    start_label = "After Doctor passes, start monitoring:" if doctor_exit not in (None, 0) else "Start monitoring:"
+    print_labelled_command(start_label, tool_command(*target_arguments, *paths))
+    print(f"Guide: {QUICK_START_GUIDE_URL}\n")
+
+    npsso_ready = "PSN_NPSSO" in state.secret_updates or secret_is_set(state.config_values.get("PSN_NPSSO"))
+    if state.target and npsso_ready and _wizard_ask_yes_no("Start monitoring now? Monitoring will continue until Ctrl+C.", default=True, input_func=input_func):
+        launch_arguments = _wizard_local_command_args(target=None if state.persist_target else state.target, config_path=state.config_path, env_path=state.env_path if secrets_written else None)
+        sys.stdout.flush()
+        return _wizard_launch_monitor(launch_arguments)
+    return 0
+
 # Prints the commands a newcomer needs next, instead of an argparse usage error nobody can act on
-def print_welcome_screen():
+def print_welcome_screen(input_func=None, interactive=None, config_file=None, env_file=None):
+    terminal_is_interactive = sys.stdin.isatty() if interactive is None else bool(interactive)
     prefix = tool_command_prefix()
     print(f"For <psn_user_id>, use the {PSN_TARGET_FORMS}.\n")
     print_labelled_command("Quickest start (already configured):", f"{prefix} <psn_user_id>")
+    # The suffix names the prompt printed below, so it only appears when that prompt does
+    print_labelled_command("Easiest start (guided setup wizard):", f"{prefix} --setup", "   (or just answer Y below)" if terminal_is_interactive else "")
     print_labelled_command("Check setup before monitoring:", f"{prefix} --doctor <psn_user_id>")
     print_labelled_command("Show profile details and exit:", f"{prefix} -i <psn_user_id>")
     print(f"Full options: {prefix} --help")
     print(f"\nGuide:        {QUICK_START_GUIDE_URL}\n")
-    return 1
+    if terminal_is_interactive and _wizard_ask_yes_no("Run the guided setup wizard now?", default=True, input_func=input_func):
+        print()
+        return run_setup_wizard(config_file=config_file, env_file=env_file, input_func=input_func)
+    # Without a terminal there was nothing to answer, so a bare invocation stays the usage error it was
+    return 0 if terminal_is_interactive else 1
 
 
 
@@ -3310,32 +3855,48 @@ def dotenv_contains_key(path, key):
     return any(match_dotenv_assignment(line, key) for line in target.read_text(encoding="utf-8").splitlines())
 
 
-# Replaces one dotenv assignment in place, leaving every other line and every comment untouched
-def update_dotenv_value(path, key, value):
+# Replaces dotenv assignments in place in one pass, leaving every other line and every comment untouched
+def update_dotenv_values(path, updates):
     target = Path(path).expanduser()
     if not target.parent.is_dir():
         raise FileNotFoundError(f"The directory for '{target}' does not exist")
+    for key in updates:
+        if key not in SECRET_KEYS:
+            raise ValueError(f"Refusing to write an unknown dotenv key: {key}")
     existing = target.read_text(encoding="utf-8") if target.is_file() else ""
     lines = []
-    replaced = False
+    replaced = set()
     for line in existing.splitlines():
-        match = match_dotenv_assignment(line, key)
-        if match and not replaced:
+        rewritten = None
+        for key in updates:
+            match = match_dotenv_assignment(line, key)
+            if not match:
+                continue
+            if key in replaced:
+                rewritten = ""
+                break
             # An already exported line is rewritten in place. Appending a second assignment would leave the
             # old credential on disk, with only the load order deciding which one wins
-            lines.append(render_dotenv_assignment(key, value, match.group(1)))
-            replaced = True
+            rewritten = render_dotenv_assignment(key, updates[key], match.group(1))
+            replaced.add(key)
+            break
+        if rewritten == "":
             continue
-        if match:
-            continue
-        lines.append(line)
-    if not replaced:
-        lines.append(render_dotenv_assignment(key, value))
+        lines.append(line if rewritten is None else rewritten)
+    for key, value in updates.items():
+        if key not in replaced:
+            lines.append(render_dotenv_assignment(key, value))
     # Written through a temporary file, so an interrupted write cannot leave the file without its secrets.
     # No backup is taken here: a copy of the credential being replaced is the one thing not worth keeping
     write_file_atomically(target, "\n".join(lines) + "\n")
-    verbose_print(f"Saved {key} in '{target}'")
+    for key in updates:
+        verbose_print(f"Saved {key} in '{target}'")
     return str(target)
+
+
+# Replaces one dotenv assignment, the single-secret case of the writer above
+def update_dotenv_value(path, key, value):
+    return update_dotenv_values(path, {key: value})
 
 
 # Returns the dotenv file a one-shot secret command writes to, refusing the disabled setting
@@ -3543,6 +4104,12 @@ def main():
         help="Print default config template and exit (on Windows PowerShell, specify a filename to avoid redirect encoding issues)",
     )
     conf.add_argument(
+        "--setup",
+        dest="setup",
+        action="store_true",
+        help="Run the guided setup and write a ready-to-run configuration"
+    )
+    conf.add_argument(
         "--force",
         dest="force",
         action="store_true",
@@ -3715,7 +4282,8 @@ def main():
 
     if not cfg_path and CLI_CONFIG_PATH:
         config_advice = classify_recovery_error(context="config.missing", detail=f"Config file '{CLI_CONFIG_PATH}' does not exist")
-        if not doctor_mode:
+        # Setup is how that file gets created, so a missing --config-file path is its destination, not a failure
+        if not doctor_mode and not args.setup:
             print_recovery_advice(config_advice)
             sys.exit(1)
 
@@ -3737,7 +4305,7 @@ def main():
 
     # Evaluated after the config file is read, so a saved PSN ID starts monitoring instead of being welcomed
     if len(sys.argv) == 1 and not args.psn_user_id:
-        sys.exit(print_welcome_screen())
+        sys.exit(print_welcome_screen(config_file=args.config_file, env_file=args.env_file))
 
     if args.env_file:
         DOTENV_FILE = os.path.expanduser(args.env_file)
@@ -3818,6 +4386,9 @@ def main():
 
     if not check_internet():
         sys.exit(1)
+
+    if args.setup:
+        sys.exit(run_setup_wizard(initial_target=args.psn_user_id, config_file=args.config_file, env_file=args.env_file))
 
     if args.set_npsso:
         try:
