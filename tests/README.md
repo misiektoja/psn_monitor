@@ -1,8 +1,7 @@
 # Offline test suite
 
-These tests never touch the network or the PlayStation Network. They assert the repository's own
-metadata, so a change that breaks the citation, the sponsor button, the declared editor style or the
-release integrity of a published archive fails before it reaches a release.
+These tests cover logic in `psn_monitor.py` that can run without network access.
+PlayStation Network calls are replaced with test doubles.
 
 ## Running
 
@@ -13,16 +12,35 @@ pip install -e '.[test]'
 python -m pytest
 ```
 
-`pyproject.toml` puts the repository root first on `sys.path`, so the tests always read the working tree.
+`pyproject.toml` puts the repository root first on `sys.path`, so the tests use the
+working tree instead of an installed copy of the module.
+
+Lint the same way CI does:
+
+```bash
+pip install -e '.[lint]'
+python -m ruff check psn_monitor.py tests
+```
+
+CI runs both on every push and pull request, across Python 3.10 through 3.14,
+and again before anything is published to PyPI.
 
 ## Layout
 
 | File | Area under test |
 | --- | --- |
+| `test_repository_contracts.py` | Governance documents, issue templates, action pinning, release gating and the CI contract |
 | `test_repository_metadata.py` | Governance files, citation, funding, line endings, the declared editor style, the pinned linter and release integrity |
 
 ## Conventions
 
-* Keep every test offline
-* Read repository files through the `read_asset` and `read_yaml_asset` helpers
-* Skip rather than fail when the checkout is not a Git working tree
+* Keep every test offline. If a code path needs network access, stub it with
+  `monkeypatch` rather than skipping the test.
+* Restore module-level globals you change. Tests share one imported module, so a
+  leaked global affects whatever runs next.
+* Replace PlayStation Network calls and notification delivery with test doubles.
+* Never use a real NPSSO token, SMTP password or webhook URL.
+
+A change to the monitoring loop, authentication or PlayStation Network data handling is not
+verified by this suite alone. Exercise it against a real account and say so in the
+pull request, without usernames or credentials.
