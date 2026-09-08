@@ -205,7 +205,6 @@ if sys.version_info < (3, 10):
     sys.exit(1)
 
 import time
-import string
 import json
 import os
 from datetime import datetime, timezone
