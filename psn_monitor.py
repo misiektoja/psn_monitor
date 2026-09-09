@@ -4425,8 +4425,11 @@ def doctor_check_configuration(config_path=None, env_path=None, config_advice=No
     else:
         checks.append(make_doctor_check("Configuration", "PASS", "No configuration file selected", "Using built-in defaults and command-line overrides"))
 
-    if env_path:
+    if env_path and os.path.isfile(str(env_path)):
         checks.append(make_doctor_check("Configuration", "PASS", "Dotenv file loaded", f"Path: {env_path}"))
+    elif env_path:
+        advice = make_recovery_advice("config.missing", "The requested dotenv file was not found", recovery_fix_with_guide("Create the file or select an existing path with --env-file", SECRETS_GUIDE_URL), False, f"Path: {env_path}")
+        checks.append(make_doctor_check("Configuration", "WARN", advice.summary, advice.detail, advice))
     else:
         checks.append(make_doctor_check("Configuration", "PASS", "No dotenv file selected", "Using environment variables and other configured sources"))
 

@@ -19,7 +19,7 @@ The report opens with the detected install method, then six sections, each row m
 * **Target**: whether the monitored PlayStation ID exists and shares its presence with your account
 * **Notifications**: whether email and webhook alerts can fire. The email row signs in to the configured SMTP server without sending a message, the webhook row checks the destination and headers without contacting the service, and each ready row lists the alert categories that channel would deliver
 
-Every `[WARN]` and `[FAIL]` row carries the `To fix:` line described in [Error Messages and Recovery](#error-messages-and-recovery), indented under the marker it belongs to, plus a `Guide:` link when a documentation page covers that row. A `[SKIP]` row names a check that could not run and says why. Secrets are reported by name and never by value, which makes the whole report safe to paste into a bug report.
+Every `[WARN]` and `[FAIL]` row carries the `To fix:` line described in [Error Messages and Recovery](#error-messages-and-recovery), indented under the marker it belongs to, plus a `Guide:` link when a documentation page covers that row. A `[SKIP]` row names a check that could not run and says why. An explicitly selected dotenv path that does not exist is reported as a warning with the path and recovery command. Secrets are reported by name and never by value, which makes the whole report safe to paste into a bug report.
 
 If a channel passes and you are on an interactive terminal, the doctor offers to send one real test email and one real test webhook. Each is approved separately, and nothing is delivered without a `y`. Ctrl+C at either prompt ends the run rather than declining one test and asking the next.
 
