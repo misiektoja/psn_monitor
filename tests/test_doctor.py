@@ -426,24 +426,27 @@ def test_the_target_reuses_the_authenticated_session(pm_module, psn_session, doc
     assert len(psn_session.instances) == 1
 
 
-# Verifies the target section is left out when authentication failed, so one problem is reported once
-def test_the_target_section_is_omitted_when_authentication_failed(pm_module, monkeypatch, doctor_run):
+# Verifies the target section says the lookup was skipped when authentication failed, rather than going missing
+def test_the_target_section_is_skipped_when_authentication_failed(pm_module, monkeypatch, doctor_run):
     monkeypatch.setattr(pm_module, "PSN_NPSSO", "")
 
     _, raw = doctor_run(psn_user_id=USER_ID, interactive=False)
 
-    assert "\nTarget\n" not in as_displayed(raw)
+    displayed = as_displayed(raw)
+    assert "\nTarget\n" in displayed
+    assert "[SKIP] The monitored profile was not checked" in displayed
 
 
-# Verifies a missing PlayStation ID is its own failure, since nothing can be monitored without one
-def test_a_missing_playstation_id_fails_the_target(pm_module, psn_session):
+# Verifies a missing PlayStation ID warns rather than fails, so a credentials-only run still exits clean
+def test_a_missing_playstation_id_warns_on_the_target(pm_module, psn_session):
     psn_session([presence_payload(status="online")])
     report = pm_module.DoctorReport()
     pm_module.doctor_check_authentication(report)
 
     checks = pm_module.doctor_check_target(report, None)
 
-    assert (checks[0].status, checks[0].advice.code) == ("FAIL", "target.missing")
+    assert (checks[0].status, checks[0].advice.code) == ("WARN", "target.missing")
+    assert checks[0].detail == "Nothing will be monitored until one is given"
 
 
 # Verifies a profile that hides its activity is reported with the privacy steps, not as a broken token

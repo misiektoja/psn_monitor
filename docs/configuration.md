@@ -146,7 +146,7 @@ psn_monitor <psn_user_id> -k 30 -c 120
 * `PSN_ACTIVE_CHECK_INTERVAL`, `-k`: check interval when the user is online, in seconds
 * `PSN_CHECK_INTERVAL`, `-c`: check interval when the user is offline, in seconds
 
-Intervals that are short enough to be rate limited by PlayStation Network are reported as a warning by `--doctor`.
+An active interval below 30 seconds invites the PlayStation Network rate limiter, which stops the tool seeing anything. `--doctor` warns when the configured interval is that short.
 
 ## Storing Secrets
 

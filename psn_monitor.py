@@ -4522,10 +4522,9 @@ def doctor_check_authentication(report):
 def doctor_check_target(report, psn_user_id=None):
     if not psn_user_id:
         advice = classify_recovery_error(context="target.missing", detail="No PlayStation ID was provided")
-        return [make_doctor_check("Target", "FAIL", advice.summary, advice=advice)]
+        return [make_doctor_check("Target", "WARN", advice.summary, "Nothing will be monitored until one is given", advice)]
     if report.psnawp is None:
-        # Authentication already failed and reported why. A second row would repeat one problem as two
-        return []
+        return [make_doctor_check("Target", "SKIP", "The monitored profile was not checked", "Sign-in did not succeed, so no lookup was attempted")]
     try:
         psn_user = report.psnawp.user(online_id=psn_user_id)
         account_id = psn_user.account_id
