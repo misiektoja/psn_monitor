@@ -4148,11 +4148,12 @@ def doctor_check_environment(version_info=None, spec_finder=None):
     checks = []
     selected = tuple(sys.version_info if version_info is None else version_info)
     version_text = ".".join(str(part) for part in selected[:3])
+    minimum_detail = f"Minimum supported version: {MINIMUM_PYTHON_VERSION_TEXT}"
     if selected[:2] >= MINIMUM_PYTHON_VERSION:
-        checks.append(make_doctor_check("Environment", "PASS", f"Python {version_text} is supported"))
+        checks.append(make_doctor_check("Environment", "PASS", f"Python {version_text} is supported", minimum_detail))
     else:
         advice = make_recovery_advice("dependency.missing", f"Python {version_text} is unsupported", recovery_fix_with_guide(f"Install Python {MINIMUM_PYTHON_VERSION_TEXT} or newer then retry", INSTALLATION_GUIDE_URL), False)
-        checks.append(make_doctor_check("Environment", "FAIL", advice.summary, advice=advice))
+        checks.append(make_doctor_check("Environment", "FAIL", advice.summary, minimum_detail, advice))
 
     for module_name, package_name in DOCTOR_REQUIRED_DEPENDENCIES:
         if dependency_is_installed(module_name, spec_finder):
@@ -4217,8 +4218,6 @@ def doctor_check_configuration(config_path=None, env_path=None, config_advice=No
     if PSN_ACTIVE_CHECK_INTERVAL < DOCTOR_MIN_SAFE_ACTIVE_INTERVAL:
         advice = make_recovery_advice("psn.rate_limited", "Check intervals are short enough to be rate limited", recovery_fix_with_guide(f"Raise PSN_ACTIVE_CHECK_INTERVAL to at least {DOCTOR_MIN_SAFE_ACTIVE_INTERVAL} seconds", INTERVALS_GUIDE_URL), True)
         checks.append(make_doctor_check("Configuration", "WARN", "Check intervals are short", intervals, advice))
-    else:
-        checks.append(make_doctor_check("Configuration", "PASS", "Check intervals are set", intervals))
 
     if VERIFY_SSL:
         checks.append(make_doctor_check("Configuration", "PASS", "TLS certificate verification is on", "Every outbound request checks the server certificate"))
@@ -4227,7 +4226,7 @@ def doctor_check_configuration(config_path=None, env_path=None, config_advice=No
         checks.append(make_doctor_check("Configuration", "WARN", "TLS certificate verification is off", "VERIFY_SSL is False, so an intercepted connection cannot be told apart from the real service", advice))
 
     try:
-        checks.append(make_doctor_check("Configuration", "PASS", f"ASCII log separators are {'on' if ascii_log_separators_enabled() else 'off'}", f"Mode: {ASCII_LOG_SEPARATORS}"))
+        ascii_log_separators_enabled()
     except ValueError as exc:
         advice = classify_recovery_error(context="config.invalid", detail=str(exc))
         checks.append(make_doctor_check("Configuration", "FAIL", advice.summary, advice=advice))
@@ -4762,14 +4761,20 @@ def _wizard_ask_duration(question, default, input_func=None):
         print("  Enter a positive duration such as 120, 2m, 1.5h, 1h 30m or 1d.")
 
 
-# Asks one secret through a hidden prompt, so it never reaches the screen or the shell history
+# Asks one secret through a hidden prompt with debug output off, so it never reaches the screen, the shell history or the debug stream
 def _wizard_ask_secret(question, getpass_func=None):
+    global DEBUG_MODE
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
+    previous_debug_mode = DEBUG_MODE
+    DEBUG_MODE = False
     try:
-        return str(read_interactively(hidden_prompt, f"{question}: ")).strip()
+        # Colorized like the visible prompts, so a hidden answer does not look like a different question
+        return str(read_interactively(hidden_prompt, colorize("info", f"{question}: "))).strip()
     except (EOFError, KeyboardInterrupt):
         print()
         raise
+    finally:
+        DEBUG_MODE = previous_debug_mode
 
 
 # Renders one setting for the generated config, keeping a mapping readable instead of on one very long line

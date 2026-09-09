@@ -779,3 +779,22 @@ def test_a_row_never_prints_its_summary_twice(pm_module):
     assert check.label == repeated
     assert check.detail == ""
     assert pm_module.render_doctor_sections(pm_module.DoctorReport(checks=[check])).count(repeated) == 1
+
+
+# Verifies the Python row states the minimum it was judged against, whichever way the judgement went
+def test_the_python_row_names_the_minimum_supported_version(pm_module):
+    too_old = (pm_module.MINIMUM_PYTHON_VERSION[0], pm_module.MINIMUM_PYTHON_VERSION[1] - 1, 0)
+
+    supported = pm_module.doctor_check_environment()[0]
+    unsupported = pm_module.doctor_check_environment(version_info=too_old)[0]
+
+    assert supported.detail == f"Minimum supported version: {pm_module.MINIMUM_PYTHON_VERSION_TEXT}"
+    assert unsupported.detail == supported.detail
+
+
+# Verifies settings that are merely valid take no row, since a value that is fine is not a finding
+def test_valid_intervals_and_separators_take_no_row(pm_module):
+    labels = [check.label for check in pm_module.doctor_check_configuration()]
+
+    assert "Check intervals are set" not in labels
+    assert not any(label.startswith("ASCII log separators") for label in labels)
