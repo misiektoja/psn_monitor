@@ -484,6 +484,16 @@ def test_the_generate_config_command_leaves_this_run_out(pm_module, monkeypatch)
     assert pm_module.tool_command("--generate-config", "psn_monitor.conf", method="pip", include_paths=False) == "psn_monitor --generate-config psn_monitor.conf"
 
 
+# Verifies the disabled dotenv search reaches the commands that accept it and stays out of the ones that refuse it
+def test_a_disabled_dotenv_search_is_carried_only_where_it_is_accepted(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "CLI_CONFIG_PATH", None)
+    monkeypatch.setattr(pm_module, "DOTENV_FILE", "none")
+
+    assert pm_module.tool_command("--doctor", method="pip") == "psn_monitor --doctor --env-file none"
+    assert pm_module.tool_command("--set-npsso", method="pip") == "psn_monitor --set-npsso"
+    assert pm_module.tool_command("--setup", method="pip") == "psn_monitor --setup"
+
+
 # Verifies a caller that already names a file is not given a second copy of it
 def test_a_path_the_caller_passed_is_not_repeated(pm_module, monkeypatch):
     monkeypatch.setattr(pm_module, "CLI_CONFIG_PATH", "/etc/psn.conf")
