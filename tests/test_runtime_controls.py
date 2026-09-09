@@ -84,6 +84,37 @@ def test_reloaded_secrets_are_not_printed(pm_module, tmp_path, monkeypatch, caps
         pm_module.PSN_NPSSO = "npsso-test-value"
 
 
+# Verifies a reloaded destination that belongs to the other service moves the provider with it
+def test_sighup_reload_follows_the_provider_of_the_new_webhook_url(pm_module, tmp_path, monkeypatch, capsys):
+    pytest.importorskip("dotenv")
+    env_file = tmp_path / ".env"
+    env_file.write_text("WEBHOOK_URL=https://ntfy.sh/private-topic-name\n", encoding="utf-8")
+    monkeypatch.setattr(pm_module, "DOTENV_FILE", str(env_file))
+    monkeypatch.setattr(pm_module, "WEBHOOK_PROVIDER", "discord")
+    monkeypatch.setattr(pm_module, "WEBHOOK_URL", "https://discord.com/api/webhooks/1/token")
+    monkeypatch.delenv("WEBHOOK_URL", raising=False)
+
+    pm_module.reload_secrets_signal_handler(signal.SIGHUP, None)
+
+    assert pm_module.WEBHOOK_PROVIDER == "ntfy"
+    assert "Updated webhook provider to ntfy" in capsys.readouterr().out
+
+
+# Verifies a destination whose service cannot be recognised leaves the configured provider alone
+def test_sighup_reload_keeps_the_provider_for_an_unrecognised_url(pm_module, tmp_path, monkeypatch):
+    pytest.importorskip("dotenv")
+    env_file = tmp_path / ".env"
+    env_file.write_text("WEBHOOK_URL=https://ntfy.example.test/topic\n", encoding="utf-8")
+    monkeypatch.setattr(pm_module, "DOTENV_FILE", str(env_file))
+    monkeypatch.setattr(pm_module, "WEBHOOK_PROVIDER", "ntfy")
+    monkeypatch.setattr(pm_module, "WEBHOOK_URL", "https://ntfy.sh/old-topic")
+    monkeypatch.delenv("WEBHOOK_URL", raising=False)
+
+    pm_module.reload_secrets_signal_handler(signal.SIGHUP, None)
+
+    assert pm_module.WEBHOOK_PROVIDER == "ntfy"
+
+
 # Verifies the dotenv scan can be turned off entirely, which a container deployment relies on
 def test_dotenv_reload_can_be_disabled(pm_module, monkeypatch, capsys):
     monkeypatch.setattr(pm_module, "DOTENV_FILE", "none")

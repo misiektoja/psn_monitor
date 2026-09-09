@@ -271,6 +271,28 @@ def test_a_missing_optional_dependency_warns_and_says_what_breaks(pm_module):
     assert "-m pip install wcwidth" in missing.advice.fix
 
 
+# Verifies a warning about a library that cannot affect this machine is not shown at all
+@pytest.mark.parametrize("system, reported", [("Windows", True), ("Linux", False), ("Darwin", False)])
+def test_a_platform_specific_dependency_is_only_reported_where_it_applies(pm_module, monkeypatch, system, reported):
+    monkeypatch.setattr(pm_module.platform, "system", lambda: system)
+
+    checks = pm_module.doctor_check_environment(spec_finder=lambda name: None)
+
+    assert any("colorama" in check.label for check in checks) is reported
+
+
+# Verifies the Windows colour library is reported there, so broken colours on that platform have a diagnostic
+def test_missing_colorama_is_reported_on_windows(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module.platform, "system", lambda: "Windows")
+
+    checks = pm_module.doctor_check_environment(spec_finder=lambda name: None if name == "colorama" else object())
+
+    missing = next(check for check in checks if "colorama" in check.label)
+    assert missing.status == "WARN"
+    assert "older Windows Command Prompt" in missing.detail
+    assert "-m pip install colorama" in missing.advice.fix
+
+
 # Verifies the install method is stated under the heading as context, using the raw key support reports use
 def test_the_install_method_is_stated_under_the_heading(pm_module, monkeypatch):
     monkeypatch.setattr(pm_module.sys, "argv", ["/usr/local/bin/psn_monitor"])

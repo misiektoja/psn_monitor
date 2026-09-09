@@ -5,6 +5,8 @@
 * Python 3.10 or higher
 * Libraries: [PSNAWP](https://codeberg.org/YoshikageKira/psnawp), `requests`, `python-dateutil`, `pytz`, `tzlocal`, `python-dotenv`, `wcwidth`, `colorama` (Windows only, optional)
 
+`tzlocal`, `python-dotenv`, `wcwidth` and `colorama` are optional. Without `tzlocal` the local time zone has to be set manually. Without `python-dotenv` secrets have to come from the environment or the command line. Without `wcwidth` screen truncation is switched off. `colorama` matters only in the older Windows Command Prompt. `--doctor` reports each one it finds missing, reporting `colorama` only on Windows.
+
 Tested on:
 
 * **macOS**: Tahoe, Sequoia, Sonoma, Ventura

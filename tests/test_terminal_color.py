@@ -526,6 +526,36 @@ def test_game_names_with_punctuation_are_still_colored(colored, name):
     assert colored["game"] in monitor._colorize_line(f"PSN user misiektoja started playing '{name}'")
 
 
+# Verifies a title's own apostrophe does not end the name early, which left most of the title uncoloured
+@pytest.mark.parametrize("title", ["Tom Clancy's Rainbow Six Siege", "Assassin's Creed Valhalla"])
+def test_a_title_containing_an_apostrophe_is_coloured_whole(colored, title):
+    result = monitor._colorize_line(f"PSN user misiektoja started playing '{title}' after 1 hour")
+
+    assert f"{colored['game']}{title}{monitor.ANSI_RESET}" in result
+
+
+# Verifies two quoted titles on one line stay two names, since the closing quote rule could have joined them
+def test_two_quoted_titles_on_one_line_stay_separate(colored):
+    result = monitor._colorize_line("PSN user misiektoja changed game from 'Bloodborne' to 'Ghost of Tsushima' after 2 hours")
+
+    assert f"{colored['game']}Bloodborne{monitor.ANSI_RESET}" in result
+    assert f"{colored['game']}Ghost of Tsushima{monitor.ANSI_RESET}" in result
+
+
+# Verifies a quoted placeholder inside a printed command stays plain, since it is text to replace rather than a name
+@pytest.mark.parametrize("line", ["Run: psn_monitor '<psn_user_id>'", "Replace '<topic>' with your own ntfy topic"])
+def test_quoted_command_placeholders_stay_plain(colored, line):
+    assert colored["game"] not in monitor._colorize_line(line)
+
+
+# Verifies a quoted fragment of a URL stays plain, since it is a piece of an address rather than a name
+@pytest.mark.parametrize("value", ["?code=", "&state="])
+def test_quoted_url_fragments_stay_plain(colored, value):
+    line = f"Copy everything after '{value}' from the address bar."
+
+    assert monitor._colorize_line(line) == line
+
+
 # Verifies quoted values shaped like a file name or a path stay plain
 @pytest.mark.parametrize("value", ["psn_misiektoja_last_status.json", "/var/log/psn.log", "~/logs/output.txt", "C:\\Users\\me\\state.json"])
 def test_quoted_file_and_path_values_stay_plain(colored, value):

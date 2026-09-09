@@ -483,7 +483,7 @@ import textwrap
 from collections import namedtuple
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 try:
     from colorama import init as colorama_init  # type: ignore[import]
 except ImportError:
@@ -2716,6 +2716,7 @@ def decrease_active_check_signal_handler(sig, frame):
 
 # Signal handler for SIGHUP allowing to reload secrets from .env
 def reload_secrets_signal_handler(sig, frame):
+    global WEBHOOK_PROVIDER
     sig_name = signal.Signals(sig).name
     print(f"* Signal {sig_name} received")
 
@@ -2738,6 +2739,7 @@ def reload_secrets_signal_handler(sig, frame):
             env_path = None
             print_recovery_advice(missing_dependency_advice("python-dotenv", "The env-var reload was skipped"), label="Warning")
 
+    webhook_url_changed = False
     if env_path:
         for secret in SECRET_KEYS:
             old_val = globals().get(secret)
@@ -2745,10 +2747,25 @@ def reload_secrets_signal_handler(sig, frame):
             if val is not None and val != old_val:
                 globals()[secret] = val
                 SECRET_SOURCES[secret] = "dotenv file"
+                if secret == "WEBHOOK_URL":
+                    webhook_url_changed = True
                 debug_print("Secret reload", name=secret, path=env_path, value=secret_fingerprint(val, secret))
                 print(f"* Reloaded {secret} from {env_path}")
 
+    # A replacement destination can belong to the other service, which the reloaded URL is the only record of
+    if webhook_url_changed:
+        detected_provider = detect_webhook_provider(WEBHOOK_URL)
+        if detected_provider and detected_provider != normalized_webhook_provider():
+            WEBHOOK_PROVIDER = detected_provider
+            print(f"* Updated webhook provider to {webhook_provider_display_name(detected_provider)}")
+
     print_cur_ts("Timestamp:\t\t\t")
+
+
+# Keeps argparse from colouring its own help, so the help screen is coloured by this tool alone and --no-color is
+# not left with a second palette to silence. From Python 3.14 argparse colours the help by default on a terminal
+def argparse_color_kwargs() -> dict[str, Any]:
+    return {"color": False} if sys.version_info >= (3, 14) else {}
 
 
 # Finds an optional config file
@@ -4056,11 +4073,13 @@ DOCTOR_STATUSES = ("PASS", "WARN", "FAIL", "SKIP")
 # Imported without a guard, so the tool cannot start when one of these is missing
 DOCTOR_REQUIRED_DEPENDENCIES = (("psnawp_api", "PSNAWP"), ("requests", "requests"), ("dateutil", "python-dateutil"), ("pytz", "pytz"))
 
-# Guarded imports the tool degrades around, with what stops working and what to do instead
+# Guarded imports the tool degrades around, with what stops working and what to do instead. The last field
+# names the only operating system a row applies to, so a machine it cannot affect is not warned about it
 DOCTOR_OPTIONAL_DEPENDENCIES = (
-    ("tzlocal", "tzlocal", "Used only to auto-detect the local time zone", "Automatic time zone detection is unavailable", "Or set LOCAL_TIMEZONE to a pytz timezone name in the config file"),
-    ("dotenv", "python-dotenv", "Used only to read secrets from a dotenv file", "Secrets cannot be read from a dotenv file", "Or export them as environment variables"),
-    ("wcwidth", "wcwidth", "Used only to measure display width for screen truncation", "Screen truncation is disabled", ""),
+    ("tzlocal", "tzlocal", "Used only to auto-detect the local time zone", "Automatic time zone detection is unavailable", "Or set LOCAL_TIMEZONE to a pytz timezone name in the config file", ""),
+    ("dotenv", "python-dotenv", "Used only to read secrets from a dotenv file", "Secrets cannot be read from a dotenv file", "Or export them as environment variables", ""),
+    ("wcwidth", "wcwidth", "Used only to measure display width for screen truncation", "Screen truncation is disabled", "", ""),
+    ("colorama", "colorama", "Used only for coloured output in the older Windows Command Prompt", "Coloured output may not render in the older Windows Command Prompt", "Or use Windows Terminal, which needs nothing extra", "Windows"),
 )
 
 # An active check interval below this invites the PSN rate limiter, which stops the tool seeing anything
@@ -4142,7 +4161,9 @@ def doctor_check_environment(version_info=None, spec_finder=None):
             advice = make_recovery_advice("dependency.missing", f"Required dependency {package_name} is missing", recovery_fix_with_guide(f"Install it with: {pip_install_command(package_name)}", INSTALLATION_GUIDE_URL), False)
             checks.append(make_doctor_check("Environment", "FAIL", advice.summary, advice=advice))
 
-    for module_name, package_name, purpose, effect, alternative in DOCTOR_OPTIONAL_DEPENDENCIES:
+    for module_name, package_name, purpose, effect, alternative, only_on in DOCTOR_OPTIONAL_DEPENDENCIES:
+        if only_on and platform.system() != only_on:
+            continue
         if dependency_is_installed(module_name, spec_finder):
             checks.append(make_doctor_check("Environment", "PASS", f"Optional dependency {package_name} is installed", purpose))
         else:
@@ -4788,6 +4809,65 @@ def generate_config_with_current_values(config_values):
     return "\n".join(output) + "\n"
 
 
+# Walks up to the first directory that exists, so a destination under a missing folder can still be judged
+def nearest_existing_parent(path):
+    candidate = Path(path).expanduser()
+    if candidate.exists():
+        return candidate if candidate.is_dir() else candidate.parent
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate = candidate.parent
+    return candidate
+
+
+# Checks one setup destination without creating or modifying it, so an unwritable path is caught before any question
+def _wizard_validate_destination(path, label):
+    destination = Path(path).expanduser().resolve()
+    if destination.exists() and destination.is_dir():
+        raise ValueError(f"{label} must be a file path, not a directory")
+    parent = nearest_existing_parent(destination)
+    if not parent.is_dir():
+        raise ValueError(f"{label} does not have a usable parent directory")
+    if not os.access(str(parent), os.W_OK):
+        raise ValueError(f"{label} is not writable through parent '{parent}'")
+    return destination
+
+
+# Resolves both setup destinations, refusing the disabled settings that leave nowhere to write
+def _wizard_destinations(config_file=None, env_file=None):
+    if config_file is not None and str(config_file).casefold() == "none":
+        raise ValueError("--setup needs a config destination. Replace '--config-file none' with a writable path")
+    if env_file is not None and str(env_file).casefold() == "none":
+        raise ValueError("--setup needs a dotenv destination. Replace '--env-file none' with a writable path")
+    config_path = Path(config_file).expanduser() if config_file is not None else Path.cwd() / DEFAULT_CONFIG_FILENAME
+    env_path = Path(env_file).expanduser() if env_file is not None else Path.cwd() / ".env"
+    return _wizard_validate_destination(config_path, "Configuration destination"), _wizard_validate_destination(env_path, "Dotenv destination")
+
+
+# Confirms replacing an existing config before any question is asked, so a long run cannot end in a surprise
+def _wizard_choose_config_destination(config_path, input_func=None):
+    selected = Path(config_path)
+    while selected.exists() and not _wizard_ask_yes_no(f"Configuration file '{selected}' exists. Replace it with a fresh configuration built from defaults and create a timestamped backup?", default=False, input_func=input_func):
+        alternative = _wizard_ask_text("Another config destination or leave empty to cancel", input_func=input_func)
+        if not alternative:
+            return None
+        try:
+            selected = _wizard_validate_destination(alternative, "Configuration destination")
+        except ValueError as exc:
+            print(f"  {exc}.")
+    return selected
+
+
+# Queues one secret for the save step, asking first when the dotenv file already assigns it
+def _wizard_queue_secret(state, key, value, input_func=None):
+    if not value:
+        return False
+    if dotenv_contains_key(state.env_path, key) and not _wizard_ask_yes_no(f"The dotenv file already contains {key}. Replace that value?", default=False, input_func=input_func):
+        print(f"  Existing {key} will be retained without being displayed or rewritten.")
+        return False
+    state.secret_updates[key] = value
+    return True
+
+
 # Holds every wizard answer until the user explicitly saves, so nothing is written during questioning
 class WizardSetupState:
     # Starts from the values already in effect, which become both the defaults and the revert target
@@ -4879,7 +4959,7 @@ def _wizard_collect_auth_section(state, input_func=None, getpass_func=None, vali
             if not _wizard_offer_retry("NPSSO code", input_func=input_func):
                 return
             continue
-        state.secret_updates["PSN_NPSSO"] = npsso
+        _wizard_queue_secret(state, "PSN_NPSSO", npsso, input_func=input_func)
         print(f"  PlayStation Network accepted the code, signed in as {account}.")
         return
 
@@ -4906,7 +4986,7 @@ def _wizard_collect_email_section(state, input_func=None, getpass_func=None):
             return
         password = _wizard_ask_secret("SMTP password", getpass_func=getpass_func)
         if password:
-            state.secret_updates["SMTP_PASSWORD"] = password
+            _wizard_queue_secret(state, "SMTP_PASSWORD", password, input_func=input_func)
         outcome = _wizard_smtp_sign_in_accepted({name: state.config_values[name] for name in WIZARD_SMTP_CONFIG_KEYS}, password, input_func=input_func)
         if outcome is None:
             _wizard_disable_email(state)
@@ -5001,7 +5081,7 @@ def _wizard_collect_webhook_section(state, input_func=None, getpass_func=None):
         entered = _wizard_ask_secret("Paste the Discord webhook URL" if provider == "discord" else "Paste the ntfy topic URL or ntfy.sh topic name", getpass_func=getpass_func)
         webhook_url = normalize_ntfy_topic_url(entered) if provider == "ntfy" else str(entered).strip()
         if validate_webhook_url(webhook_url):
-            state.secret_updates["WEBHOOK_URL"] = webhook_url
+            _wizard_queue_secret(state, "WEBHOOK_URL", webhook_url, input_func=input_func)
             break
         # Nothing can be delivered without a destination, so giving up has to stay reachable from the prompt
         if not webhook_url:
@@ -5021,7 +5101,7 @@ def _wizard_collect_webhook_section(state, input_func=None, getpass_func=None):
             token = _wizard_ask_secret("Paste the ntfy access token only", getpass_func=getpass_func)
             if not token or ("\r" not in token and "\n" not in token and not token.casefold().startswith(("bearer ", "basic "))):
                 if token:
-                    state.secret_updates["NTFY_ACCESS_TOKEN"] = token
+                    _wizard_queue_secret(state, "NTFY_ACCESS_TOKEN", token, input_func=input_func)
                 break
             print("  Paste only the access token without a Bearer or Basic prefix.")
             if not _wizard_offer_retry("ntfy access token", input_func=input_func):
@@ -5217,12 +5297,11 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
         print(f"Guide: {QUICK_START_GUIDE_URL}")
         return 1
 
-    if env_file and str(env_file).casefold() == "none":
-        print("--setup needs a dotenv destination. Replace '--env-file none' with a writable path.")
+    try:
+        config_path, env_path = _wizard_destinations(config_file, env_file)
+    except ValueError as exc:
+        print_recovery_advice(classify_recovery_error(context="file.unwritable", detail=str(exc)))
         return 1
-
-    config_path = Path(config_file).expanduser() if config_file else Path.cwd() / DEFAULT_CONFIG_FILENAME
-    env_path = Path(env_file).expanduser() if env_file else Path.cwd() / ".env"
 
     print(colorize("header", "Setup Wizard") + "\n")
     print("This asks a few questions and writes a ready-to-run configuration.")
@@ -5235,6 +5314,16 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     state.config_values["DOTENV_FILE"] = str(env_path)
 
     try:
+        # Asked before anything else, so a config that has to be replaced is agreed to rather than discovered at Save
+        config_existed = Path(config_path).exists()
+        chosen_config = _wizard_choose_config_destination(config_path, input_func=input_func)
+        if chosen_config is None:
+            print("\n" + colorize("warning", "Setup cancelled. Destination files were not changed."))
+            return 1
+        state.config_path = chosen_config
+        # A destination nothing was asked about printed nothing, so the separator would leave a blank gap
+        if config_existed:
+            print()
         _wizard_collect_target_section(state, initial_target, input_func=input_func)
         print()
         _wizard_collect_polling_section(state, input_func=input_func)
@@ -5659,7 +5748,8 @@ def main():
     parser = argparse.ArgumentParser(
         prog="psn_monitor",
         description=("Monitor a PSN user's playing status and send customizable email or webhook alerts [ https://github.com/misiektoja/psn_monitor/ ]"), formatter_class=argparse.RawTextHelpFormatter,
-        epilog=help_examples()
+        epilog=help_examples(),
+        **argparse_color_kwargs()
     )
 
     # Positional

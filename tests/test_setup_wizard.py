@@ -580,3 +580,109 @@ def test_prompts_restore_the_default_interrupt_handler(monkeypatch):
     assert monitor._wizard_input("Prompt: ", input_func=lambda _prompt: "value") == "value"
 
     assert installed == [signal.default_int_handler, signal.getsignal(signal.SIGINT)]
+
+
+# Verifies a destination that cannot be written is refused before the first question is asked
+def test_an_unwritable_destination_is_refused_before_any_question(tmp_path, capsys):
+    def refuse_every_question(prompt=""):
+        raise AssertionError(f"Setup asked a question before checking its destinations: {prompt!r}")
+
+    code = monitor.run_setup_wizard(config_file="/psn_monitor_unwritable_root.conf", env_file=str(tmp_path / ".env"), input_func=refuse_every_question, interactive=True)
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "Configuration destination is not writable" in out
+    assert "To fix:" in out
+
+
+# Verifies a directory given as a destination is refused rather than failing at the save step
+def test_a_directory_destination_is_refused(tmp_path, capsys):
+    code = monitor.run_setup_wizard(config_file=str(tmp_path), env_file=str(tmp_path / ".env"), interactive=True)
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "must be a file path, not a directory" in out
+
+
+# Verifies the disabled config setting is refused, since setup exists to write one
+def test_a_disabled_config_destination_is_refused(tmp_path, capsys):
+    code = monitor.run_setup_wizard(config_file="none", env_file=str(tmp_path / ".env"), interactive=True)
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "--setup needs a config destination" in out
+
+
+# Verifies an existing config is replaced only after the user agrees, and that a backup is kept
+def test_an_existing_config_is_replaced_only_after_it_is_agreed_to(wizard_environment, capsys):
+    config = wizard_environment / "psn_monitor.conf"
+    config.write_text("# earlier config\n", encoding="utf-8")
+
+    code = run_wizard(ScriptedTerminal("y", *happy_path()))
+
+    out = capsys.readouterr().out
+    backups = [path for path in wizard_environment.iterdir() if path.name.startswith("psn_monitor.conf.")]
+    assert code == 0
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == "# earlier config\n"
+    assert "Backup:" in out
+
+
+# Verifies an existing config can be kept by sending the run to another path instead
+def test_an_existing_config_can_be_redirected_to_another_path(wizard_environment):
+    config = wizard_environment / "psn_monitor.conf"
+    config.write_text("# earlier config\n", encoding="utf-8")
+    elsewhere = wizard_environment / "elsewhere.conf"
+
+    code = run_wizard(ScriptedTerminal("n", str(elsewhere), *happy_path()))
+
+    assert code == 0
+    assert config.read_text(encoding="utf-8") == "# earlier config\n"
+    assert f"PSN_USER_ID = '{USER_ID}'" in elsewhere.read_text(encoding="utf-8")
+
+
+# Verifies declining to replace an existing config and naming no alternative ends the run without writing
+def test_declining_an_existing_config_without_an_alternative_writes_nothing(wizard_environment, capsys):
+    config = wizard_environment / "psn_monitor.conf"
+    config.write_text("# earlier config\n", encoding="utf-8")
+
+    code = run_wizard(ScriptedTerminal("n", ""))
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert config.read_text(encoding="utf-8") == "# earlier config\n"
+    assert not (wizard_environment / ".env").exists()
+    assert "Setup cancelled. Destination files were not changed." in out
+
+
+# Returns the happy-path answers with one extra answer for the dotenv replace prompt after the SMTP password
+def answers_with_smtp_replace(replace):
+    answers = list(happy_path())
+    answers.insert(11, replace)
+    return answers
+
+
+# Verifies a secret already in the dotenv file is kept when the replacement is declined
+def test_an_existing_dotenv_secret_is_kept_unless_the_replacement_is_confirmed(wizard_environment):
+    env_file = wizard_environment / ".env"
+    env_file.write_text('SMTP_PASSWORD="original"\n', encoding="utf-8")
+
+    terminal = ScriptedTerminal(*answers_with_smtp_replace("n"))
+    code = run_wizard(terminal)
+
+    written = env_file.read_text(encoding="utf-8")
+    assert code == 0
+    assert terminal.asked("The dotenv file already contains SMTP_PASSWORD. Replace that value?")
+    assert 'SMTP_PASSWORD="original"' in written
+    assert SMTP_SECRET not in written
+
+
+# Verifies a confirmed replacement does reach the dotenv file
+def test_a_confirmed_dotenv_secret_replacement_is_written(wizard_environment):
+    env_file = wizard_environment / ".env"
+    env_file.write_text('SMTP_PASSWORD="original"\n', encoding="utf-8")
+
+    code = run_wizard(ScriptedTerminal(*answers_with_smtp_replace("y")))
+
+    assert code == 0
+    assert f'SMTP_PASSWORD="{SMTP_SECRET}"' in env_file.read_text(encoding="utf-8")
