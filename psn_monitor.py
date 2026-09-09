@@ -1374,6 +1374,11 @@ def write_generated_config(output_file, content, force=False, interactive=None, 
 def resolve_status_file(psn_user_id):
     if PSN_STATUS_FILE:
         return os.path.expanduser(PSN_STATUS_FILE)
+    return default_status_file(psn_user_id)
+
+
+# Returns the status file name a target gets when no path is configured
+def default_status_file(psn_user_id):
     return f"psn_{psn_user_id}_last_status.json"
 
 
@@ -5673,7 +5678,7 @@ def _wizard_print_setup_summary(state):
         ("Webhook alerts", ", ".join(enabled_webhook) if enabled_webhook else "none"),
         ("Output log", "disabled" if state.config_values.get("DISABLE_LOGGING") else "enabled"),
         ("CSV output", state.config_values.get("CSV_FILE") or "disabled"),
-        ("Status file", state.config_values.get("PSN_STATUS_FILE") or "default"),
+        ("Status file", state.config_values.get("PSN_STATUS_FILE") or (default_status_file(state.target) if state.target else "psn_<psn_user_id>_last_status.json")),
         ("Config destination", state.config_path),
         ("Dotenv destination", state.env_path),
         ("Install method", install_method_display_name()),

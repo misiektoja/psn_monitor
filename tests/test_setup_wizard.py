@@ -1041,3 +1041,11 @@ def test_the_email_question_defaults_to_the_saved_alerts(tmp_path, monkeypatch):
     state.config_values.update({"ERROR_NOTIFICATION": False, "SMTP_HOST": "your_smtp_server_ssl", "GAME_CHANGE_NOTIFICATION": True})
     monitor._wizard_collect_email_section(state)
     assert seen[-1] == ("Configure email notifications?", True)
+
+
+# Verifies the summary names the status file the run will use, built from the target when no path was given
+def test_the_summary_names_the_default_status_file(capsys):
+    run_wizard(ScriptedTerminal(*happy_path()))
+
+    summary = capsys.readouterr().out.rsplit("Setup summary", 1)[1]
+    assert f"Status file:                    psn_{USER_ID}_last_status.json" in summary
