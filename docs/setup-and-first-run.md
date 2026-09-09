@@ -8,7 +8,7 @@ The quickest way to a working setup is the guided one:
 psn_monitor --setup
 ```
 
-It asks for the account to monitor, how often to check it, your [npsso code](#psn-npsso-code), whether to send email and webhook alerts and where the output goes, then writes a ready-to-run configuration file and a separate dotenv file for the secrets. Both destinations are checked before the first question, so an unwritable path or a directory given by mistake is reported straight away rather than after you have answered everything.
+It asks for the account to monitor, how often to check it, your [npsso code](#psn-npsso-code), whether to send email and webhook alerts and where the output goes, then writes a ready-to-run configuration file and a separate dotenv file for the secrets. Both destinations are checked before the first question, so an unwritable path or a directory given by mistake is reported straight away rather than after you have answered everything. `--setup` needs somewhere to put both files, so it refuses `--config-file none` and `--env-file none`.
 
 Durations accept `120`, `2m`, `1.5h`, `1h 30m` or `1d`.
 
