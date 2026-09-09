@@ -4591,10 +4591,10 @@ def build_startup_summary(psn_user_id=None, config_path=None, env_path=None, log
         StartupSummaryRow("Output logging", str(log_path) if log_path else "Disabled"),
         StartupSummaryRow("Config", str(config_path) if config_path else "None", concise=True),
         StartupSummaryRow("Dotenv", str(env_path) if env_path else "None", concise=True),
-        StartupSummaryRow("Status file", resolve_status_file(psn_user_id) if psn_user_id else "None"),
         # Each optional feature earns a concise row only once it is actually switched on
         StartupSummaryRow("Liveness output", display_time(LIVENESS_CHECK_INTERVAL) if LIVENESS_CHECK_INTERVAL else "Disabled", concise=bool(LIVENESS_CHECK_INTERVAL)),
         StartupSummaryRow("CSV output", CSV_FILE or "Disabled", concise=bool(CSV_FILE)),
+        StartupSummaryRow("Status file", resolve_status_file(psn_user_id) if psn_user_id else "None"),
         StartupSummaryRow("Terminal truncation", f"{TRUNCATE_CHARS} chars" if TRUNCATE_CHARS else "Disabled", concise=bool(TRUNCATE_CHARS)),
         StartupSummaryRow("Local timezone", LOCAL_TIMEZONE),
         StartupSummaryRow("Install method", install_method_display_name()),

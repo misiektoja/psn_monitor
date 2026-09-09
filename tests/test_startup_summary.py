@@ -376,3 +376,11 @@ def test_each_secret_source_is_reported_under_its_own_row(pm_module, monkeypatch
     for other in ("Secrets from dotenv", "Secrets from environment", "Secrets from config file", "Secrets from command line"):
         if other != label:
             assert row_named(rows, other).value == "None"
+
+
+# Verifies the state file this tool generates sits with the other generated files rather than beside the dotenv row
+def test_the_generated_state_file_follows_the_csv_row(summary_rows):
+    labels = [row.label for row in summary_rows]
+
+    assert labels[labels.index("CSV output") + 1] == "Status file"
+    assert labels.index("Status file") < labels.index("Terminal truncation")

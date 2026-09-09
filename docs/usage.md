@@ -102,7 +102,7 @@ Monitoring mode prints the settings that are actually in effect before the first
 
 Optional features appear once you switch them on, and `TLS verification` appears here whenever certificate checking is off.
 
-`--verbose` or `--debug` replaces this with the complete list: the log file, the status file, the CSV file, the install method, which secrets came from the dotenv file, the environment or the configuration file, the resolved time zone, the liveness interval, the truncation width, whether colour is actually in use and the two flags themselves.
+`--verbose` or `--debug` replaces this with the complete list, in the order it prints: the log file, the liveness interval, the CSV file, the status file, the truncation width, the resolved time zone, the install method, which secrets came from the dotenv file, the environment, the configuration file or the command line, whether certificate checking is on, how log separators are written, whether colour is actually in use and the two flags themselves.
 
 The sibling monitors print the same rows in the same order, so a setting sits in the same place whichever of them you are reading.
 
