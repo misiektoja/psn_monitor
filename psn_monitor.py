@@ -4525,7 +4525,7 @@ def offer_doctor_delivery_tests(report):
     if report.webhook_ready:
         provider = webhook_provider_display_name()
         if ask_yes_no(f"Send one test webhook through {provider} now? This will publish a real notification"):
-            delivered = send_webhook("psn_monitor: doctor test webhook", "This test notification was sent after approval in --doctor. Your webhook settings work.", "status", force=True) == 0
+            delivered = send_webhook("psn_monitor: doctor test webhook", "This test notification was sent after approval in --doctor. Your webhook delivery settings work.", "status", force=True) == 0
             check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "PASS" if delivered else "FAIL", f"Doctor test webhook through {provider} delivered" if delivered else f"Doctor test webhook through {provider} delivery failed", f"One real test notification was sent to {webhook_destination_host()}" if delivered else "The approved test webhook could not be delivered")
         else:
             check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "SKIP", f"Test webhook through {provider} was not sent")
@@ -6238,7 +6238,7 @@ def main():
 
     if args.send_test_email:
         print("* Sending test email notification ...\n")
-        if send_email("psn_monitor: test email", "This is test email - your SMTP settings seems to be correct !", "", SMTP_SSL, smtp_timeout=5) == 0:
+        if send_email("psn_monitor: test email", "This test email was sent by --send-test-email. Your SMTP settings work.", "", SMTP_SSL, smtp_timeout=5) == 0:
             print("* Email sent successfully !")
         else:
             sys.exit(1)
@@ -6247,7 +6247,7 @@ def main():
     if args.send_test_webhook:
         print(f"* Sending test webhook notification through {webhook_provider_display_name()} to {webhook_destination_host()} ...\n")
         # Forced past the alert settings, because the point of the test is the destination, not the choices
-        if send_webhook("psn_monitor: test webhook", "This is a test notification - your webhook settings seem to be correct !", "status", force=True) == 0:
+        if send_webhook("psn_monitor: test webhook", "This test notification was sent by --send-test-webhook. Your webhook settings work.", "status", force=True) == 0:
             print("* Webhook sent successfully !")
         else:
             sys.exit(1)

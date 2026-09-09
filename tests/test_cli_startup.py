@@ -676,3 +676,14 @@ def test_a_failed_test_webhook_exits_non_zero(pm_module, monkeypatch):
     monkeypatch.setattr(pm_module, "send_webhook", lambda *args, **kwargs: 1)
 
     assert run_main(pm_module, monkeypatch, [USER_ID, "--send-test-webhook"]) == 1
+
+
+# Verifies both test commands carry the subject, title and body shared with the sibling monitors
+def test_the_test_messages_use_the_shared_wording(pm_module, monkeypatch, sent_emails, sent_webhooks):
+    monkeypatch.setattr(pm_module, "WEBHOOK_URL", WEBHOOK_URL)
+
+    assert run_main(pm_module, monkeypatch, [USER_ID, "--send-test-email"]) == 0
+    assert run_main(pm_module, monkeypatch, [USER_ID, "--send-test-webhook"]) == 0
+
+    assert (sent_emails[0]["subject"], sent_emails[0]["body"]) == ("psn_monitor: test email", "This test email was sent by --send-test-email. Your SMTP settings work.")
+    assert (sent_webhooks[0]["title"], sent_webhooks[0]["description"]) == ("psn_monitor: test webhook", "This test notification was sent by --send-test-webhook. Your webhook settings work.")
