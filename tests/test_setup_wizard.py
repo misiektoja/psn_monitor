@@ -1020,3 +1020,24 @@ def test_a_failed_doctor_run_removes_the_launch_offer(monkeypatch, capsys):
     assert launched == []
     assert not terminal.asked("Start monitoring now?")
     assert "After Doctor passes, start monitoring:" in capsys.readouterr().out
+
+
+# Verifies the email question defaults to the saved alerts, so a rerun over configured email proposes keeping it
+def test_the_email_question_defaults_to_the_saved_alerts(tmp_path, monkeypatch):
+    state = monitor.WizardSetupState(tmp_path / "psn_monitor.conf", tmp_path / ".env", dict(vars(monitor)))
+    seen = []
+    monkeypatch.setattr(monitor, "_wizard_ask_yes_no", lambda question, default=False, **kwargs: seen.append((question, default)) or False)
+
+    state.config_values.update({key: False for key in monitor.WIZARD_EMAIL_NOTIFICATION_KEYS})
+    state.config_values.update({"ERROR_NOTIFICATION": True, "SMTP_HOST": "your_smtp_server_ssl"})
+    monitor._wizard_collect_email_section(state)
+    assert seen == [("Configure email notifications?", False)]
+
+    # A declined answer clears the section, so each case seeds the settings it needs again
+    state.config_values.update({"ERROR_NOTIFICATION": True, "SMTP_HOST": "smtp.example.test"})
+    monitor._wizard_collect_email_section(state)
+    assert seen[-1] == ("Configure email notifications?", True)
+
+    state.config_values.update({"ERROR_NOTIFICATION": False, "SMTP_HOST": "your_smtp_server_ssl", "GAME_CHANGE_NOTIFICATION": True})
+    monitor._wizard_collect_email_section(state)
+    assert seen[-1] == ("Configure email notifications?", True)
