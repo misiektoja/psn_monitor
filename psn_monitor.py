@@ -1070,6 +1070,20 @@ def secret_is_set(value):
     return isinstance(value, str) and bool(value.strip()) and not value.startswith("your_")
 
 
+# The settings a sign-in needs before a password can be checked against the mail server
+MAIL_SIGN_IN_SETTINGS = ("SMTP_HOST", "SMTP_USER", "SENDER_EMAIL", "RECEIVER_EMAIL")
+
+
+# Returns the mail settings a sign-in needs that are still empty or still hold their shipped placeholder
+def mail_sign_in_settings_missing():
+    return [name for name in MAIL_SIGN_IN_SETTINGS if not secret_is_set(str(globals().get(name) or ""))]
+
+
+# Joins setting names into the phrase a message reads out, for example "SMTP_HOST and SMTP_USER"
+def join_setting_names(names, conjunction):
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} {conjunction} {names[-1]}"
+
+
 # Returns every redactable secret value currently known to the process, longest first so overlaps redact fully
 def known_secret_values():
     values = [value for key in SECRET_KEYS for value in (globals().get(key),) if secret_is_set(value) and len(value) >= MIN_REDACTABLE_SECRET_LENGTH]
@@ -1502,11 +1516,14 @@ _STYLE_CODES = {
     "bright_white": "97",
 }
 
-# Whole-line styles, listed so the palette test can prove no value colour disappears inside one of them
-BLOCK_STYLE_PARTS = ("error", "warning", "signal", "email", "webhook", "info")
+# Whole-line styles, listed so the palette test can prove no value colour disappears inside one of them.
+# Warnings and signals are not on this list: both are yellow, which is the colour of the words reporting an
+# activity change, so they mark their own opening words instead of painting the line
+BLOCK_STYLE_PARTS = ("error", "email", "webhook", "info")
 
-# Parts that carry a name supplied by PlayStation Network or by the user, which a block style must never hide
-NAME_STYLE_PARTS = ("username", "id", "game", "platform", "trophy", "link")
+# Parts that carry a name supplied by PlayStation Network or by the user, or that report a change, which a
+# block style must never hide
+NAME_STYLE_PARTS = ("username", "id", "game", "platform", "trophy", "status_change", "link")
 
 # Output labels whose value is coloured with one theme style, longest label first so a prefix cannot win
 _LABEL_STYLES = (
@@ -1547,6 +1564,10 @@ _ERROR_LINE_RE = re.compile(r"^\s*\*\s*(?:error|critical)\b", re.IGNORECASE)
 _WARNING_LINE_RE = re.compile(r"^\s*\*\s*(?:warning|caution)\b", re.IGNORECASE)
 _INFO_LINE_RE = re.compile(r"^\s*\*\s*(?:info|note)\b", re.IGNORECASE)
 _SIGNAL_LINE_RE = re.compile(r"^\s*\*\s*signal\b.*\breceived\b", re.IGNORECASE)
+
+# The opening word of a warning and the name of a reported signal, marked instead of painting the line
+_WARNING_LABEL_RE = re.compile(r"^\s*\*+\s*(Warning:|Caution:)")
+_SIGNAL_NAME_RE = re.compile(r"(?<=^\* Signal )(\w+)(?= received$)")
 
 # Doctor status markers, coloured with the same theme parts the sibling monitors use for them
 _DOCTOR_MARK_RE = re.compile(r"^\[(PASS|WARN|FAIL|SKIP)\]")
@@ -1822,15 +1843,15 @@ def _colorize_line(line):
     line = _sub_outside_color(_GAME_STOPPED_RE, lambda mo: colorize("status_inactive", mo.group(0)), line)
     line = _sub_outside_color(_STATUS_CHANGE_RE, lambda mo: colorize("status_change", mo.group(0)), line)
 
+    # Mark the opening word of a warning and the name of a reported signal, rather than painting the whole line
+    line = _sub_outside_color(_WARNING_LABEL_RE, lambda mo: mo.group(0)[:mo.start(1) - mo.start(0)] + colorize("warning", mo.group(1)), line)
+    line = _sub_outside_color(_SIGNAL_NAME_RE, lambda mo: colorize("signal", mo.group(0)), line)
+
     # Whole-line styling last, so the colours applied above survive the nesting logic
     if lowered.startswith("to fix:") or _INFO_LINE_RE.match(line):
         line = _apply_style_nested(line, "info")
     elif _ERROR_LINE_RE.match(line):
         line = _apply_style_nested(line, "error")
-    elif _WARNING_LINE_RE.match(line):
-        line = _apply_style_nested(line, "warning")
-    elif _SIGNAL_LINE_RE.match(line):
-        line = _apply_style_nested(line, "signal")
     elif "sending email" in lowered:
         line = _apply_style_nested(line, "email")
     elif "sending webhook" in lowered:
@@ -5505,8 +5526,10 @@ def _wizard_collect_webhook_section(state, input_func=None, getpass_func=None):
             if validate_webhook_url(webhook_url):
                 state.secret_updates["WEBHOOK_URL"] = webhook_url
                 break
-            # Nothing can be delivered without a destination, so giving up has to stay reachable from the prompt
-            if not webhook_url:
+            # Nothing can be delivered without a destination, so giving up has to stay reachable from the prompt.
+            # The branch is chosen by what was typed rather than by the normalized value, since a rejected ntfy
+            # topic normalizes to an empty string and would otherwise be reported as nothing entered
+            if not str(entered).strip():
                 if not _wizard_offer_retry("webhook URL", "Webhook alerts stay off until one is set", input_func=input_func):
                     _wizard_disable_webhook(state)
                     return
@@ -5985,22 +6008,26 @@ def update_dotenv_values(path, updates):
             if key in replaced:
                 rewritten = ""
                 break
+            replaced.add(key)
+            # A secret cleared by its owner is removed rather than emptied, so a disabled value cannot linger here
+            if not updates[key]:
+                rewritten = ""
+                break
             # An already exported line is rewritten in place. Appending a second assignment would leave the
             # old credential on disk, with only the load order deciding which one wins
             rewritten = render_dotenv_assignment(key, updates[key], match.group(1))
-            replaced.add(key)
             break
         if rewritten == "":
             continue
         lines.append(line if rewritten is None else rewritten)
     for key, value in updates.items():
-        if key not in replaced:
+        if key not in replaced and value:
             lines.append(render_dotenv_assignment(key, value))
     # Written through a temporary file, so an interrupted write cannot leave the file without its secrets.
     # No backup is taken here: a copy of the credential being replaced is the one thing not worth keeping
     write_file_atomically(target, "\n".join(lines) + "\n")
-    for key in updates:
-        verbose_print(f"Saved {key} in '{target}'")
+    for key, value in updates.items():
+        verbose_print(f"{'Saved' if value else 'Removed'} {key} in '{target}'")
     return str(target)
 
 
@@ -6156,6 +6183,11 @@ def run_set_webhook_url(env_file=None, config_path=None, psn_user_id=None, inter
 
 # Stores one SMTP password in the dotenv file after the mail server has actually accepted it
 def run_set_smtp_password(env_file=None, config_path=None, psn_user_id=None, interactive=None, input_func=None, getpass_func=None):
+    # Checked before the prompts, so nobody types a password only to be told the mail server was never configured
+    missing = mail_sign_in_settings_missing()
+    if missing:
+        names = join_setting_names(missing, "and")
+        raise RecoveryError(make_recovery_advice("smtp.invalid", f"The mail server settings are incomplete, {names} {'is' if len(missing) == 1 else 'are'} not set", recovery_fix_with_guide(f"Set {names} in the config file, or run --setup, then run --set-smtp-password again", SMTP_GUIDE_URL), False))
     return run_set_secret("SMTP_PASSWORD", "--set-smtp-password", "SMTP password", SMTP_GUIDE_URL, f"* The password is checked by signing in to {SMTP_HOST} as {SMTP_USER}. Nothing is sent", "Enter the SMTP password (input hidden): ", smtp_sign_in, lambda user: f"The mail server accepted the password for {user}", env_file, config_path, psn_user_id, interactive, input_func, getpass_func)
 
 
@@ -6676,7 +6708,9 @@ def main():
 
     if args.check_interval:
         PSN_CHECK_INTERVAL = args.check_interval
-        LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_INTERVAL > 0 else 0
+
+    # The interval can come from a config file, so the reminder is settled once every layer has been applied
+    LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_INTERVAL > 0 else 0
 
     if args.active_interval:
         PSN_ACTIVE_CHECK_INTERVAL = args.active_interval
