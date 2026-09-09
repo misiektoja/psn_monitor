@@ -227,14 +227,14 @@ def test_interval_flags_override_the_configuration(pm_module, monkeypatch, monit
 
     assert pm_module.PSN_CHECK_INTERVAL == 600
     assert pm_module.PSN_ACTIVE_CHECK_INTERVAL == 30
-    assert pm_module.LIVENESS_CHECK_COUNTER == pm_module.LIVENESS_CHECK_INTERVAL / 600
+    assert pm_module.LIVENESS_REMINDER_SECONDS == pm_module.LIVENESS_CHECK_INTERVAL
 
 
-# Verifies a check interval longer than the liveness interval still waits one whole check
-def test_a_long_check_interval_leaves_the_liveness_counter_at_one_check(pm_module, monkeypatch, monitor_calls):
+# Verifies a check interval longer than the liveness interval leaves the configured reminder alone
+def test_a_long_check_interval_keeps_the_configured_liveness_interval(pm_module, monkeypatch, monitor_calls):
     assert run_main(pm_module, monkeypatch, ["-c", "86400", USER_ID]) == 0
 
-    assert pm_module.LIVENESS_CHECK_COUNTER == 1
+    assert pm_module.LIVENESS_REMINDER_SECONDS == pm_module.LIVENESS_CHECK_INTERVAL
 
 
 # Verifies the notification flags switch on exactly the alerts they name

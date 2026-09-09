@@ -393,10 +393,8 @@ EXPORTED_SECRET_KEYS = frozenset()
 # Default value for timeouts in alarm signal handler; in seconds
 FUNCTION_TIMEOUT = 15
 
-# Whole checks, so a check interval longer than the liveness interval still waits one check instead of reporting on every check
-LIVENESS_CHECK_COUNTER = max(1, -(-LIVENESS_CHECK_INTERVAL // PSN_CHECK_INTERVAL)) if LIVENESS_CHECK_INTERVAL else 0
 # Seconds rather than checks, because a failing run usually retries on a different interval than a healthy one
-LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_COUNTER else 0
+LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_INTERVAL > 0 else 0
 
 stdout_bck = None
 csvfieldnames = ['Date', 'Status', 'Game name']
@@ -3658,7 +3656,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
     mark_monitoring_started()
 
-    alive_counter = 0
+    alive_since = int(time.time())
     status_ts = 0
     status_ts_old = 0
     status_online_start_ts = 0
@@ -3906,7 +3904,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
     print_cur_ts("\nTimestamp:\t\t\t")
 
-    alive_counter = 0
+    alive_since = int(time.time())
     error_email_sent = False
     error_webhook_sent = False
 
@@ -3915,6 +3913,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     outage = OutageReporter()
     # A recovery is only worth reporting when the failure it recovers from was reported or alerted on
     failure_announced = False
+    # A session rebuild is worth one line per outage, since it repeats on its own cooldown while the failure lasts
+    rebuild_announced = False
     last_recreate_ts = 0
     recreate_cooldown = 300  # avoid recreating PSNAWP session too frequently
     last_npsso_seen = PSN_NPSSO
@@ -4007,6 +4007,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             error_webhook_sent = False
             error_streak = 0
             failure_announced = False
+            rebuild_announced = False
 
         # Sometimes PSN network functions halt, so we use alarm signal functionality to kill it inevitably, not available on Windows
         if platform.system() != 'Windows':
@@ -4067,8 +4068,9 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 print_outage_liveness(psn_user_id, advice, outage.since)
                 failure_announced = True
 
-            if error_streak >= policy["recreate_after"] and _recreate_session_rate_limited():
+            if error_streak >= policy["recreate_after"] and _recreate_session_rate_limited() and not rebuild_announced:
                 print(f"* Rebuilt the PSNAWP session after {error_streak} failed {'check' if error_streak == 1 else 'checks'} in a row")
+                rebuild_announced = True
 
             if error_streak >= alert_after and ((ERROR_NOTIFICATION and not error_email_sent) or (webhook_event_enabled("error") and not error_webhook_sent)):
                 email_delivered, webhook_delivered = send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice, error_streak), email_enabled=ERROR_NOTIFICATION and not error_email_sent, webhook_enabled=webhook_event_enabled("error") and not error_webhook_sent)
@@ -4089,11 +4091,13 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 # A streak nobody was told about needs no recovery line, since nothing reported it as broken
                 if failure_announced and outage_lasted is not None:
                     print_outage_recovery(psn_user_id, outage_lasted)
+                    alive_since = int(time.time())
             recovery_hints.reset()
             error_email_sent = False
             error_webhook_sent = False
             error_streak = 0
             failure_announced = False
+            rebuild_announced = False
 
         finally:
             if platform.system() != 'Windows':
@@ -4222,7 +4226,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             print_cur_ts("Timestamp:\t\t\t")
 
         if change:
-            alive_counter = 0
+            alive_since = int(time.time())
 
             try:
                 if csv_file_name:
@@ -4233,11 +4237,10 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
         status_old = status
         game_name_old = game_name
-        alive_counter += 1
 
-        if LIVENESS_CHECK_COUNTER and alive_counter >= LIVENESS_CHECK_COUNTER:
+        if LIVENESS_REMINDER_SECONDS and int(time.time()) - alive_since >= LIVENESS_REMINDER_SECONDS:
             print_liveness_banner(f"Monitoring healthy for {psn_user_id}. The user is {status or 'unknown'} with no activity change since the last check")
-            alive_counter = 0
+            alive_since = int(time.time())
 
         sleep_interval = get_sleep_interval()
         debug_print("Completed check", check=f"#{check_number}", user=psn_user_id, status=status or "unknown", game=game_name or None, next=display_time(sleep_interval))
@@ -5947,7 +5950,7 @@ def run_set_smtp_password(env_file=None, config_path=None, psn_user_id=None, int
 
 
 def main():
-    global CLI_CONFIG_PATH, CONFIG_DISCOVERY_DISABLED, DOTENV_FILE, PSN_STATUS_FILE, LOCAL_TIMEZONE, LOCAL_TIMEZONE_STATE, LIVENESS_CHECK_COUNTER, LIVENESS_REMINDER_SECONDS, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, COLORED_OUTPUT, WEBHOOK_ENABLED, stdout_bck, DEBUG_MODE
+    global CLI_CONFIG_PATH, CONFIG_DISCOVERY_DISABLED, DOTENV_FILE, PSN_STATUS_FILE, LOCAL_TIMEZONE, LOCAL_TIMEZONE_STATE, LIVENESS_REMINDER_SECONDS, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, COLORED_OUTPUT, WEBHOOK_ENABLED, stdout_bck, DEBUG_MODE
 
     if "--generate-config" in sys.argv:
         config_content = CONFIG_BLOCK.strip("\n") + "\n"
@@ -6463,8 +6466,7 @@ def main():
 
     if args.check_interval:
         PSN_CHECK_INTERVAL = args.check_interval
-        LIVENESS_CHECK_COUNTER = max(1, -(-LIVENESS_CHECK_INTERVAL // PSN_CHECK_INTERVAL)) if LIVENESS_CHECK_INTERVAL else 0
-        LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_COUNTER else 0
+        LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_INTERVAL > 0 else 0
 
     if args.active_interval:
         PSN_ACTIVE_CHECK_INTERVAL = args.active_interval

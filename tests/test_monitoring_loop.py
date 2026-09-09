@@ -302,7 +302,6 @@ def test_longer_network_outage_recreates_the_session(pm_module, psn_session, fak
 
 # Verifies a lasting outage reports itself once and then only on the liveness cadence
 def test_a_lasting_outage_rides_the_liveness_cadence(pm_module, psn_session, fake_clock, monkeypatch, capsys):
-    monkeypatch.setattr(pm_module, "LIVENESS_CHECK_COUNTER", 2)
     monkeypatch.setattr(pm_module, "LIVENESS_REMINDER_SECONDS", 2 * pm_module.FUNCTION_TIMEOUT)
     outage = [requests.exceptions.ConnectionError("connection reset by peer")] * 8
     psn_session([presence_payload(status="offline"), *outage])
@@ -327,6 +326,16 @@ def test_the_outage_reminder_follows_the_clock_not_the_check_count(pm_module, fa
         outcomes.append(reporter.failed(advice, 900))
 
     assert outcomes.count("degraded") == 1
+
+
+# Verifies a long outage announces the session rebuild once rather than on every cooldown
+def test_the_session_rebuild_is_announced_once_per_outage(pm_module, psn_session, fake_clock, monkeypatch, capsys):
+    monkeypatch.setattr(pm_module, "LIVENESS_REMINDER_SECONDS", 43200)
+    psn_session([presence_payload(status="offline"), *[requests.exceptions.ConnectionError("connection reset by peer")] * 60])
+
+    run_monitor(pm_module)
+
+    assert capsys.readouterr().out.count("* Rebuilt the PSNAWP session") == 1
 
 
 # Verifies rebuilding the session closes the HTTP session of the replaced client instead of leaking its connection pool
@@ -414,7 +423,7 @@ def test_a_verbose_notice_stays_bare_on_the_startup_screen(pm_module, monkeypatc
 
 # Verifies the liveness line is printed while an offline user produces no other output
 def test_liveness_check_reports_the_loop_is_alive(pm_module, psn_session, fake_clock, monkeypatch, capsys):
-    monkeypatch.setattr(pm_module, "LIVENESS_CHECK_COUNTER", 2)
+    monkeypatch.setattr(pm_module, "LIVENESS_REMINDER_SECONDS", 2 * pm_module.PSN_CHECK_INTERVAL)
     psn_session([presence_payload(status="offline")] * 4)
 
     run_monitor(pm_module)
@@ -422,9 +431,19 @@ def test_liveness_check_reports_the_loop_is_alive(pm_module, psn_session, fake_c
     assert "Liveness check, timestamp:" in capsys.readouterr().out
 
 
+# Verifies the banner follows the clock, so a user polled on the shorter active interval is not reminded more often
+def test_the_liveness_banner_follows_the_clock_not_the_check_count(pm_module, psn_session, fake_clock, monkeypatch, capsys):
+    monkeypatch.setattr(pm_module, "LIVENESS_REMINDER_SECONDS", 4 * pm_module.PSN_ACTIVE_CHECK_INTERVAL)
+    psn_session([presence_payload(status="online")] * 6)
+
+    run_monitor(pm_module)
+
+    assert capsys.readouterr().out.count("Monitoring healthy for") == 1
+
+
 # Verifies an online user still reports the liveness line, since nothing changed there either
 def test_liveness_check_reports_an_online_user(pm_module, psn_session, fake_clock, monkeypatch, capsys):
-    monkeypatch.setattr(pm_module, "LIVENESS_CHECK_COUNTER", 2)
+    monkeypatch.setattr(pm_module, "LIVENESS_REMINDER_SECONDS", 2 * pm_module.PSN_ACTIVE_CHECK_INTERVAL)
     monkeypatch.setattr(pm_module, "VERBOSE_MODE", True)
     psn_session([presence_payload(status="online")] * 4)
 
@@ -438,7 +457,7 @@ def test_liveness_check_reports_an_online_user(pm_module, psn_session, fake_cloc
 
 # Verifies the banner explains itself without --verbose too, so a plain run never prints a bare timestamp
 def test_the_liveness_banner_explains_itself_without_diagnostics(pm_module, psn_session, fake_clock, monkeypatch, capsys):
-    monkeypatch.setattr(pm_module, "LIVENESS_CHECK_COUNTER", 2)
+    monkeypatch.setattr(pm_module, "LIVENESS_REMINDER_SECONDS", 2 * pm_module.PSN_CHECK_INTERVAL)
     monkeypatch.setattr(pm_module, "VERBOSE_MODE", False)
     psn_session([presence_payload()] * 4)
 
