@@ -4459,8 +4459,9 @@ def render_doctor_sections(report):
             lines.append(f"[{check.status}] {check.label}")
             if check.detail:
                 lines.append(f"  {check.detail}")
-            if check.advice is not None and check.status in ("FAIL", "WARN"):
-                lines.append(f"To fix: {check.advice.fix}")
+            if check.advice is not None and check.status != "PASS":
+                # The fix carries its own guide line, so each line is indented on its own
+                lines.extend(f"  {advice_line}" for advice_line in f"To fix: {check.advice.fix}".splitlines())
     return sanitize_error_text("\n".join(lines))
 
 

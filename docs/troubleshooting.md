@@ -18,7 +18,7 @@ The report opens with the detected install method, then five sections, each row 
 * **Target**: whether the monitored PlayStation ID exists and shares its presence with your account
 * **Notifications**: whether email and webhook alerts can fire. The email row signs in to the configured SMTP server without sending a message, the webhook row checks the destination and headers without contacting the service, and each ready row lists the alert categories that channel would deliver
 
-Rows that are not a pass carry the same `To fix:` and `Guide:` lines described in [Error Messages and Recovery](#error-messages-and-recovery). Secrets are reported by name and never by value, which makes the whole report safe to paste into a bug report.
+Every `[WARN]` and `[FAIL]` row carries the same `To fix:` and `Guide:` lines described in [Error Messages and Recovery](#error-messages-and-recovery), indented under the marker they belong to. A `[SKIP]` row names a check that could not run and says why. Secrets are reported by name and never by value, which makes the whole report safe to paste into a bug report.
 
 If a channel passes and you are on an interactive terminal, the doctor offers to send one real test email and one real test webhook. Each is approved separately, and nothing is delivered without a `y`.
 
