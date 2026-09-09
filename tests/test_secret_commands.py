@@ -402,3 +402,17 @@ def test_the_progress_line_names_the_dotenv_file_not_its_path(command_name, subj
 
     line = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("* Checking the entered"))
     assert line == f"* Checking the entered {subject} before changing the dotenv file ..."
+
+
+# Verifies the printed next steps carry a target this run was given and no placeholder when there is none
+def test_the_next_steps_carry_a_real_target_or_none(tmp_path, capsys):
+    env_file = tmp_path / ".env"
+
+    monitor.print_secret_next_steps(env_file)
+    without_target = capsys.readouterr().out
+    monitor.print_secret_next_steps(env_file, psn_user_id="someone")
+    with_target = capsys.readouterr().out
+
+    assert "<psn_user_id>" not in without_target
+    assert "psn_monitor --doctor --env-file" in without_target.replace("python3 ", "").replace(".py", "")
+    assert "someone" in with_target

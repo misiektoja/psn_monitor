@@ -21,7 +21,7 @@ The report opens with the detected install method, then six sections, each row m
 
 Every `[WARN]` and `[FAIL]` row carries the `To fix:` line described in [Error Messages and Recovery](#error-messages-and-recovery), indented under the marker it belongs to, plus a `Guide:` link when a documentation page covers that row. A `[SKIP]` row names a check that could not run and says why. Secrets are reported by name and never by value, which makes the whole report safe to paste into a bug report.
 
-If a channel passes and you are on an interactive terminal, the doctor offers to send one real test email and one real test webhook. Each is approved separately, and nothing is delivered without a `y`.
+If a channel passes and you are on an interactive terminal, the doctor offers to send one real test email and one real test webhook. Each is approved separately, and nothing is delivered without a `y`. Ctrl+C at either prompt ends the run rather than declining one test and asking the next.
 
 The report ends with a **Next steps** block naming the command that starts monitoring, carrying the same `--config-file` and `--env-file` this run checked. While a check is failing it asks for the failures first.
 
