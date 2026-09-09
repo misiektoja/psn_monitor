@@ -142,6 +142,23 @@ def test_the_master_switch_turns_every_alert_off(pm_module, monkeypatch):
     assert [pm_module.webhook_event_enabled(name) for name in ("status", "game", "error")] == [True, True, True]
 
 
+# Verifies a disabled alert type is recorded as a debug trace, since it repeats on every notification
+def test_a_disabled_alert_type_is_traced_in_debug_only(pm_module, monkeypatch, capsys):
+    monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", False)
+    monkeypatch.setattr(pm_module, "VERBOSE_MODE", True)
+    monkeypatch.setattr(pm_module, "DEBUG_MODE", False)
+
+    assert pm_module.send_webhook("alert", "body", "status") == 1
+    assert capsys.readouterr().out == ""
+
+    monkeypatch.setattr(pm_module, "DEBUG_MODE", True)
+
+    assert pm_module.send_webhook("alert", "body", "status") == 1
+
+    output = capsys.readouterr().out
+    assert "Webhook delivery: outcome=skipped, type=status, reason=alerts are disabled" in output
+
+
 # Verifies an alert type nothing defines cannot switch itself on
 def test_an_unknown_alert_type_is_never_enabled(pm_module, monkeypatch):
     monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)

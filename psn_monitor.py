@@ -2373,7 +2373,7 @@ def post_webhook_request(**request_kwargs):
 # Sends one webhook through its own bounded retry path, which never shares the PlayStation Network retry policy
 def send_webhook(title, description, notification_type="status", force=False, sleeper=None):
     if not force and not webhook_event_enabled(notification_type):
-        verbose_print(f"Webhook delivery skipped because {notification_type} alerts are disabled")
+        debug_print("Webhook delivery", outcome="skipped", type=notification_type, reason="alerts are disabled")
         return 1
     if not validate_webhook_url():
         print_webhook_error("WEBHOOK_URL must contain a complete HTTPS link")
@@ -3708,6 +3708,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
     m_subject = m_body = ""
     error_streak = 0
+    # A recovery is only worth reporting when the failure it recovers from was reported or alerted on
+    failure_announced = False
     last_recreate_ts = 0
     recreate_cooldown = 300  # avoid recreating PSNAWP session too frequently
     last_npsso_seen = PSN_NPSSO
@@ -3799,6 +3801,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             error_email_sent = False
             error_webhook_sent = False
             error_streak = 0
+            failure_announced = False
 
         # Sometimes PSN network functions halt, so we use alarm signal functionality to kill it inevitably, not available on Windows
         if platform.system() != 'Windows':
@@ -3852,6 +3855,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
             if error_streak >= policy["report_after"]:
                 print_recovery_advice(advice, recovery_hints, f"retrying in {display_time(sleep_interval)}")
+                failure_announced = True
 
             if error_streak >= policy["recreate_after"] and _recreate_session_rate_limited():
                 print(f"* Rebuilt the PSNAWP session after {error_streak} failed {'check' if error_streak == 1 else 'checks'} in a row")
@@ -3860,6 +3864,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 email_delivered, webhook_delivered = send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice, error_streak), email_enabled=ERROR_NOTIFICATION and not error_email_sent, webhook_enabled=webhook_event_enabled("error") and not error_webhook_sent)
                 error_email_sent = error_email_sent or email_delivered
                 error_webhook_sent = error_webhook_sent or webhook_delivered
+                failure_announced = failure_announced or email_delivered or webhook_delivered
 
             if error_streak >= policy["report_after"]:
                 print_cur_ts("Timestamp:\t\t\t")
@@ -3869,11 +3874,15 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
         else:
             if error_streak:
-                verbose_notice(f"Recovered after {error_streak} failed checks in a row")
+                debug_print("Recovered", streak=error_streak, reported=failure_announced)
+                # A streak nobody was told about needs no recovery line, since nothing reported it as broken
+                if failure_announced:
+                    verbose_notice(f"Recovered after {error_streak} failed {'check' if error_streak == 1 else 'checks'} in a row")
             recovery_hints.reset()
             error_email_sent = False
             error_webhook_sent = False
             error_streak = 0
+            failure_announced = False
 
         finally:
             if platform.system() != 'Windows':
