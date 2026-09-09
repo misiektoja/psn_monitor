@@ -237,6 +237,37 @@ def test_terms_of_service_hint_replaces_the_raw_error(pm_module, psn_session, fa
     assert "Terms of Service" in sent_emails[0]["body"]
 
 
+# Verifies an alert that lands on a check the outage reporter keeps quiet still ends with a timestamp
+def test_a_delivery_on_a_quiet_check_ends_with_a_timestamp(pm_module, psn_session, fake_clock, monkeypatch, sent_emails, capsys):
+    monkeypatch.setattr(pm_module, "ERROR_NOTIFICATION", True)
+    broken = presence_payload(status="offline")
+    broken["basicPresence"]["primaryPlatformInfo"] = None
+    psn_session([presence_payload(status="offline"), broken, broken, broken, broken])
+
+    run_monitor(pm_module)
+
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    deliveries = [index for index, line in enumerate(lines) if line.startswith("Sending email notification")]
+
+    assert deliveries, lines
+    for index in deliveries:
+        assert any(line.startswith("Timestamp:") for line in lines[index + 1:index + 3]), lines[index:index + 3]
+
+
+# Verifies a session rebuild announced on a check the outage reporter keeps quiet still ends with a timestamp
+def test_a_session_rebuild_on_a_quiet_check_ends_with_a_timestamp(pm_module, psn_session, fake_clock, capsys):
+    psn_session([presence_payload(status="offline")] + [RuntimeError("unrecognized failure") for _ in range(6)])
+
+    run_monitor(pm_module)
+
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    rebuilds = [index for index, line in enumerate(lines) if line.startswith("* Rebuilt the PSNAWP session")]
+
+    assert rebuilds, lines
+    for index in rebuilds:
+        assert any(line.startswith("Timestamp:") for line in lines[index + 1:index + 3]), lines[index:index + 3]
+
+
 # Verifies a malformed presence response rebuilds the session rather than being treated as an outage
 def test_malformed_response_recreates_the_session(pm_module, psn_session, fake_clock, capsys):
     broken = presence_payload(status="offline")

@@ -4093,6 +4093,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
             # A failure that has not changed is left to the liveness cadence rather than repeated every check
             outage_outcome = outage.failed(advice, LIVENESS_REMINDER_SECONDS) if error_streak >= policy["report_after"] else ""
+            printed_this_check = False
             if outage_outcome in ("full", "repeat"):
                 print_recovery_advice(advice, recovery_hints, f"retrying in {display_time(sleep_interval)}")
                 failure_announced = True
@@ -4103,14 +4104,18 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             if error_streak >= policy["recreate_after"] and _recreate_session_rate_limited() and not rebuild_announced:
                 print(f"* Rebuilt the PSNAWP session after {error_streak} failed {'check' if error_streak == 1 else 'checks'} in a row")
                 rebuild_announced = True
+                printed_this_check = True
 
             if error_streak >= alert_after and ((ERROR_NOTIFICATION and not error_email_sent) or (webhook_event_enabled("error") and not error_webhook_sent)):
                 email_delivered, webhook_delivered = send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice, error_streak), email_enabled=ERROR_NOTIFICATION and not error_email_sent, webhook_enabled=webhook_event_enabled("error") and not error_webhook_sent)
                 error_email_sent = error_email_sent or email_delivered
                 error_webhook_sent = error_webhook_sent or webhook_delivered
                 failure_announced = failure_announced or email_delivered or webhook_delivered
+                printed_this_check = True
 
-            if error_streak >= policy["report_after"] and outage_outcome in ("full", "repeat"):
+            # A rebuild or a retried alert can reach the screen on a check the outage reporter keeps quiet, and a
+            # line with nothing under it reads as a run that stopped there
+            if outage_outcome in ("full", "repeat") or printed_this_check:
                 print_cur_ts("Timestamp:\t\t\t")
             debug_print("Waiting", interval=display_time(sleep_interval), reason=f"{kind} failure", streak=error_streak)
             time.sleep(sleep_interval)
