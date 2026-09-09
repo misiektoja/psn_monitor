@@ -287,7 +287,7 @@ COLORED_OUTPUT = True
 #     "status_other": "white",
 #     # PlayStation info
 #     "game": "bright_yellow",
-#     "platform": "bright_blue",
+#     "platform": "blue",
 #     "trophy": "bright_green",
 #     "duration": "green",
 #     # Activity info
@@ -300,7 +300,7 @@ COLORED_OUTPUT = True
 #     "error": "red",
 #     "signal": "yellow",
 #     "email": "bright_cyan",
-#     "webhook": "magenta",
+#     "webhook": "bright_blue",
 #     # Dates
 #     "date": "magenta",
 #     "date_range": "magenta",
@@ -1318,7 +1318,7 @@ DEFAULT_COLOR_THEME = {
     "status_other": "white",
     # PlayStation info
     "game": "bright_yellow",
-    "platform": "bright_blue",
+    "platform": "blue",
     "trophy": "bright_green",
     "duration": "green",
     # Activity info
@@ -1331,7 +1331,7 @@ DEFAULT_COLOR_THEME = {
     "error": "red",
     "signal": "yellow",
     "email": "bright_cyan",
-    "webhook": "magenta",
+    "webhook": "bright_blue",
     # Dates
     "date": "magenta",
     "date_range": "magenta",
@@ -1341,8 +1341,8 @@ DEFAULT_COLOR_THEME = {
     "link": "blue underline",
 }
 
-# COLOR_THEME key names used by older releases, still honoured so an existing config keeps working
-_THEME_KEY_ALIASES = {"user_uri_id": "id"}
+# COLOR_THEME key names used by older releases. This tool shipped the current names, so there is nothing to alias yet
+_THEME_KEY_ALIASES: dict = {}
 
 ANSI_RESET = "\033[0m"
 

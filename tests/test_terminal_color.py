@@ -651,21 +651,16 @@ def test_the_target_row_uses_the_name_colour(colored):
     assert monitor._colorize_line(line) == f"* Target:                       {colored['username']}misiektoja{monitor.ANSI_RESET}"
 
 
-# Verifies a config written against the pre-rename 'user_uri_id' key still colours identifiers
-def test_legacy_theme_key_still_applies(monkeypatch):
-    monkeypatch.setattr(monitor, "COLORED_OUTPUT", True)
-    monkeypatch.setattr(monitor, "COLOR_THEME", {"user_uri_id": "red"})
-    monkeypatch.setattr(monitor, "COLOR_ENABLED", False)
-    monkeypatch.setattr(monitor, "_COLOR_STYLES", {})
-    monkeypatch.setattr(monitor, "_stream_supports_color", lambda stream: True)
-    monitor.init_color_output(StringIO())
-    assert monitor._COLOR_STYLES["id"] == monitor._build_ansi_sequence("red")
+# Verifies no key is aliased, since this tool shipped the current names and the only alias it ever carried
+# was for 'user_uri_id', a key that belongs to a different monitor and was never valid here
+def test_no_theme_key_needs_an_alias():
+    assert monitor._THEME_KEY_ALIASES == {}
 
 
-# Verifies the current key name wins when a config sets both the old and the new name
-def test_current_theme_key_wins_over_the_legacy_name(monkeypatch):
+# Verifies a configured theme key applies, which is the path the alias table would otherwise short-circuit
+def test_a_configured_theme_key_applies(monkeypatch):
     monkeypatch.setattr(monitor, "COLORED_OUTPUT", True)
-    monkeypatch.setattr(monitor, "COLOR_THEME", {"user_uri_id": "red", "id": "green"})
+    monkeypatch.setattr(monitor, "COLOR_THEME", {"id": "green"})
     monkeypatch.setattr(monitor, "COLOR_ENABLED", False)
     monkeypatch.setattr(monitor, "_COLOR_STYLES", {})
     monkeypatch.setattr(monitor, "_stream_supports_color", lambda stream: True)
@@ -766,3 +761,9 @@ def test_the_documented_theme_defaults_match_the_shipped_values():
         name, default = row.split("|")[1].strip().strip("`"), row.split("|")[2].strip()
         expected = f"`{monitor.DEFAULT_COLOR_THEME[name]}`" if monitor.DEFAULT_COLOR_THEME[name] else "*(empty)*"
         assert default == expected, name
+
+
+# Verifies the two channels keep the values every sibling monitor ships, so a channel reads the same in all of them
+def test_the_delivery_channels_keep_the_shared_colours():
+    assert monitor.DEFAULT_COLOR_THEME["email"] == "bright_cyan"
+    assert monitor.DEFAULT_COLOR_THEME["webhook"] == "bright_blue"
