@@ -579,6 +579,7 @@ def test_every_theme_part_is_used():
     "PSN user misiektoja changed status from offline to online",
     "* Fetching details for PlayStation user 'misiektoja'...",
     "[DEBUG 20:15:03] PSN API get_presence(): user=misiektoja",
+    "PS+ user:\t\t\tmisiektoja",
     "PlayStation ID:\t\t\tmisiektoja",
 ])
 def test_the_account_name_uses_the_name_colour_everywhere(colored, line):
@@ -587,6 +588,19 @@ def test_the_account_name_uses_the_name_colour_everywhere(colored, line):
     assert monitor.ANSI_ESCAPE_RE.sub("", result) == line
     assert f"{colored['username']}misiektoja{monitor.ANSI_RESET}" in result
     assert colored["game"] not in result
+
+
+# Verifies an ordinary sentence about the user is not read as a name, since prose follows "user" with a verb
+@pytest.mark.parametrize("line", [
+    "* Last time user was available:\tSat 22 Nov 2025, 16:54:31",
+    "* User is OFFLINE for:\t\t2 hours",
+    "Email when user goes online/offline",
+    "Monitoring healthy for misiektoja. The user is still offline with no activity change",
+    "Check that the path exists and that this user can read it, then retry",
+    "[DEBUG 20:15:03] PSN user ID resolved | source=configuration file, value=misiektoja",
+])
+def test_a_word_after_user_in_prose_keeps_no_name_colour(colored, line):
+    assert colored["username"] not in monitor._colorize_line(line)
 
 
 # Verifies the startup line colours the account name and not the words that introduce it
