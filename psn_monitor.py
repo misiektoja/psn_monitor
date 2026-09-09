@@ -400,6 +400,9 @@ csvfieldnames = ['Date', 'Status', 'Game name']
 
 CLI_CONFIG_PATH = None
 
+# Set when --config-file none switches discovery off, so no later lookup can find a file the run rejected
+CONFIG_DISCOVERY_DISABLED = False
+
 # to solve the issue: 'SyntaxError: f-string expression part cannot include a backslash'
 nl_ch = "\n"
 
@@ -638,12 +641,20 @@ def command_writes_dotenv(arguments=()):
     return any(str(argument) == "--setup" or str(argument).startswith("--set-") for argument in arguments)
 
 
+# True when a command writes the config file itself, so it refuses a --config-file that switches discovery off
+def command_writes_config(arguments=()):
+    return any(str(argument) == "--setup" for argument in arguments)
+
+
 # Returns the --config-file and --env-file arguments this run was given, skipping any the caller already passed
 def active_path_arguments(arguments=()):
     given = {str(argument) for argument in arguments}
     paths = []
-    if CLI_CONFIG_PATH and "--config-file" not in given:
-        paths.extend(("--config-file", str(CLI_CONFIG_PATH)))
+    active_config = CLI_CONFIG_PATH or ("none" if CONFIG_DISCOVERY_DISABLED else None)
+    # The "none" sentinel is carried so the printed command checks the setup this run checked, except into a
+    # command that writes the config file, since those refuse the sentinel at their own argument gate
+    if active_config and "--config-file" not in given and not (str(active_config).casefold() == "none" and command_writes_config(arguments)):
+        paths.extend(("--config-file", str(active_config)))
     # The "none" sentinel is carried so the printed command checks the setup this run checked, except into a
     # command that writes the dotenv file, since those refuse the sentinel at their own argument gate
     if DOTENV_FILE and "--env-file" not in given and not (str(DOTENV_FILE).casefold() == "none" and command_writes_dotenv(arguments)):
@@ -5839,7 +5850,7 @@ def run_set_smtp_password(env_file=None, config_path=None, psn_user_id=None, int
 
 
 def main():
-    global CLI_CONFIG_PATH, DOTENV_FILE, PSN_STATUS_FILE, LOCAL_TIMEZONE, LOCAL_TIMEZONE_STATE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, COLORED_OUTPUT, WEBHOOK_ENABLED, stdout_bck, DEBUG_MODE
+    global CLI_CONFIG_PATH, CONFIG_DISCOVERY_DISABLED, DOTENV_FILE, PSN_STATUS_FILE, LOCAL_TIMEZONE, LOCAL_TIMEZONE_STATE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, COLORED_OUTPUT, WEBHOOK_ENABLED, stdout_bck, DEBUG_MODE
 
     if "--generate-config" in sys.argv:
         config_content = CONFIG_BLOCK.strip("\n") + "\n"
@@ -6178,11 +6189,13 @@ def main():
     apply_diagnostic_cli_overrides(args)
 
     # "none" is the documented sentinel that switches discovery off, so it is a selection rather than a missing file
-    config_discovery_disabled = args.config_file is not None and str(args.config_file).casefold() == "none"
-    if args.config_file and not config_discovery_disabled:
+    CONFIG_DISCOVERY_DISABLED = args.config_file is not None and str(args.config_file).casefold() == "none"
+    if CONFIG_DISCOVERY_DISABLED:
+        CLI_CONFIG_PATH = None
+    elif args.config_file:
         CLI_CONFIG_PATH = os.path.expanduser(args.config_file)
 
-    cfg_path = None if config_discovery_disabled else find_config_file(CLI_CONFIG_PATH)
+    cfg_path = None if CONFIG_DISCOVERY_DISABLED else find_config_file(CLI_CONFIG_PATH)
 
     # Doctor reports a broken setup instead of exiting on the first thing it finds, so the whole report is usable
     doctor_mode = bool(args.doctor)
