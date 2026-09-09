@@ -1401,15 +1401,23 @@ _DOCTOR_MARK_STYLES = {"PASS": "boolean_true", "WARN": "warning", "FAIL": "error
 _TROPHY_ROW_RE = re.compile(r"^- ([^|]+) \| ([^|]+) \| ([A-Z]+) \| (.+)$")
 
 # Quoted names such as game titles. At least one word character is required so a run of punctuation between
-# two apostrophes is not read as a name
-_QUOTED_CONTENT_RE = re.compile(r"(')([^'\n]*\w[^'\n]*)(')")
+# two apostrophes is not read as a name. The closing quote has to be followed by whitespace, punctuation or the
+# end of the line, so a title's own apostrophe does not end the name early: "Tom Clancy's Rainbow Six Siege"
+_QUOTED_CONTENT_RE = re.compile(r"(')([^\n]*?\w[^\n]*?)(')(?=[\s.,;:!?)\]]|$)")
 
 # Quoted values shaped like a file name or a filesystem path stay plain, since a log or state destination is
 # not content. Game titles routinely contain slashes and dots, so only these two shapes are excluded
 _QUOTED_FILE_LIKE_RE = re.compile(r"^[~.]?[\\/]|^[A-Za-z]:[\\/]|\.[A-Za-z0-9]{1,8}$")
 
+# A quoted '<name>' inside a printed command is the placeholder the reader has to replace, not a game title
+_QUOTED_PLACEHOLDER_RE = re.compile(r"^<[^<>]*>$")
+
 # A quoted command-line option is an instruction to retype, not a name
 _QUOTED_OPTION_RE = re.compile(r"^-")
+
+# A quoted piece of a URL, such as the '?code=' or '&state=' a prompt points at. Only a leading '?' or '&' counts,
+# so a title may end in a question mark and a title such as 'Ratchet & Clank' is still a name
+_QUOTED_URL_PART_RE = re.compile(r"^[?&]|://")
 
 # The console tag printed beside a game, for example "(PS5)"
 _LAUNCH_PLATFORM_RE = re.compile(r"\((PS[A-Z0-9_]*|MOBILE_APP)\)")
@@ -1561,7 +1569,7 @@ def _sub_outside_color(pattern, replacement, line):
 # Colours one quoted name unless the quoted value is a file name, a path or a command-line option
 def _colorize_quoted_name(match, style_name):
     name = match.group(2)
-    if _QUOTED_FILE_LIKE_RE.search(name) or _QUOTED_OPTION_RE.match(name):
+    if _QUOTED_FILE_LIKE_RE.search(name) or _QUOTED_PLACEHOLDER_RE.match(name) or _QUOTED_OPTION_RE.match(name) or _QUOTED_URL_PART_RE.search(name):
         return match.group(0)
     # What sits right before the quote decides the colour, so an account name is not read as a game title
     if _QUOTED_USER_ID_CONTEXT_RE.search(match.string[:match.start()]):
