@@ -50,13 +50,12 @@ def row_named(rows, label):
     return matched[0]
 
 
-# Verifies a row is part of the full view and the log file unless it opts out, and stays out of the concise view
+# Verifies a row is part of the full view unless it opts out, and stays out of the concise view
 def test_a_row_is_full_view_only_until_it_opts_in(pm_module):
     row = pm_module.StartupSummaryRow("Some setting", "some value")
 
     assert row.concise is False
     assert row.full is True
-    assert row.log is True
 
 
 # Verifies the concise view stays short and the full view is a superset of the settings it reports
@@ -75,7 +74,6 @@ def test_the_flag_pointer_is_concise_view_only(summary_rows):
 
     assert pointer.concise is True
     assert pointer.full is False
-    assert pointer.log is False
 
 
 # Verifies every file the tool can be configured to write is named in the full view with its effective path

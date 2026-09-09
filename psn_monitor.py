@@ -4814,9 +4814,9 @@ def run_doctor(psn_user_id=None, config_path=None, env_path=None, config_advice=
     return 1 if any(check.status == "FAIL" for check in report.checks) else 0
 
 
-# One startup summary setting, routed independently to the concise view, the full view and the log file
-StartupSummaryRow = namedtuple("StartupSummaryRow", ["label", "value", "concise", "full", "log"])
-StartupSummaryRow.__new__.__defaults__ = (False, True, True)
+# One startup summary setting, routed to the concise view, the full view or both. The log keeps the full view
+StartupSummaryRow = namedtuple("StartupSummaryRow", ["label", "value", "concise", "full"])
+StartupSummaryRow.__new__.__defaults__ = (False, True)
 
 
 # Reports whether the reader asked for the complete startup summary rather than the concise one
@@ -4850,7 +4850,7 @@ def build_startup_summary(psn_user_id=None, config_path=None, env_path=None, log
         StartupSummaryRow("Polling intervals", f"[offline: {display_time(PSN_CHECK_INTERVAL)}] [online: {display_time(PSN_ACTIVE_CHECK_INTERVAL)}]", concise=True),
         StartupSummaryRow("Notifications (email)", startup_notification_state(), concise=True),
         StartupSummaryRow("Notifications (webhook)", startup_webhook_notification_state(), concise=True),
-        StartupSummaryRow("Output", output_state, concise=True, full=False, log=False),
+        StartupSummaryRow("Output", output_state, concise=True, full=False),
         StartupSummaryRow("Output logging", str(log_path) if log_path else "Disabled"),
         StartupSummaryRow("Config", str(config_path) if config_path else "None", concise=True),
         StartupSummaryRow("Dotenv", str(env_path) if env_path else "None", concise=True),
@@ -4872,7 +4872,7 @@ def build_startup_summary(psn_user_id=None, config_path=None, env_path=None, log
         StartupSummaryRow("Verbose mode", str(VERBOSE_MODE), concise=bool(VERBOSE_MODE)),
         StartupSummaryRow("Debug mode", str(DEBUG_MODE), concise=bool(DEBUG_MODE)),
         # Points at the two modes for a reader who does not know they exist, so the full view drops it
-        StartupSummaryRow("More details", "use --verbose or --debug", concise=True, full=False, log=False),
+        StartupSummaryRow("More details", "use --verbose or --debug", concise=True, full=False),
     ]
 
 
@@ -4895,7 +4895,7 @@ def emit_startup_summary(rows, show_full=False, stream=None):
         write_terminal = destination.write
     for row in rows:
         line = format_startup_summary_row(row)
-        if row.full and row.log:
+        if row.full:
             write_log(line)
         if row.full if show_full else row.concise:
             write_terminal(line)
