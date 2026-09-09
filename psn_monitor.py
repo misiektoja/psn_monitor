@@ -5871,13 +5871,13 @@ def main():
         "--set-webhook-url",
         dest="set_webhook_url",
         action="store_true",
-        help="Enter the webhook URL privately, check its shape and save it to the dotenv file",
+        help="Save a Discord or ntfy webhook URL through a hidden prompt",
     )
     conf.add_argument(
         "--doctor",
         dest="doctor",
         action="store_true",
-        help="Run preflight checks on this setup and exit",
+        help="Run read-only preflight checks and report what is ready and what is not",
     )
 
     # API credentials
@@ -5981,7 +5981,7 @@ def main():
         "--send-test-webhook",
         dest="send_test_webhook",
         action="store_true",
-        help="Send one test webhook to verify the destination settings"
+        help="Send one test webhook without starting monitoring"
     )
     times = parser.add_argument_group("Intervals & timers")
     times.add_argument(
