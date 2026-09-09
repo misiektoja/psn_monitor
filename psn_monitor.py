@@ -4734,7 +4734,8 @@ def print_doctor_next_steps(psn_user_id=None, doctor_exit=0):
     print("\n" + colorize("header", "Next steps") + "\n")
     label = "After Doctor passes, start monitoring:" if doctor_exit else "Start monitoring:"
     print_labelled_command(label, tool_command(*([str(psn_user_id)] if psn_user_id else [])))
-    print(f"Guide: {QUICK_START_GUIDE_URL}\n")
+    # No trailing blank line: the command printer already left one and the report must not end on two
+    print(f"Guide: {QUICK_START_GUIDE_URL}")
 
 
 
