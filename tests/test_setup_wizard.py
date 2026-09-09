@@ -2,6 +2,7 @@
 
 import re
 
+import signal
 import pytest
 
 import psn_monitor as monitor
@@ -568,3 +569,14 @@ def test_interrupting_the_launch_offer_keeps_the_saved_setup(tmp_path, capsys):
     assert "Setup is saved. Start monitoring with the command above when ready." in output
     assert "Setup cancelled" not in output
     assert (tmp_path / "psn_monitor.conf").is_file()
+
+
+# Verifies a prompt runs with Python's default Ctrl+C behavior, so the signal handler cannot pre-empt it
+def test_prompts_restore_the_default_interrupt_handler(monkeypatch):
+    # The suite neutralizes signal.signal, so the installed handlers are recorded instead of applied
+    installed = []
+    monkeypatch.setattr(monitor.signal, "signal", lambda sig, handler: installed.append(handler))
+
+    assert monitor._wizard_input("Prompt: ", input_func=lambda _prompt: "value") == "value"
+
+    assert installed == [signal.default_int_handler, signal.getsignal(signal.SIGINT)]

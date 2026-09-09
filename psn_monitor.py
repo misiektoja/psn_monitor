@@ -1189,7 +1189,7 @@ def confirm_generated_config_replacement(destination, force=False, interactive=N
     if not terminal_is_interactive:
         raise FileExistsError(f"Config file '{destination_path}' already exists and there is no terminal to confirm replacing it")
     try:
-        answer = str(input_func(f"Config file '{destination_path}' exists. Replace it and keep a timestamped backup? [y/N]: ")).strip().casefold()
+        answer = str(read_interactively(input_func, f"Config file '{destination_path}' exists. Replace it and keep a timestamped backup? [y/N]: ")).strip().casefold()
     except (EOFError, KeyboardInterrupt):
         print()
         answer = ""
@@ -1744,6 +1744,23 @@ def signal_handler(sig, frame):
     sys.stdout = stdout_bck
     print('\n* You pressed Ctrl+C, tool is terminated.')
     sys.exit(0)
+
+
+# Reads one answer with Python's default Ctrl+C behavior, so the prompt reports the outcome instead of the signal handler
+def read_interactively(reader, *args, **kwargs):
+    try:
+        previous_handler = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+    except (ValueError, OSError):
+        # Handlers can only be replaced from the main thread, which is where every prompt runs
+        return reader(*args, **kwargs)
+    try:
+        return reader(*args, **kwargs)
+    finally:
+        try:
+            signal.signal(signal.SIGINT, previous_handler)
+        except (ValueError, OSError):
+            pass
 
 
 # Silences the repeated certificate warning once verification is off, so the choice is reported by the summary and the doctor instead of on every request
@@ -4358,7 +4375,7 @@ def ask_yes_no(question, default=False):
     hint = "[Y/n]" if default else "[y/N]"
     while True:
         try:
-            answer = input(f"{question} {hint}: ").strip().casefold()
+            answer = read_interactively(input, f"{question} {hint}: ").strip().casefold()
         except (EOFError, KeyboardInterrupt):
             print()
             return False
@@ -4570,7 +4587,7 @@ def _wizard_print_default_guidance():
 def _wizard_input(prompt_text, input_func=None):
     prompt = input if input_func is None else input_func
     try:
-        return prompt(colorize("info", prompt_text))
+        return read_interactively(prompt, colorize("info", prompt_text))
     except (EOFError, KeyboardInterrupt):
         # The interrupted prompt owns the line break, so every handler prints its message alone
         print()
@@ -4674,7 +4691,7 @@ def _wizard_ask_duration(question, default, input_func=None):
 def _wizard_ask_secret(question, getpass_func=None):
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
     try:
-        return str(hidden_prompt(f"{question}: ")).strip()
+        return str(read_interactively(hidden_prompt, f"{question}: ")).strip()
     except (EOFError, KeyboardInterrupt):
         print()
         raise
@@ -5467,7 +5484,7 @@ def run_set_secret(key, flag, guidance, prompt_text, validator, describe_success
     previous_debug_mode = DEBUG_MODE
     DEBUG_MODE = False
     try:
-        entered = hidden_prompt(prompt_text)
+        entered = read_interactively(hidden_prompt, prompt_text)
     except (EOFError, KeyboardInterrupt):
         print()
         raise RecoveryError(classify_recovery_error(context="secret.entry", detail=f"{key} entry was cancelled and the dotenv file was not changed")) from None
