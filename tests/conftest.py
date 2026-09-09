@@ -169,6 +169,7 @@ def deterministic_globals(monkeypatch):
     monkeypatch.setattr(pm, "OFFLINE_INTERRUPT", 420, raising=False)
     monkeypatch.setattr(pm, "LIVENESS_CHECK_INTERVAL", 43200, raising=False)
     monkeypatch.setattr(pm, "LIVENESS_CHECK_COUNTER", 240, raising=False)
+    monkeypatch.setattr(pm, "LIVENESS_REMINDER_SECONDS", 43200, raising=False)
     monkeypatch.setattr(pm, "PSN_NPSSO", "npsso-test-value", raising=False)
     monkeypatch.setattr(pm, "SMTP_HOST", "smtp.example.test", raising=False)
     monkeypatch.setattr(pm, "SMTP_PORT", 587, raising=False)

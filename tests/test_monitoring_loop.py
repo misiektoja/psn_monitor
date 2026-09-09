@@ -303,6 +303,7 @@ def test_longer_network_outage_recreates_the_session(pm_module, psn_session, fak
 # Verifies a lasting outage reports itself once and then only on the liveness cadence
 def test_a_lasting_outage_rides_the_liveness_cadence(pm_module, psn_session, fake_clock, monkeypatch, capsys):
     monkeypatch.setattr(pm_module, "LIVENESS_CHECK_COUNTER", 2)
+    monkeypatch.setattr(pm_module, "LIVENESS_REMINDER_SECONDS", 2 * pm_module.FUNCTION_TIMEOUT)
     outage = [requests.exceptions.ConnectionError("connection reset by peer")] * 8
     psn_session([presence_payload(status="offline"), *outage])
 
@@ -312,6 +313,20 @@ def test_a_lasting_outage_rides_the_liveness_cadence(pm_module, psn_session, fak
     assert output.count("To fix: ") == 1
     assert f"* Monitoring degraded for {USER_ID}. " in output
     assert "could not be reached since " in output
+
+
+# Verifies the reminder follows the clock, so a run that retries faster than it polls does not remind more often
+def test_the_outage_reminder_follows_the_clock_not_the_check_count(pm_module, fake_clock):
+    reporter = pm_module.OutageReporter()
+    advice = pm_module.classify_recovery_error(requests.exceptions.ConnectionError("connection reset by peer"), context="monitor")
+
+    assert reporter.failed(advice, 900) == "full"
+    outcomes = []
+    for _ in range(60):
+        fake_clock.advance(15)
+        outcomes.append(reporter.failed(advice, 900))
+
+    assert outcomes.count("degraded") == 1
 
 
 # Verifies rebuilding the session closes the HTTP session of the replaced client instead of leaking its connection pool

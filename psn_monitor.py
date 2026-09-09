@@ -395,6 +395,8 @@ FUNCTION_TIMEOUT = 15
 
 # Whole checks, so a check interval longer than the liveness interval still waits one check instead of reporting on every check
 LIVENESS_CHECK_COUNTER = max(1, -(-LIVENESS_CHECK_INTERVAL // PSN_CHECK_INTERVAL)) if LIVENESS_CHECK_INTERVAL else 0
+# Seconds rather than checks, because a failing run usually retries on a different interval than a healthy one
+LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_COUNTER else 0
 
 stdout_bck = None
 csvfieldnames = ['Date', 'Status', 'Game name']
@@ -955,22 +957,23 @@ class OutageReporter:
     def __init__(self):
         self.code = None
         self.since = 0
-        self.checks = 0
+        self.reported_at = 0
 
-    # Records one failed check and returns "full" for a new failure, "degraded" on the liveness cadence,
+    # Records one failed check and returns "full" for a new failure, "degraded" once the liveness interval has passed,
     # "repeat" while the liveness banner is switched off or "" while the same failure is merely continuing
-    def failed(self, advice, liveness_counter):
+    def failed(self, advice, liveness_interval):
+        now = int(time.time())
         if advice.code != self.code:
             self.code = advice.code
-            self.since = int(time.time())
-            self.checks = 0
+            self.since = now
+            self.reported_at = now
             return "full"
-        self.checks += 1
         # With the liveness banner off there is nothing to carry the reminder, so the summary keeps its old cadence
-        if not liveness_counter:
+        if not liveness_interval:
             return "repeat"
-        if self.checks >= liveness_counter:
-            self.checks = 0
+        # Timed rather than counted, because a failing run usually retries on a different interval than a healthy one
+        if now - self.reported_at >= liveness_interval:
+            self.reported_at = now
             return "degraded"
         return ""
 
@@ -981,7 +984,7 @@ class OutageReporter:
         lasted = int(time.time()) - self.since
         self.code = None
         self.since = 0
-        self.checks = 0
+        self.reported_at = 0
         return lasted
 
 
@@ -4056,7 +4059,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             alert_after = policy["alert_after"] if advice.retryable else 1
 
             # A failure that has not changed is left to the liveness cadence rather than repeated every check
-            outage_outcome = outage.failed(advice, LIVENESS_CHECK_COUNTER) if error_streak >= policy["report_after"] else ""
+            outage_outcome = outage.failed(advice, LIVENESS_REMINDER_SECONDS) if error_streak >= policy["report_after"] else ""
             if outage_outcome in ("full", "repeat"):
                 print_recovery_advice(advice, recovery_hints, f"retrying in {display_time(sleep_interval)}")
                 failure_announced = True
@@ -5944,7 +5947,7 @@ def run_set_smtp_password(env_file=None, config_path=None, psn_user_id=None, int
 
 
 def main():
-    global CLI_CONFIG_PATH, CONFIG_DISCOVERY_DISABLED, DOTENV_FILE, PSN_STATUS_FILE, LOCAL_TIMEZONE, LOCAL_TIMEZONE_STATE, LIVENESS_CHECK_COUNTER, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, COLORED_OUTPUT, WEBHOOK_ENABLED, stdout_bck, DEBUG_MODE
+    global CLI_CONFIG_PATH, CONFIG_DISCOVERY_DISABLED, DOTENV_FILE, PSN_STATUS_FILE, LOCAL_TIMEZONE, LOCAL_TIMEZONE_STATE, LIVENESS_CHECK_COUNTER, LIVENESS_REMINDER_SECONDS, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, COLORED_OUTPUT, WEBHOOK_ENABLED, stdout_bck, DEBUG_MODE
 
     if "--generate-config" in sys.argv:
         config_content = CONFIG_BLOCK.strip("\n") + "\n"
@@ -6461,6 +6464,7 @@ def main():
     if args.check_interval:
         PSN_CHECK_INTERVAL = args.check_interval
         LIVENESS_CHECK_COUNTER = max(1, -(-LIVENESS_CHECK_INTERVAL // PSN_CHECK_INTERVAL)) if LIVENESS_CHECK_INTERVAL else 0
+        LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_COUNTER else 0
 
     if args.active_interval:
         PSN_ACTIVE_CHECK_INTERVAL = args.active_interval
