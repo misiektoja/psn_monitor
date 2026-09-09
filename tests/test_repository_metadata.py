@@ -174,3 +174,16 @@ def test_release_archives_ship_checksums_and_provenance():
     assert "_SHA256SUMS.txt" in upload["with"]["files"]
     # Offline verifiers need the bundle as an asset, since the attestations API may be unreachable
     assert ".intoto.jsonl" in upload["with"]["files"]
+
+
+# Verifies the minimum supported Python version is declared once and matches the packaging metadata
+def test_the_minimum_python_version_is_declared_once():
+    import psn_monitor as monitor
+
+    pyproject = read_asset("pyproject.toml")
+
+    assert monitor.MINIMUM_PYTHON_VERSION_TEXT == ".".join(str(part) for part in monitor.MINIMUM_PYTHON_VERSION)
+    assert f'requires-python = ">={monitor.MINIMUM_PYTHON_VERSION_TEXT}"' in pyproject
+    assert f"Programming Language :: Python :: {monitor.MINIMUM_PYTHON_VERSION_TEXT}" in pyproject
+    classifiers = re.findall(r"Programming Language :: Python :: (\d+\.\d+)", pyproject)
+    assert min(tuple(int(part) for part in version.split(".")) for version in classifiers) == monitor.MINIMUM_PYTHON_VERSION
