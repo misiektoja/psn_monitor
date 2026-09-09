@@ -388,3 +388,17 @@ def test_a_declined_secret_replacement_reports_the_kept_value(tmp_path, monkeypa
     assert advice.summary == "The saved SMTP password was left as it is and the dotenv file was not changed"
     assert "answer y to replace the saved value" in advice.fix
     assert destination.read_text(encoding="utf-8") == 'SMTP_PASSWORD="original"\n'
+
+
+PROGRESS_COMMANDS = (("run_set_npsso", "NPSSO code", NPSSO), ("run_set_webhook_url", "webhook URL", WEBHOOK_URL), ("run_set_smtp_password", "SMTP password", SMTP_SECRET))
+
+
+# Verifies each secret command announces the check the way the siblings do, naming the dotenv file rather than its path
+@pytest.mark.parametrize("command_name, subject, secret", PROGRESS_COMMANDS)
+def test_the_progress_line_names_the_dotenv_file_not_its_path(command_name, subject, secret, tmp_path, psn_double, smtp_double, capsys):
+    env_file = tmp_path / ".env"
+
+    getattr(monitor, command_name)(env_file=str(env_file), interactive=True, getpass_func=lambda prompt: secret)
+
+    line = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("* Checking the entered"))
+    assert line == f"* Checking the entered {subject} before changing the dotenv file ..."

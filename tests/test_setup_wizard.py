@@ -791,16 +791,19 @@ def test_the_saved_timezone_is_resolved_before_doctor_reads_it(monkeypatch):
     assert monitor.TIMEZONE_CHECK_LABELS[monitor.LOCAL_TIMEZONE_STATE] == "Local timezone can be detected"
 
 
-# Verifies the recommended preset already switches on every supported type, which is why no "everything"
-# option sits beside it: on this tool the two would enable exactly the same set
+# Verifies the recommended preset switches on every supported type and is offered alone, since an "everything"
+# option beside it would enable exactly the same set on this tool
 @pytest.mark.parametrize("collect, keys, answers", (
     ("_wizard_collect_email_section", "WIZARD_EMAIL_NOTIFICATION_KEYS", ("y", "smtp.example.test", "587", "y", "monitor@example.test", "monitor@example.test", "alerts@example.test", "1")),
     ("_wizard_collect_webhook_section", "WIZARD_WEBHOOK_NOTIFICATION_KEYS", ("y", "1", "1")),
 ))
-def test_the_recommended_preset_switches_on_every_supported_type(collect, keys, answers, tmp_path):
+def test_the_recommended_preset_switches_on_every_supported_type(collect, keys, answers, tmp_path, capsys):
     state = monitor.WizardSetupState(tmp_path / "psn_monitor.conf", tmp_path / ".env", dict(vars(monitor)))
     terminal = ScriptedTerminal(*answers, secrets=secrets_for(WEBHOOK_URL))
 
     getattr(monitor, collect)(state, input_func=terminal.answer, getpass_func=terminal.secret)
 
     assert all(state.config_values[name] for name in getattr(monitor, keys))
+    # The notification menu is the last choice each section asks, so two options there means the preset stands alone
+    assert [prompt for prompt in terminal.prompts if prompt.startswith("Choose [")][-1] == "Choose [1-2]: "
+    assert "2. Custom" in capsys.readouterr().out

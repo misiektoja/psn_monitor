@@ -5799,7 +5799,7 @@ def run_set_secret(key, flag, subject, guide_url, guidance, prompt_text, validat
     finally:
         DEBUG_MODE = previous_debug_mode
 
-    print(f"* Checking the entered value before writing it to '{destination}' ...")
+    print(f"* Checking the entered {subject} before changing the dotenv file ...")
     outcome = validator(entered)
     # What is stored can differ from what was typed, so a shorthand the validator accepted is saved in full
     stored = str(entered).strip() if normalize is None else normalize(entered)
