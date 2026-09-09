@@ -906,3 +906,56 @@ def test_declining_the_retry_offer_keeps_the_saved_number(pm_module, capsys):
     answers = iter(["", "n"])
 
     assert pm_module._wizard_ask_positive_int("SMTP port", 587, maximum=65535, input_func=lambda _prompt: next(answers)) == 587
+
+
+# Verifies a rerun that keeps the loaded secrets leaves every one of them out of the rebuilt configuration file
+def test_a_rerun_keeps_loaded_secrets_out_of_the_configuration(wizard_environment, monkeypatch, pm_module):
+    loaded = {"PSN_NPSSO": "loaded-npsso-value", "SMTP_PASSWORD": "mail-secret-value", "WEBHOOK_URL": "https://discord.com/api/webhooks/1/loaded-hook-value", "NTFY_ACCESS_TOKEN": "ntfy-secret-value"}
+    for name, value in loaded.items():
+        monkeypatch.setattr(pm_module, name, value)
+    config = wizard_environment / "psn_monitor.conf"
+    config.write_text("# earlier config\n", encoding="utf-8")
+    # rebuild, target, persist, both intervals, keep the loaded npsso, no email, no webhook, output files, save, decline doctor and monitoring
+    code = run_wizard(ScriptedTerminal("y", USER_ID, "", "", "", "n", "n", "n", "y", "", "", "1", "n", "n"))
+
+    assert code == 0
+    written = config.read_text(encoding="utf-8")
+    for value in loaded.values():
+        assert value not in written
+
+
+# Verifies the configuration renderer keeps the template placeholder for every secret whatever the values hold
+def test_the_configuration_renderer_never_writes_a_secret(pm_module):
+    values = {name: f"real-{name.lower()}" for name in pm_module.SECRET_KEYS}
+    values["PSN_CHECK_INTERVAL"] = 4321
+
+    rendered = pm_module.generate_config_with_current_values(values)
+
+    assert "PSN_CHECK_INTERVAL = 4321" in rendered
+    assert not any(value in rendered for value in values.values() if isinstance(value, str))
+
+
+# Verifies a blank target answer whose retry is declined ends the section instead of asking the same question forever
+def test_declining_the_target_retry_ends_the_section_without_a_target(tmp_path, pm_module, capsys):
+    state = pm_module.WizardSetupState(tmp_path / "psn_monitor.conf", tmp_path / ".env", {})
+    terminal = ScriptedTerminal("", "n")
+
+    pm_module._wizard_collect_target_section(state, input_func=terminal.answer)
+
+    assert state.target == ""
+    assert state.config_values["PSN_USER_ID"] == ""
+    assert not terminal.asked("Persist this target")
+    assert "No target selected. Nothing can be monitored until one is set." in capsys.readouterr().out
+
+
+# Verifies a rejected target answer offers another attempt and declining it keeps the target already given
+def test_a_rejected_target_answer_offers_a_retry_and_keeps_the_previous_target(tmp_path, pm_module):
+    state = pm_module.WizardSetupState(tmp_path / "psn_monitor.conf", tmp_path / ".env", {})
+    state.target = USER_ID
+    terminal = ScriptedTerminal("someone@example.com", "n", "y")
+
+    pm_module._wizard_collect_target_section(state, input_func=terminal.answer)
+
+    assert state.target == USER_ID
+    assert terminal.asked("Try entering the PlayStation online ID to monitor again?")
+    assert terminal.asked("Persist this target")

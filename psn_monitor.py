@@ -5100,7 +5100,8 @@ def generate_config_with_current_values(config_values):
         if not isinstance(statement, ast.Assign) or len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Name):
             continue
         name = statement.targets[0].id
-        if name not in config_values:
+        # A secret belongs in the dotenv file, so its template placeholder stays even when the running values hold the real one
+        if name not in config_values or name in SECRET_KEYS:
             continue
         replacements[name] = (statement.lineno, getattr(statement, "end_lineno", statement.lineno), render_config_value(config_values[name]))
     lines = CONFIG_BLOCK.strip("\n").split("\n")
@@ -5241,14 +5242,24 @@ def _wizard_clear_section(state, config_keys, secret_keys=()):
 
 # Asks which account to watch, accepting the online ID or a profile link and rejecting the e-mail mistake
 def _wizard_collect_target_section(state, initial_target=None, input_func=None):
+    question = "PlayStation online ID to monitor"
     while True:
-        answer = _wizard_ask_text("PlayStation online ID to monitor", default=str(initial_target or state.target or ""), required=True, input_func=input_func)
+        answer = _wizard_ask_text(question, default=str(initial_target or state.target or ""), required=True, input_func=input_func)
+        if not answer:
+            # The question already offered another attempt and it was declined, so the section ends instead of asking again
+            break
         try:
             state.target = normalize_psn_target(answer)
         except ValueError as exc:
             print(f"  {exc}")
+            if not _wizard_offer_retry(question, input_func=input_func):
+                break
             continue
         break
+    if not state.target:
+        print("  No target selected. Nothing can be monitored until one is set. Run --setup again or pass the target on the command line.")
+        _wizard_apply_target(state)
+        return
     state.persist_target = _wizard_ask_yes_no("Persist this target in the generated config?", default=state.persist_target, input_func=input_func)
     _wizard_apply_target(state)
 
