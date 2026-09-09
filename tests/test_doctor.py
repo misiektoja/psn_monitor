@@ -282,7 +282,7 @@ def test_a_missing_optional_dependency_warns_and_says_what_breaks(pm_module):
     missing = next(check for check in checks if "wcwidth" in check.label)
     assert missing.status == "WARN"
     assert "Screen truncation is disabled" in missing.detail
-    assert "Monitoring is unaffected" in missing.detail
+    assert "Every other feature is unaffected" in missing.detail
     assert "-m pip install wcwidth" in missing.advice.fix
 
 
@@ -829,7 +829,7 @@ def test_the_report_names_the_status_file(pm_module, doctor_run, monkeypatch, tm
 
     _, raw = doctor_run(psn_user_id=USER_ID)
 
-    assert "[PASS] Status file is writable" in raw
+    assert "[PASS] Status destination appears writable" in raw
     assert str(destination) in raw
 
 
@@ -1008,8 +1008,8 @@ def test_the_output_rows_wait_for_a_target(pm_module, psn_session, doctor_run, m
     assert "[PASS] Log destination will be finalized after a target is selected" in without_target
     assert "Path: psn_<psn_user_id>_last_status.json" not in without_target
     assert "Path: psn_monitor_<psn_user_id>.log" not in without_target
-    assert "[PASS] Status file is writable" in with_target
-    assert "[PASS] Log file is writable" in with_target
+    assert "[PASS] Status destination appears writable" in with_target
+    assert "[PASS] Log destination appears writable" in with_target
 
 
 # Verifies a report read on its own ends with the command that starts monitoring, carrying this run's files

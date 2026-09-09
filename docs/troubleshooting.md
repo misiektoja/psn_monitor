@@ -10,7 +10,7 @@ psn_monitor <psn_user_id> --doctor
 
 It writes no files, and it exits `1` if any check failed so you can run it from a script.
 
-The report opens with the detected install method, then six sections, each row marked `[PASS]`, `[WARN]`, `[FAIL]` or `[SKIP]`:
+The report opens with the detected install method, then six sections, each row marked `[PASS]`, `[WARN]`, `[FAIL]` or `[SKIP]` and colour-coded by status when colour output is on:
 
 * **Environment**: the Python version against the supported minimum, the required libraries, and the optional ones with what stops working without each
 * **Configuration**: the configuration and dotenv files in use, which secrets are loaded and where each came from, the local time zone including whether an `Auto` setting can be detected, whether TLS verification is on, whether the timing and count settings hold usable values and the files the tool would write
