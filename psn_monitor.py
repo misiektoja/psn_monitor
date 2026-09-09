@@ -194,7 +194,7 @@ OFFLINE_INTERRUPT = 420  # 7 mins
 
 # How often to print a "liveness check" message to the output; in seconds
 # Set to 0 to disable
-LIVENESS_CHECK_INTERVAL = 43200  # 12 hours
+LIVENESS_CHECK_INTERVAL = 86400  # 24 hours
 
 # URL used to verify internet connectivity at startup
 CHECK_INTERNET_URL = 'https://ca.account.sony.com/'
