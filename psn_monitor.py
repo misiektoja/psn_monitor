@@ -271,42 +271,44 @@ COLORED_OUTPUT = True
 #   "bright_cyan bold", "yellow", "red underline", "bright_magenta bold underline", "red bold blink"
 # Valid colour names: black, red, green, yellow, blue, magenta, cyan, white,
 # and their bright_ variants (bright_red, bright_green, ...).
-COLOR_THEME = {
-    # Headings and commands the wizard tells you to run
-    "header": "bright_cyan",
-    "section": "bright_white",
-    # Identity
-    "username": "bright_cyan underline",
-    "id": "bright_magenta",
-    # Presence status values
-    "status_active": "green",
-    "status_inactive": "red",
-    "status_offline": "red",
-    "status_other": "white",
-    # PlayStation info
-    "game": "bright_yellow",
-    "platform": "bright_blue",
-    "trophy": "bright_green",
-    "duration": "green",
-    # Activity info
-    "status_change": "yellow",
-    # Misc
-    "timestamp_label": "",
-    "timestamp_value": "cyan",
-    "info": "cyan",
-    "warning": "yellow",
-    "error": "red",
-    "signal": "yellow",
-    "email": "bright_cyan",
-    "webhook": "magenta",
-    # Dates
-    "date": "magenta",
-    "date_range": "magenta",
-    # Boolean values
-    "boolean_true": "green",
-    "boolean_false": "red",
-    "link": "blue underline",
-}
+# The defaults below are what the tool uses while this block stays commented out. Uncomment it to override
+# them and keep only the lines you want to change, so the rest keep following the tool's own defaults.
+# COLOR_THEME = {
+#     # Headings and commands the wizard tells you to run
+#     "header": "bright_cyan",
+#     "section": "bright_white",
+#     # Identity
+#     "username": "bright_cyan underline",
+#     "id": "bright_magenta",
+#     # Presence status values
+#     "status_active": "green",
+#     "status_inactive": "red",
+#     "status_offline": "red",
+#     "status_other": "white",
+#     # PlayStation info
+#     "game": "bright_yellow",
+#     "platform": "bright_blue",
+#     "trophy": "bright_green",
+#     "duration": "green",
+#     # Activity info
+#     "status_change": "yellow",
+#     # Misc
+#     "timestamp_label": "",
+#     "timestamp_value": "cyan",
+#     "info": "cyan",
+#     "warning": "yellow",
+#     "error": "red",
+#     "signal": "yellow",
+#     "email": "bright_cyan",
+#     "webhook": "magenta",
+#     # Dates
+#     "date": "magenta",
+#     "date_range": "magenta",
+#     # Boolean values
+#     "boolean_true": "green",
+#     "boolean_false": "red",
+#     "link": "blue underline",
+# }
 
 # Value used by signal handlers increasing/decreasing the check for player activity
 # when user is online (PSN_ACTIVE_CHECK_INTERVAL); in seconds
@@ -2790,11 +2792,14 @@ def apply_early_output_config():
 # Settings an older version wrote that this version no longer defines, ignored instead of rejected
 RETIRED_CONFIG_SETTINGS = frozenset(())
 
+# Settings the template ships commented out so the built-in default applies, still accepted from a config file
+COMMENTED_CONFIG_SETTINGS = frozenset({"COLOR_THEME"})
+
 
 # Collects the setting names the built-in configuration template defines
 def _config_allowed_names():
     template_tree = ast.parse(CONFIG_BLOCK, "<built-in-config>", "exec")
-    return frozenset(statement.targets[0].id for statement in template_tree.body if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name))
+    return frozenset(statement.targets[0].id for statement in template_tree.body if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name)) | COMMENTED_CONFIG_SETTINGS
 
 
 # Parses allowlisted literal config assignments without executing any file content
