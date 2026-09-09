@@ -591,14 +591,14 @@ def test_an_enabled_channel_with_no_alerts_warns(pm_module, monkeypatch):
     assert report.webhook_ready is False
 
 
-# Verifies each unusable webhook setting is reported as a warning instead of failing at delivery time
+# Verifies each unusable webhook setting fails the report instead of failing at delivery time
 @pytest.mark.parametrize("setting, value", [
     ("WEBHOOK_URL", "your_webhook_url"),
     ("WEBHOOK_PROVIDER", "slack"),
     ("WEBHOOK_AVATAR_URL", "not-a-url"),
     ("WEBHOOK_HEADERS", {"Bad Header": "value"}),
 ])
-def test_an_unusable_webhook_setting_warns(pm_module, monkeypatch, setting, value):
+def test_an_unusable_webhook_setting_fails(pm_module, monkeypatch, setting, value):
     monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_URL", WEBHOOK_URL)
     monkeypatch.setattr(pm_module, "WEBHOOK_ERROR_NOTIFICATION", True)
@@ -607,7 +607,7 @@ def test_an_unusable_webhook_setting_warns(pm_module, monkeypatch, setting, valu
 
     check = pm_module.doctor_check_webhook_notifications(report)[0]
 
-    assert check.status == "WARN"
+    assert check.status == "FAIL"
     assert report.webhook_ready is False
 
 

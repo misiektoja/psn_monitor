@@ -4561,14 +4561,14 @@ def doctor_check_webhook_notifications(report):
     provider = normalized_webhook_provider()
     if not provider:
         advice = classify_recovery_error(context="webhook", detail="WEBHOOK_PROVIDER must be discord or ntfy")
-        return [make_doctor_check("Notifications", "WARN", advice.summary, advice.detail, advice)]
+        return [make_doctor_check("Notifications", "FAIL", advice.summary, advice.detail, advice)]
     if not validate_webhook_url():
         advice = classify_recovery_error(context="webhook", detail="WEBHOOK_URL must contain a complete HTTPS link")
-        return [make_doctor_check("Notifications", "WARN", advice.summary, advice.detail, advice)]
+        return [make_doctor_check("Notifications", "FAIL", advice.summary, advice.detail, advice)]
     for validation_error in (validate_webhook_customization(provider), validate_webhook_headers(provider)):
         if validation_error is not None:
             advice = classify_recovery_error(context="webhook", detail=validation_error)
-            return [make_doctor_check("Notifications", "WARN", advice.summary, advice.detail, advice)]
+            return [make_doctor_check("Notifications", "FAIL", advice.summary, advice.detail, advice)]
     report.webhook_ready = True
     return [make_doctor_check("Notifications", "PASS", f"{WEBHOOK_READY_CHECK_LABEL} for {webhook_provider_display_name()}", f"Alerts: {', '.join(selected)}. The private link was not displayed. No webhook was sent during this passive check")]
 
