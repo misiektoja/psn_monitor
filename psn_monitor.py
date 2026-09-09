@@ -5803,7 +5803,7 @@ def main():
         "--config-file",
         dest="config_file",
         metavar="PATH",
-        help="Location of the optional config file",
+        help="Location of the optional config file (auto-search if not set, disable with 'none')",
     )
     conf.add_argument(
         "--generate-config",
@@ -6052,10 +6052,12 @@ def main():
     # Applied before the config file is read, so a failure while reading it is already diagnosable
     apply_diagnostic_cli_overrides(args)
 
-    if args.config_file:
+    # "none" is the documented sentinel that switches discovery off, so it is a selection rather than a missing file
+    config_discovery_disabled = args.config_file is not None and str(args.config_file).casefold() == "none"
+    if args.config_file and not config_discovery_disabled:
         CLI_CONFIG_PATH = os.path.expanduser(args.config_file)
 
-    cfg_path = find_config_file(CLI_CONFIG_PATH)
+    cfg_path = None if config_discovery_disabled else find_config_file(CLI_CONFIG_PATH)
 
     # Doctor reports a broken setup instead of exiting on the first thing it finds, so the whole report is usable
     doctor_mode = bool(args.doctor)

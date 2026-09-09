@@ -44,6 +44,8 @@ If you saved it under a different name or in a different directory, specify its 
 psn_monitor <psn_user_id> --config-file /path/psn_monitor_new.conf
 ```
 
+`--config-file none` switches automatic config discovery off for one run.
+
 ## Target Account
 
 Set `PSN_USER_ID` to save the account you usually watch. A PSN ID passed on the command line always wins over the saved one, and with a saved value you can start monitoring with no arguments at all:
