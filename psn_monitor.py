@@ -1078,6 +1078,44 @@ def apply_diagnostic_cli_overrides(args):
         DEBUG_MODE = args.debug_mode
 
 
+# Applies every secret the environment or a loaded dotenv file provides, recording where each value came from.
+# Environment variables are a documented alternative to a dotenv file, so they apply even when no file was loaded
+def apply_environment_secrets():
+    for secret in SECRET_KEYS:
+        value = os.getenv(secret)
+        if value is not None:
+            globals()[secret] = value
+            SECRET_SOURCES[secret] = "environment" if secret in EXPORTED_SECRET_KEYS else "dotenv file"
+
+
+# Resolves LOCAL_TIMEZONE and the state doctor reports it with, returning advice when no zone could be determined
+def resolve_local_timezone():
+    global LOCAL_TIMEZONE, LOCAL_TIMEZONE_STATE
+
+    LOCAL_TIMEZONE_STATE = "config"
+    timezone_advice = None
+    local_tz = None
+    if LOCAL_TIMEZONE == "Auto":
+        if get_localzone is not None:
+            try:
+                local_tz = get_localzone()
+            except Exception as diag_exc:
+                debug_print("Local timezone auto-detection", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+        if local_tz and is_valid_timezone(str(local_tz)):
+            LOCAL_TIMEZONE = str(local_tz)
+            LOCAL_TIMEZONE_STATE = "auto"
+        elif get_localzone is None:
+            LOCAL_TIMEZONE_STATE = "auto_unavailable"
+            timezone_advice = make_recovery_advice("dependency.missing", "The local timezone could not be detected", recovery_fix_with_guide(f"Install tzlocal with: {pip_install_command('tzlocal')} or set LOCAL_TIMEZONE to a pytz timezone name such as 'Europe/Warsaw'", TIMEZONE_GUIDE_URL), False, "LOCAL_TIMEZONE is Auto but tzlocal is unavailable")
+        else:
+            LOCAL_TIMEZONE_STATE = "auto_failed"
+            timezone_advice = make_recovery_advice("config.invalid", "The local timezone could not be detected", recovery_fix_with_guide("Set LOCAL_TIMEZONE to a pytz timezone name such as 'Europe/Warsaw'", TIMEZONE_GUIDE_URL), False, "tzlocal did not return a supported timezone")
+    elif not is_valid_timezone(LOCAL_TIMEZONE):
+        LOCAL_TIMEZONE_STATE = "invalid"
+        timezone_advice = make_recovery_advice("config.invalid", f"Configured LOCAL_TIMEZONE '{LOCAL_TIMEZONE}' is not valid", recovery_fix_with_guide("Set LOCAL_TIMEZONE to a pytz timezone name such as 'Europe/Warsaw'", TIMEZONE_GUIDE_URL), False, str(LOCAL_TIMEZONE))
+    return timezone_advice
+
+
 # Applies the webhook options that were actually typed, then reconciles the provider with the destination
 def apply_webhook_cli_overrides(args, parser):
     global WEBHOOK_ENABLED, WEBHOOK_PROVIDER, WEBHOOK_URL, WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION, WEBHOOK_GAME_CHANGE_NOTIFICATION, WEBHOOK_ERROR_NOTIFICATION
@@ -5338,7 +5376,8 @@ def _wizard_print_setup_destinations(config_path, env_path):
     print(f"Dotenv:                 {env_path}\n")
 
 
-# Puts the values setup just saved into effect, so doctor checks the written files instead of the earlier state
+# Puts the values setup just saved into effect, so doctor checks the written files instead of the earlier state.
+# Returns the timezone advice, since the saved config can name a zone the startup resolution never saw
 def _wizard_apply_saved_values(state, env_path=None):
     # Config values first: they carry the unset placeholders for every secret, which would otherwise
     # overwrite the secrets applied below and make doctor report a working setup as unconfigured
@@ -5350,14 +5389,14 @@ def _wizard_apply_saved_values(state, env_path=None):
             load_dotenv(str(env_path), override=True)
         except Exception as exc:
             debug_print("Reading the dotenv file back after setup", path=env_path, outcome="failed", error=f"{type(exc).__name__}: {exc}")
-    for key in SECRET_KEYS:
-        value = os.getenv(key)
-        if value is not None:
-            globals()[key] = value
+    # The shared resolver rather than a local loop, so doctor names the same source it would after a restart
+    apply_environment_secrets()
     # Secrets exported before startup keep winning here, exactly as they will when monitoring runs
     for key, value in state.secret_updates.items():
         if key not in EXPORTED_SECRET_KEYS and not secret_is_set(globals().get(key)):
             globals()[key] = value
+            SECRET_SOURCES[key] = "dotenv file"
+    return resolve_local_timezone()
 
 
 # Builds the exact local command that starts this monitor, used when setup offers to launch it
@@ -5470,8 +5509,8 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     try:
         if doctor_offered and _wizard_ask_yes_no("Run doctor now? It writes no files and offers real delivery tests only with separate approval.", default=True, input_func=input_func):
             print()
-            _wizard_apply_saved_values(state, env_path=state.env_path if secrets_written else None)
-            doctor_exit = run_doctor(psn_user_id=state.target, config_path=str(state.config_path), env_path=str(state.env_path) if secrets_written else None)
+            timezone_advice = _wizard_apply_saved_values(state, env_path=state.env_path if secrets_written else None)
+            doctor_exit = run_doctor(psn_user_id=state.target, config_path=str(state.config_path), env_path=str(state.env_path) if secrets_written else None, timezone_advice=timezone_advice)
     except (EOFError, KeyboardInterrupt):
         # The files are already written, so an interrupt here only skips the optional check
         print(colorize("warning", "Setup is saved. Use the commands below when ready."))
@@ -6130,7 +6169,6 @@ def main():
     # Doctor reports a broken setup instead of exiting on the first thing it finds, so the whole report is usable
     doctor_mode = bool(args.doctor)
     config_advice = None
-    timezone_advice = None
 
     if not cfg_path and CLI_CONFIG_PATH:
         config_advice = classify_recovery_error(context="config.missing", detail=f"Config file '{CLI_CONFIG_PATH}' does not exist")
@@ -6207,37 +6245,14 @@ def main():
                 print_recovery_advice(missing_dependency_advice("python-dotenv", f"The dotenv file '{env_path}' was not loaded"), label="Warning")
                 print()
 
-    # Environment variables are a documented alternative to a dotenv file, so they apply even when no file was loaded
-    for secret in SECRET_KEYS:
-        val = os.getenv(secret)
-        if val is not None:
-            globals()[secret] = val
-            SECRET_SOURCES[secret] = "environment" if secret in EXPORTED_SECRET_KEYS else "dotenv file"
+    apply_environment_secrets()
 
     apply_webhook_cli_overrides(args, parser)
 
     for secret in SECRET_KEYS:
         debug_print("Secret resolution", name=secret, source=SECRET_SOURCES.get(secret, "nowhere"), value=secret_fingerprint(globals().get(secret), secret))
 
-    local_tz = None
-    if LOCAL_TIMEZONE == "Auto":
-        if get_localzone is not None:
-            try:
-                local_tz = get_localzone()
-            except Exception as diag_exc:
-                debug_print("Local timezone auto-detection", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
-        if local_tz and is_valid_timezone(str(local_tz)):
-            LOCAL_TIMEZONE = str(local_tz)
-            LOCAL_TIMEZONE_STATE = "auto"
-        elif get_localzone is None:
-            LOCAL_TIMEZONE_STATE = "auto_unavailable"
-            timezone_advice = make_recovery_advice("dependency.missing", "The local timezone could not be detected", recovery_fix_with_guide(f"Install tzlocal with: {pip_install_command('tzlocal')} or set LOCAL_TIMEZONE to a pytz timezone name such as 'Europe/Warsaw'", TIMEZONE_GUIDE_URL), False, "LOCAL_TIMEZONE is Auto but tzlocal is unavailable")
-        else:
-            LOCAL_TIMEZONE_STATE = "auto_failed"
-            timezone_advice = make_recovery_advice("config.invalid", "The local timezone could not be detected", recovery_fix_with_guide("Set LOCAL_TIMEZONE to a pytz timezone name such as 'Europe/Warsaw'", TIMEZONE_GUIDE_URL), False, "tzlocal did not return a supported timezone")
-    elif not is_valid_timezone(LOCAL_TIMEZONE):
-        LOCAL_TIMEZONE_STATE = "invalid"
-        timezone_advice = make_recovery_advice("config.invalid", f"Configured LOCAL_TIMEZONE '{LOCAL_TIMEZONE}' is not valid", recovery_fix_with_guide("Set LOCAL_TIMEZONE to a pytz timezone name such as 'Europe/Warsaw'", TIMEZONE_GUIDE_URL), False, str(LOCAL_TIMEZONE))
+    timezone_advice = resolve_local_timezone()
 
     if timezone_advice is not None:
         if not doctor_mode:

@@ -3,6 +3,7 @@
 import re
 
 import signal
+import types
 import pytest
 
 import psn_monitor as monitor
@@ -733,3 +734,45 @@ def test_the_credential_guidance_opens_its_own_group(capsys):
 # Verifies the guide link opens the setup page the sibling monitors link, with no section fragment
 def test_the_welcome_guide_link_opens_the_shared_setup_page():
     assert monitor.QUICK_START_GUIDE_URL.endswith("/setup-and-first-run/")
+
+
+# Verifies the doctor setup runs reports the source a restart would report, not the fallback label
+def test_saved_secrets_are_credited_to_the_dotenv_file(monkeypatch, tmp_path):
+    env_path = tmp_path / ".env"
+    env_path.write_text(f"PSN_NPSSO={NPSSO}\n", encoding="utf-8")
+    monkeypatch.setattr(monitor, "SECRET_SOURCES", {})
+    monkeypatch.setattr(monitor, "PSN_NPSSO", "")
+    state = types.SimpleNamespace(config_values={}, secret_updates={"PSN_NPSSO": NPSSO})
+
+    monitor._wizard_apply_saved_values(state, env_path=env_path)
+
+    assert monitor.SECRET_SOURCES["PSN_NPSSO"] == "dotenv file"
+    assert "PSN_NPSSO" in monitor.doctor_secret_sources()["dotenv file"]
+
+
+# Verifies an exported secret keeps its own source after setup, since the export still wins at the next start
+def test_an_exported_secret_is_not_credited_to_the_dotenv_file(monkeypatch, tmp_path):
+    env_path = tmp_path / ".env"
+    env_path.write_text(f"PSN_NPSSO={NPSSO}\n", encoding="utf-8")
+    monkeypatch.setenv("PSN_NPSSO", NPSSO)
+    monkeypatch.setattr(monitor, "SECRET_SOURCES", {})
+    monkeypatch.setattr(monitor, "EXPORTED_SECRET_KEYS", {"PSN_NPSSO"})
+    state = types.SimpleNamespace(config_values={}, secret_updates={})
+
+    monitor._wizard_apply_saved_values(state, env_path=env_path)
+
+    assert monitor.SECRET_SOURCES["PSN_NPSSO"] == "environment"
+
+
+# Verifies an Auto zone in the saved config is resolved before doctor reads it, as it is on a normal start
+def test_the_saved_timezone_is_resolved_before_doctor_reads_it(monkeypatch):
+    monkeypatch.setattr(monitor, "LOCAL_TIMEZONE", "Europe/Warsaw")
+    monkeypatch.setattr(monitor, "LOCAL_TIMEZONE_STATE", "config")
+    monkeypatch.setattr(monitor, "get_localzone", lambda: "Europe/Warsaw")
+    state = types.SimpleNamespace(config_values={"LOCAL_TIMEZONE": "Auto"}, secret_updates={})
+
+    advice = monitor._wizard_apply_saved_values(state, env_path=None)
+
+    assert advice is None
+    assert monitor.LOCAL_TIMEZONE == "Europe/Warsaw"
+    assert monitor.TIMEZONE_CHECK_LABELS[monitor.LOCAL_TIMEZONE_STATE] == "Local timezone can be detected"
