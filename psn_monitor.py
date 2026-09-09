@@ -625,9 +625,21 @@ def tool_command_prefix(method=None):
     return "psn_monitor"
 
 
-# Returns a complete, copy-pasteable command line for this tool with every argument quoted for the host shell
-def tool_command(*arguments, method=None):
-    return " ".join([tool_command_prefix(method), *[render_command([argument]) for argument in arguments]])
+# Returns the --config-file and --env-file arguments this run was given, skipping any the caller already passed
+def active_path_arguments(arguments=()):
+    given = {str(argument) for argument in arguments}
+    paths = []
+    if CLI_CONFIG_PATH and "--config-file" not in given:
+        paths.extend(("--config-file", str(CLI_CONFIG_PATH)))
+    if DOTENV_FILE and str(DOTENV_FILE).casefold() != "none" and "--env-file" not in given:
+        paths.extend(("--env-file", str(DOTENV_FILE)))
+    return paths
+
+
+# Returns a copy-pasteable command line for this tool, carrying the config and dotenv paths this run was given
+def tool_command(*arguments, method=None, include_paths=True):
+    parts = [*arguments, *(active_path_arguments(arguments) if include_paths else ())]
+    return " ".join([tool_command_prefix(method), *[render_command([part]) for part in parts]])
 
 
 # Stable recovery categories. Every code here is produced somewhere in this file, and nothing else is accepted
@@ -762,10 +774,10 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         return make_recovery_advice("resource.exhausted", "This process ran out of file descriptors, which is a local limit and not a PlayStation Network problem", recovery_fix_with_guide(f"Raise the file descriptor limit, for example with 'ulimit -n 4096', or set LimitNOFILE= if you run under systemd, then restart the tool.{npsso_note}", DIAGNOSTICS_GUIDE_URL), False, safe_detail)
 
     if context == "config.missing":
-        return make_recovery_advice("config.missing", safe_detail or "The configuration file was not found", recovery_fix_with_guide(f"Check the --config-file path, or create one with: {tool_command('--generate-config', 'psn_monitor.conf')}", CONFIG_GUIDE_URL), False, safe_detail)
+        return make_recovery_advice("config.missing", safe_detail or "The configuration file was not found", recovery_fix_with_guide(f"Check the --config-file path, or create one with: {tool_command('--generate-config', 'psn_monitor.conf', include_paths=False)}", CONFIG_GUIDE_URL), False, safe_detail)
 
     if context == "config.invalid":
-        return make_recovery_advice("config.invalid", safe_detail or "The configuration file could not be loaded", recovery_fix_with_guide(f"Config files are read as data. Only documented SETTING = value lines with plain literal values are accepted. Correct the reported line, or write a fresh template to a different path with: {tool_command('--generate-config', '<new-file>')}", CONFIG_GUIDE_URL), False, safe_detail)
+        return make_recovery_advice("config.invalid", safe_detail or "The configuration file could not be loaded", recovery_fix_with_guide(f"Config files are read as data. Only documented SETTING = value lines with plain literal values are accepted. Correct the reported line, or write a fresh template to a different path with: {tool_command('--generate-config', '<new-file>', include_paths=False)}", CONFIG_GUIDE_URL), False, safe_detail)
 
     if context == "secret.missing":
         return make_recovery_advice("secret.missing", safe_detail or "A required credential is missing", recovery_fix_with_guide(npsso_recovery_fix(), SECRETS_GUIDE_URL), False, safe_detail)
@@ -5335,7 +5347,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     terminal_is_interactive = sys.stdin.isatty() if interactive is None else bool(interactive)
     if not terminal_is_interactive:
         print("The setup wizard needs an interactive terminal (TTY).")
-        print(f"Run --setup from an interactive shell, or write a config to edit by hand with: {tool_command('--generate-config', 'psn_monitor.conf')}")
+        print(f"Run --setup from an interactive shell, or write a config to edit by hand with: {tool_command('--generate-config', 'psn_monitor.conf', include_paths=False)}")
         print(f"Guide: {QUICK_START_GUIDE_URL}")
         return 1
 

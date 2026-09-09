@@ -34,7 +34,7 @@ Guide: https://misiektoja.github.io/psn_monitor/setup-and-first-run/#psn-npsso-c
 
 Every failure is sorted into a category, so an expired npsso code, a hidden profile, a rate limit, an unreachable network and a local file descriptor limit each get their own instructions instead of one generic message. Problems the tool survives, such as a missing optional library, are reported as `* Warning:` and it keeps running.
 
-Commands in the fix text match how you installed the tool: `psn_monitor ...` for a PyPI install and `python3 psn_monitor.py ...` for a downloaded script.
+Commands in the fix text match how you installed the tool: `psn_monitor ...` for a PyPI install and `python3 psn_monitor.py ...` for a downloaded script. It also carries the `--config-file` or `--env-file` you started with, so it can be pasted as it is.
 
 During a long outage the fix is printed once and each retry after that is a single line, until the failure changes or a check succeeds. The raw library error is not shown by default. Add `--debug` to print it as a `Technical detail:` line, with every secret redacted.
 

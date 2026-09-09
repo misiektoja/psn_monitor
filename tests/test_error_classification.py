@@ -448,3 +448,30 @@ def test_auth_probe_sends_the_token_only_to_sony(pm_module, monkeypatch):
     assert recorded["url"].startswith("https://ca.account.sony.com/")
     assert recorded["headers"]["Cookie"] == "npsso=npsso-test-value"
     assert recorded["allow_redirects"] is False
+
+
+# Verifies a printed command carries the files this run was given, so the retest reads the settings that failed
+def test_printed_commands_carry_the_files_this_run_was_given(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "CLI_CONFIG_PATH", "/etc/psn.conf")
+    monkeypatch.setattr(pm_module, "DOTENV_FILE", "/etc/psn.env")
+
+    assert pm_module.tool_command("--send-test-webhook", method="pip") == "psn_monitor --send-test-webhook --config-file /etc/psn.conf --env-file /etc/psn.env"
+    assert f"then run: {pm_module.tool_command('--send-test-webhook')}" in pm_module.classify_recovery_error_offline(ValueError("bad"), context="webhook").fix
+
+
+# Verifies --generate-config keeps the paths out, since it writes the new file at the name in the command
+def test_the_generate_config_command_leaves_this_run_out(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "CLI_CONFIG_PATH", "/etc/psn.conf")
+    monkeypatch.setattr(pm_module, "DOTENV_FILE", "/etc/psn.env")
+
+    assert pm_module.tool_command("--generate-config", "psn_monitor.conf", method="pip", include_paths=False) == "psn_monitor --generate-config psn_monitor.conf"
+
+
+# Verifies a caller that already names a file is not given a second copy of it
+def test_a_path_the_caller_passed_is_not_repeated(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "CLI_CONFIG_PATH", "/etc/psn.conf")
+    monkeypatch.setattr(pm_module, "DOTENV_FILE", "/etc/psn.env")
+
+    rendered = pm_module.tool_command("--doctor", "--config-file", "/tmp/other.conf", method="pip")
+
+    assert rendered == "psn_monitor --doctor --config-file /tmp/other.conf --env-file /etc/psn.env"
