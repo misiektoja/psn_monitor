@@ -421,6 +421,19 @@ def test_liveness_check_reports_an_online_user(pm_module, psn_session, fake_cloc
     assert "Liveness check, timestamp:" in output
 
 
+# Verifies the banner explains itself without --verbose too, so a plain run never prints a bare timestamp
+def test_the_liveness_banner_explains_itself_without_diagnostics(pm_module, psn_session, fake_clock, monkeypatch, capsys):
+    monkeypatch.setattr(pm_module, "LIVENESS_CHECK_COUNTER", 2)
+    monkeypatch.setattr(pm_module, "VERBOSE_MODE", False)
+    psn_session([presence_payload()] * 4)
+
+    run_monitor(pm_module)
+
+    output = capsys.readouterr().out
+    assert "* Monitoring healthy for " in output
+    assert "Liveness check, timestamp:" in output
+
+
 # Verifies the offline interval is used while the user is away and the shorter one once they appear
 def test_polling_interval_follows_the_user_status(pm_module, psn_session, fake_clock, monkeypatch):
     monkeypatch.setattr(pm_module, "PSN_CHECK_INTERVAL", 180)

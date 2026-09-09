@@ -985,6 +985,12 @@ class OutageReporter:
         return lasted
 
 
+# Reports that nothing changed, so a quiet run still says it is alive on the liveness cadence
+def print_liveness_banner(message):
+    print(f"* {sanitize_error_text(message)}")
+    print_cur_ts("Liveness check, timestamp:\t")
+
+
 # Reports a lasting failure on the liveness cadence, so a broken run still says it is alive without repeating itself
 def print_outage_liveness(target, advice, since):
     print(f"* Monitoring degraded for {target}. {advice.summary} since {get_date_from_ts(since)}")
@@ -4227,8 +4233,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         alive_counter += 1
 
         if LIVENESS_CHECK_COUNTER and alive_counter >= LIVENESS_CHECK_COUNTER:
-            verbose_print(f"Monitoring healthy for {psn_user_id}. The user is {status or 'unknown'} with no activity change since the last check")
-            print_cur_ts("Liveness check, timestamp:\t")
+            print_liveness_banner(f"Monitoring healthy for {psn_user_id}. The user is {status or 'unknown'} with no activity change since the last check")
             alive_counter = 0
 
         sleep_interval = get_sleep_interval()
