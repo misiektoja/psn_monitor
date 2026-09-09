@@ -276,8 +276,8 @@ COLOR_THEME = {
     "header": "bright_cyan",
     "section": "bright_white",
     # Identity
-    "username": "blue underline",
-    "user_uri_id": "bright_magenta",
+    "username": "bright_cyan underline",
+    "id": "bright_magenta",
     # Presence status values
     "status_active": "green",
     "status_inactive": "red",
@@ -1272,8 +1272,8 @@ DEFAULT_COLOR_THEME = {
     "header": "bright_cyan",
     "section": "bright_white",
     # Identity
-    "username": "blue underline",
-    "user_uri_id": "bright_magenta",
+    "username": "bright_cyan underline",
+    "id": "bright_magenta",
     # Presence status values
     "status_active": "green",
     "status_inactive": "red",
@@ -1303,6 +1303,9 @@ DEFAULT_COLOR_THEME = {
     "boolean_false": "red",
     "link": "blue underline",
 }
+
+# COLOR_THEME key names used by older releases, still honoured so an existing config keeps working
+_THEME_KEY_ALIASES = {"user_uri_id": "id"}
 
 ANSI_RESET = "\033[0m"
 
@@ -1334,12 +1337,12 @@ _STYLE_CODES = {
 BLOCK_STYLE_PARTS = ("error", "warning", "signal", "email", "webhook", "info")
 
 # Parts that carry a name supplied by PlayStation Network or by the user, which a block style must never hide
-NAME_STYLE_PARTS = ("username", "user_uri_id", "game", "platform", "trophy", "link")
+NAME_STYLE_PARTS = ("username", "id", "game", "platform", "trophy", "link")
 
 # Output labels whose value is coloured with one theme style, longest label first so a prefix cannot win
 _LABEL_STYLES = (
-    (("PlayStation ID:", "PSN ID:"), "username"),
-    (("PSN account ID:", "Account ID:"), "user_uri_id"),
+    (("PlayStation ID:", "PSN ID:", "Target:"), "username"),
+    (("PSN account ID:", "Account ID:"), "id"),
     (("User is currently in-game:", "In-game:"), "game"),
     (("Trophies earned:", "Trophy level:"), "trophy"),
     (("Platform:",), "platform"),
@@ -1455,7 +1458,14 @@ def init_color_output(stream):
         return
 
     configured = globals().get("COLOR_THEME")
-    theme = {**DEFAULT_COLOR_THEME, **(configured if isinstance(configured, dict) else {})}
+    user_theme = configured if isinstance(configured, dict) else {}
+    theme = {**DEFAULT_COLOR_THEME, **user_theme}
+
+    # A config written against an older key name still wins over the default, unless it also sets the current name
+    for legacy_name, current_name in _THEME_KEY_ALIASES.items():
+        if legacy_name in user_theme and current_name not in user_theme:
+            theme[current_name] = user_theme[legacy_name]
+
     _COLOR_STYLES = {name: sequence for name, style in theme.items() for sequence in (_build_ansi_sequence(style),) if sequence}
 
 

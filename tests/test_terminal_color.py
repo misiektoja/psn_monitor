@@ -178,7 +178,7 @@ def test_startup_banner_text_is_unchanged(colored, capsys):
 # Verifies labelled PlayStation rows colour the value with the expected theme part
 @pytest.mark.parametrize("line,part", [
     ("PlayStation ID:\t\t\tmisiektoja", "username"),
-    ("PSN account ID:\t\t\t1234567890123456789", "user_uri_id"),
+    ("PSN account ID:\t\t\t1234567890123456789", "id"),
     ("Platform:\t\t\tPlayStation 5", "platform"),
     ("Trophy level:\t\t\t312 (45% to next, tier 2)", "trophy"),
     ("Trophies earned:\t\t12 Platinum, 210 Gold", "trophy"),
@@ -580,7 +580,35 @@ def test_the_startup_line_colours_only_the_account_name(colored):
 
 # Verifies the numeric account ID keeps its own colour, so the two identifiers stay distinguishable
 def test_the_account_id_uses_the_id_colour(colored):
-    assert colored["user_uri_id"] in monitor._colorize_line("PSN account ID:\t\t\t1234567890123456789")
+    assert colored["id"] in monitor._colorize_line("PSN account ID:\t\t\t1234567890123456789")
+
+
+# Verifies the summary target row is coloured as the PlayStation ID it holds
+def test_the_target_row_uses_the_name_colour(colored):
+    line = "* Target:                       misiektoja"
+    assert monitor._colorize_line(line) == f"* Target:                       {colored['username']}misiektoja{monitor.ANSI_RESET}"
+
+
+# Verifies a config written against the pre-rename 'user_uri_id' key still colours identifiers
+def test_legacy_theme_key_still_applies(monkeypatch):
+    monkeypatch.setattr(monitor, "COLORED_OUTPUT", True)
+    monkeypatch.setattr(monitor, "COLOR_THEME", {"user_uri_id": "red"})
+    monkeypatch.setattr(monitor, "COLOR_ENABLED", False)
+    monkeypatch.setattr(monitor, "_COLOR_STYLES", {})
+    monkeypatch.setattr(monitor, "_stream_supports_color", lambda stream: True)
+    monitor.init_color_output(StringIO())
+    assert monitor._COLOR_STYLES["id"] == monitor._build_ansi_sequence("red")
+
+
+# Verifies the current key name wins when a config sets both the old and the new name
+def test_current_theme_key_wins_over_the_legacy_name(monkeypatch):
+    monkeypatch.setattr(monitor, "COLORED_OUTPUT", True)
+    monkeypatch.setattr(monitor, "COLOR_THEME", {"user_uri_id": "red", "id": "green"})
+    monkeypatch.setattr(monitor, "COLOR_ENABLED", False)
+    monkeypatch.setattr(monitor, "_COLOR_STYLES", {})
+    monkeypatch.setattr(monitor, "_stream_supports_color", lambda stream: True)
+    monitor.init_color_output(StringIO())
+    assert monitor._COLOR_STYLES["id"] == monitor._build_ansi_sequence("green")
 
 
 # Verifies the guided setup surface is coloured, not only the monitoring output. The install method decides

@@ -230,8 +230,8 @@ COLOR_THEME = {
 | --- | --- | --- |
 | `header` | `bright_cyan` | Report and wizard headings, and the tool name in the startup line |
 | `section` | `bright_white` | Section names and every command the tool tells you to run |
-| `username` | `blue underline` | The monitored PlayStation ID, the detected install method and wizard menu numbers |
-| `user_uri_id` | `bright_magenta` | The numeric PSN account ID |
+| `username` | `bright_cyan underline` | The monitored PlayStation ID, the detected install method and wizard menu numbers |
+| `id` | `bright_magenta` | The numeric PSN account ID. A configuration file that still sets `user_uri_id` keeps working |
 | `status_active` | `green` | An online or available presence, and a game that just started |
 | `status_inactive` | `red` | A standby or unavailable presence, and a game that just stopped |
 | `status_offline` | `red` | An offline presence |
