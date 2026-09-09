@@ -255,7 +255,7 @@ def test_an_unparsable_duration_is_refused(typed):
 
 # Verifies a duration the parser rejects is asked again with the accepted formats named
 def test_an_invalid_duration_is_asked_again(tmp_path, capsys):
-    script = happy_path()[:2] + ("later", "300", "") + happy_path()[4:]
+    script = happy_path()[:2] + ("later", "y", "300", "") + happy_path()[4:]
 
     run_wizard(ScriptedTerminal(*script))
 
@@ -939,7 +939,7 @@ def test_the_dotenv_destination_cannot_be_the_configuration_file(tmp_path, capsy
 
 # Verifies the port question rejects a number no TCP port can be, instead of saving it for the doctor to reject
 def test_the_smtp_port_question_rejects_a_number_above_the_port_range(pm_module, capsys):
-    answers = iter(["70000", "2525"])
+    answers = iter(["70000", "y", "2525"])
 
     chosen = pm_module._wizard_ask_positive_int("SMTP port", 587, maximum=65535, input_func=lambda _prompt: next(answers))
 
@@ -949,7 +949,7 @@ def test_the_smtp_port_question_rejects_a_number_above_the_port_range(pm_module,
 
 # Verifies declining the retry offer keeps the saved value rather than asking the same question forever
 def test_declining_the_retry_offer_keeps_the_saved_number(pm_module, capsys):
-    answers = iter(["", "n"])
+    answers = iter(["70000", "n"])
 
     assert pm_module._wizard_ask_positive_int("SMTP port", 587, maximum=65535, input_func=lambda _prompt: next(answers)) == 587
 
@@ -1070,3 +1070,18 @@ def test_the_summary_names_the_default_status_file(capsys):
 
     summary = capsys.readouterr().out.rsplit("Setup summary", 1)[1]
     assert f"Status file:                    psn_{USER_ID}_last_status.json" in summary
+
+
+# Verifies declining the retry offer after a value the wizard cannot use keeps the default rather than asking again
+def test_a_rejected_duration_keeps_the_default(pm_module, capsys):
+    prompts = []
+    answers = iter(["later", "n"])
+
+    def script(prompt):
+        prompts.append(prompt)
+        return next(answers)
+
+    assert pm_module._wizard_ask_duration("Polling interval while the user is offline (seconds or use s/m/h/d)", 60, input_func=script) == 60
+    assert "Keeping 60s - 1m." in capsys.readouterr().out
+    # The hint the question carries belongs in the prompt, not in the offer that repeats it
+    assert any("Try entering the Polling interval while the user is offline again? [Y/n]: " in prompt for prompt in prompts), prompts
