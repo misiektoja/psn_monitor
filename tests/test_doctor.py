@@ -478,7 +478,7 @@ def test_a_fresh_install_reports_email_as_disabled(pm_module, monkeypatch):
 
     check = pm_module.doctor_check_notifications(report)[0]
 
-    assert (check.status, check.label) == ("PASS", "Email alerts are disabled")
+    assert (check.status, check.label) == ("PASS", "Email notifications are disabled")
     assert check.detail == "No SMTP connection was attempted and no email was sent"
     assert report.email_ready is False
 

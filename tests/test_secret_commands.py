@@ -425,3 +425,14 @@ def test_the_next_steps_carry_the_target_the_config_does_not_supply(tmp_path, ca
     assert with_target.count("someone") == 2
     assert "someone" not in already_saved
     assert "<psn_user_id>" not in already_saved
+
+
+# Verifies the replace question names the secret rather than its dotenv key, the way the siblings word it
+def test_the_replace_question_names_the_secret_not_the_key(tmp_path, monkeypatch, psn_double):
+    env_file = tmp_path / ".env"
+    env_file.write_text('PSN_NPSSO="working-code"\n', encoding="utf-8")
+    prompts = []
+
+    monitor.run_set_npsso(env_file=str(env_file), interactive=True, input_func=lambda prompt: prompts.append(prompt) or "y", getpass_func=lambda prompt: NPSSO)
+
+    assert prompts == [f"Replace the saved NPSSO code in '{env_file.resolve()}'? [y/N]: "]

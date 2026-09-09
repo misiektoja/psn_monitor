@@ -810,7 +810,7 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         return make_recovery_advice("secret.missing", safe_detail or "A required credential is missing", recovery_fix_with_guide(npsso_recovery_fix(), SECRETS_GUIDE_URL), False, safe_detail)
 
     if context == "target.missing":
-        return make_recovery_advice("target.missing", safe_detail or "No PlayStation ID was given", recovery_fix_with_guide(f"Pass the account to watch: {tool_command('<psn_user_id>')}. Use the {PSN_TARGET_FORMS}", QUICK_START_GUIDE_URL), False, safe_detail)
+        return make_recovery_advice("target.missing", safe_detail or "No PlayStation ID was provided", recovery_fix_with_guide(f"Pass the account to watch: {tool_command('<psn_user_id>')}. Use the {PSN_TARGET_FORMS}", QUICK_START_GUIDE_URL), False, safe_detail)
 
     if context == "secret.entry":
         return make_recovery_advice("secret.entry", safe_detail or "The value was not entered, so nothing was written", recovery_fix_with_guide("Run the command again from an interactive terminal and enter the value when prompted", SECRETS_GUIDE_URL), False, safe_detail)
@@ -1219,7 +1219,7 @@ def apply_webhook_cli_overrides(args, parser):
         detected = detect_webhook_provider(WEBHOOK_URL)
         if detected and detected != normalized_webhook_provider():
             WEBHOOK_PROVIDER = detected
-            print(f"* Warning: the configured webhook provider does not match the destination URL, using {webhook_provider_display_name(detected)}\n")
+            print(f"* Warning: Configured webhook provider did not match the URL. Using {webhook_provider_display_name(detected)}.")
 
 
 # Matches every ANSI escape sequence, used to keep colour codes out of files
@@ -4499,7 +4499,7 @@ def doctor_check_authentication(report):
 # Checks the monitored profile can be found and that it shares the activity the tool reads
 def doctor_check_target(report, psn_user_id=None):
     if not psn_user_id:
-        advice = classify_recovery_error(context="target.missing", detail="No PlayStation ID was given")
+        advice = classify_recovery_error(context="target.missing", detail="No PlayStation ID was provided")
         return [make_doctor_check("Target", "FAIL", advice.summary, advice=advice)]
     if report.psnawp is None:
         # Authentication already failed and reported why. A second row would repeat one problem as two
@@ -4533,7 +4533,7 @@ def doctor_check_email_notifications(report):
     # An error alert is on by default, so on its own it cannot make a fresh install look configured
     deliberate = ACTIVE_INACTIVE_NOTIFICATION or GAME_CHANGE_NOTIFICATION
     if not deliberate and not (ERROR_NOTIFICATION and problem is None):
-        return [make_doctor_check("Notifications", "PASS", "Email alerts are disabled", "No SMTP connection was attempted and no email was sent")]
+        return [make_doctor_check("Notifications", "PASS", "Email notifications are disabled", "No SMTP connection was attempted and no email was sent")]
     if problem is not None:
         return [doctor_email_unusable_check(*problem)]
     try:
@@ -4622,7 +4622,7 @@ def build_doctor_report(psn_user_id=None, config_path=None, env_path=None, confi
         ("configuration", lambda: doctor_check_configuration(config_path, env_path, config_advice, timezone_advice, psn_user_id)),
         ("authentication", lambda: doctor_check_authentication(report)),
         ("connectivity", lambda: doctor_check_connectivity()),
-        ("target", lambda: doctor_check_target(report, psn_user_id)),
+        ("the monitored profile", lambda: doctor_check_target(report, psn_user_id)),
         ("notifications", lambda: doctor_check_notifications(report)),
     )
     for label, run_step in steps:
@@ -5594,7 +5594,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     terminal_is_interactive = sys.stdin.isatty() if interactive is None else bool(interactive)
     if not terminal_is_interactive:
         print("The setup wizard needs an interactive terminal (TTY).")
-        print(f"Run --setup from an interactive shell, or write a config to edit by hand with: {tool_command('--generate-config', 'psn_monitor.conf', include_paths=False)}")
+        print("Run --setup from an interactive shell or use --generate-config and edit the files manually.")
         print(f"Guide: {QUICK_START_GUIDE_URL}")
         return 1
 
@@ -5915,7 +5915,7 @@ def run_set_secret(key, flag, subject, guide_url, guidance, prompt_text, validat
     ask = input if input_func is None else input_func
     if dotenv_contains_key(destination, key):
         try:
-            confirmed = str(read_interactively(ask, f"{key} is already set in '{destination}'. Replace it? [y/N]: ")).strip().casefold() in ("y", "yes")
+            confirmed = str(read_interactively(ask, f"Replace the saved {subject} in '{destination}'? [y/N]: ")).strip().casefold() in ("y", "yes")
         except (EOFError, KeyboardInterrupt):
             print()
             raise RecoveryError(secret_entry_cancelled_advice(subject, flag, guide_url)) from None

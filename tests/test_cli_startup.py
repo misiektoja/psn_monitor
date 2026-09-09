@@ -646,7 +646,7 @@ def test_a_recognised_url_corrects_the_configured_provider(pm_module, monkeypatc
     assert run_main(pm_module, monkeypatch, [USER_ID, "--webhook-url", WEBHOOK_URL]) == 0
 
     assert pm_module.WEBHOOK_PROVIDER == "discord"
-    assert "does not match the destination URL" in capsys.readouterr().out
+    assert "Configured webhook provider did not match the URL" in capsys.readouterr().out
 
 
 # Verifies an explicitly chosen provider is left alone, even when the URL points somewhere else
