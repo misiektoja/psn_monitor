@@ -811,6 +811,13 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
     if context == "file.unwritable":
         return make_recovery_advice("file.unwritable", safe_detail or "A file the tool needs could not be written", recovery_fix_with_guide("Check that the directory exists, that this user can write to it and that there is free space, then retry", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
 
+    if context == "connectivity":
+        # Classified from the error, because the detail names the endpoint rather than the failure
+        cause = str(error or "").lower()
+        if "timed out" in cause or "timeout" in cause:
+            return make_recovery_advice("network.timeout", "The connectivity endpoint did not answer in time", recovery_fix_with_guide("Check network, DNS, proxy and CHECK_INTERNET_URL settings", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+        return make_recovery_advice("network.unavailable", "The connectivity endpoint could not be reached", recovery_fix_with_guide("Check network, DNS, proxy and CHECK_INTERNET_URL settings", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+
     types = recovery_exception_types()
 
     if context.startswith("smtp"):
@@ -1866,7 +1873,7 @@ def check_internet(url=None, timeout=None, quiet=False):
         LAST_CONNECTIVITY_ERROR = e
         # Quiet callers render the failure themselves, which doctor needs so nothing lands on its progress line
         if not quiet:
-            report_recovery_error(e, context="startup", detail=f"The connectivity check to {url} failed: {e}")
+            report_recovery_error(e, context="connectivity", detail=f"The connectivity check to {url} failed: {e}")
         return False
 
 
@@ -4325,7 +4332,7 @@ def doctor_check_connectivity():
     LAST_CONNECTIVITY_ERROR = None
     if check_internet(quiet=True):
         return [make_doctor_check("Connectivity", "PASS", "The connectivity endpoint is reachable", f"Endpoint: {CHECK_INTERNET_URL}")]
-    advice = classify_recovery_error(LAST_CONNECTIVITY_ERROR, context="startup", detail=f"Could not reach {CHECK_INTERNET_URL}")
+    advice = classify_recovery_error(LAST_CONNECTIVITY_ERROR, context="connectivity", detail=f"Could not reach {CHECK_INTERNET_URL}")
     return [make_doctor_check("Connectivity", "FAIL", "The connectivity endpoint could not be reached", f"Endpoint: {CHECK_INTERNET_URL}", advice)]
 
 

@@ -934,6 +934,7 @@ def test_the_connectivity_row_names_the_shared_endpoint(pm_module, monkeypatch):
 
     assert (passing.status, passing.label, passing.detail) == ("PASS", "The connectivity endpoint is reachable", "Endpoint: https://probe.example/ping")
     assert (failing.status, failing.label, failing.detail) == ("FAIL", "The connectivity endpoint could not be reached", "Endpoint: https://probe.example/ping")
+    assert failing.advice is not None and failing.advice.fix.splitlines()[0] == "Check network, DNS, proxy and CHECK_INTERNET_URL settings"
 
 
 # Verifies the output rows wait for the target instead of checking a placeholder path that is never written
