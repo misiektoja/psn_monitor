@@ -582,7 +582,7 @@ def is_too_many_open_files(ex):
 # Documentation the recovery advice points at, kept as README anchors so one file stays the source of truth
 DOCS_BASE_URL = "https://misiektoja.github.io/psn_monitor"
 INSTALLATION_GUIDE_URL = f"{DOCS_BASE_URL}/installation/"
-QUICK_START_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#quick-start"
+QUICK_START_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/"
 CONFIG_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#configuration-file"
 NPSSO_GUIDE_URL = f"{DOCS_BASE_URL}/setup-and-first-run/#psn-npsso-code"
 SECRETS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#storing-secrets"
