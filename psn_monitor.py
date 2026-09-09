@@ -1845,9 +1845,16 @@ def psn_client(npsso=None):
         debug_print("TLS verification could not be applied to the PSNAWP session", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
     return client
 
+# The last connectivity failure, so a quiet caller can classify it instead of the check printing it
+LAST_CONNECTIVITY_ERROR = None
+
 
 # Checks internet connectivity
-def check_internet(url=CHECK_INTERNET_URL, timeout=CHECK_INTERNET_TIMEOUT):
+def check_internet(url=None, timeout=None, quiet=False):
+    # Resolved at call time so a config file or dotenv value can change these, which binding them as default
+    # arguments prevented
+    url = CHECK_INTERNET_URL if url is None else url
+    timeout = CHECK_INTERNET_TIMEOUT if timeout is None else timeout
     debug_print("Connectivity check", url=url, timeout=f"{timeout}s")
     try:
         _ = req.get(url, timeout=timeout, verify=VERIFY_SSL)
@@ -1855,7 +1862,11 @@ def check_internet(url=CHECK_INTERNET_URL, timeout=CHECK_INTERNET_TIMEOUT):
         return True
     except req.RequestException as e:
         debug_print("Connectivity check", url=url, outcome="failed", error=f"{type(e).__name__}: {e}")
-        report_recovery_error(e, context="startup", detail=f"The connectivity check to {url} failed: {e}")
+        global LAST_CONNECTIVITY_ERROR
+        LAST_CONNECTIVITY_ERROR = e
+        # Quiet callers render the failure themselves, which doctor needs so nothing lands on its progress line
+        if not quiet:
+            report_recovery_error(e, context="startup", detail=f"The connectivity check to {url} failed: {e}")
         return False
 
 
@@ -4102,7 +4113,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 # so a user who runs two of them reads one report format rather than two
 DOCTOR_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#doctor-preflight"
 
-DOCTOR_SECTIONS = ("Environment", "Configuration", "Authentication", "Target", "Notifications")
+DOCTOR_SECTIONS = ("Environment", "Configuration", "Authentication", "Connectivity", "Target", "Notifications")
 
 # Delivery results are printed as they happen rather than inside a section, but they still count in the summary
 DOCTOR_DELIVERY_SECTION = "Optional delivery tests"
@@ -4283,8 +4294,11 @@ def doctor_check_configuration(config_path=None, env_path=None, config_advice=No
     else:
         checks.append(make_doctor_check("Configuration", "PASS", "CSV history is disabled"))
 
-    status_path = resolve_status_file(psn_user_id or "<psn_user_id>")
-    if path_is_writable(status_path):
+    # A configured path is fixed, so it stays checkable without a target. The default name carries the target
+    status_path = os.path.expanduser(PSN_STATUS_FILE) if PSN_STATUS_FILE else (resolve_status_file(psn_user_id) if psn_user_id else "")
+    if not status_path:
+        checks.append(make_doctor_check("Configuration", "PASS", "Status file will be finalized after a target is selected", "Base name: psn_<target>_last_status.json in the working directory"))
+    elif path_is_writable(status_path):
         checks.append(make_doctor_check("Configuration", "PASS", "Status file is writable", f"Path: {status_path}"))
     else:
         advice = classify_recovery_error(context="file.unwritable", detail=f"Status file '{status_path}' cannot be written")
@@ -4293,13 +4307,26 @@ def doctor_check_configuration(config_path=None, env_path=None, config_advice=No
     if DISABLE_LOGGING:
         checks.append(make_doctor_check("Configuration", "PASS", "Output logging is disabled"))
     else:
-        log_path = resolve_log_path(psn_user_id or "<psn_user_id>")
-        if path_is_writable(log_path):
+        # A name with an extension is used as it is, so only a bare base name has to wait for the target
+        log_path = resolve_log_path(psn_user_id) if (psn_user_id or Path(os.path.expanduser(PSN_LOGFILE)).suffix) else ""
+        if not log_path:
+            checks.append(make_doctor_check("Configuration", "PASS", "Log destination will be finalized after a target is selected", f"Base path: {Path(os.path.expanduser(PSN_LOGFILE))}"))
+        elif path_is_writable(log_path):
             checks.append(make_doctor_check("Configuration", "PASS", "Log file is writable", f"Path: {log_path}"))
         else:
             advice = classify_recovery_error(context="file.unwritable", detail=f"Log file '{log_path}' cannot be written")
             checks.append(make_doctor_check("Configuration", "FAIL", advice.summary, advice=advice))
     return checks
+
+
+# Confirms the endpoint the tool checks at startup answers, using the configured URL, timeout and TLS setting
+def doctor_check_connectivity():
+    global LAST_CONNECTIVITY_ERROR
+    LAST_CONNECTIVITY_ERROR = None
+    if check_internet(quiet=True):
+        return [make_doctor_check("Connectivity", "PASS", "The connectivity endpoint is reachable", f"Endpoint: {CHECK_INTERNET_URL}")]
+    advice = classify_recovery_error(LAST_CONNECTIVITY_ERROR, context="startup", detail=f"Could not reach {CHECK_INTERNET_URL}")
+    return [make_doctor_check("Connectivity", "FAIL", "The connectivity endpoint could not be reached", f"Endpoint: {CHECK_INTERNET_URL}", advice)]
 
 
 # Authenticates once and keeps the session, so the target checks do not sign in a second time
@@ -4442,6 +4469,7 @@ def build_doctor_report(psn_user_id=None, config_path=None, env_path=None, confi
         ("environment", lambda: doctor_check_environment()),
         ("configuration", lambda: doctor_check_configuration(config_path, env_path, config_advice, timezone_advice, psn_user_id)),
         ("authentication", lambda: doctor_check_authentication(report)),
+        ("connectivity", lambda: doctor_check_connectivity()),
         ("target", lambda: doctor_check_target(report, psn_user_id)),
         ("notifications", lambda: doctor_check_notifications(report)),
     )

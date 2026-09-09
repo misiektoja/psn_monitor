@@ -1,5 +1,6 @@
 """Tests that a config file is read as data and never executed."""
 
+import inspect
 import subprocess
 import sys
 from pathlib import Path
@@ -108,3 +109,16 @@ def test_config_file_none_disables_discovery(tmp_path):
     output = result.stdout + result.stderr
     assert "Config file 'none' does not exist" not in output
     assert "PSN_USER_ID needs to be defined" in output
+
+
+# Verifies a config-file URL and timeout reach the startup check rather than values frozen at import
+def test_the_connectivity_settings_are_read_at_call_time(pm_module, monkeypatch):
+    recorded = {}
+    parameters = inspect.signature(pm_module.check_internet).parameters
+    monkeypatch.setattr(pm_module, "CHECK_INTERNET_URL", "https://probe.example/ping")
+    monkeypatch.setattr(pm_module, "CHECK_INTERNET_TIMEOUT", 17)
+    monkeypatch.setattr(pm_module.req, "get", lambda url, **kwargs: recorded.update(url=url, **kwargs))
+
+    assert pm_module.check_internet() is True
+    assert [parameters[name].default for name in ("url", "timeout")] == [None, None], "resolving these at import time would freeze them before any config file loads"
+    assert (recorded["url"], recorded["timeout"]) == ("https://probe.example/ping", 17)

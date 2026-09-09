@@ -922,3 +922,33 @@ def test_the_summary_is_rendered_after_the_delivery_tests(pm_module):
         assert max(offers) < min(summaries), f"{function.name} renders the summary before the delivery tests"
 
     assert checked, "no doctor entry point runs the delivery tests and then the summary"
+
+
+# Verifies the connectivity row carries the label and the endpoint detail shared with the sibling monitors
+def test_the_connectivity_row_names_the_shared_endpoint(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "CHECK_INTERNET_URL", "https://probe.example/ping")
+    monkeypatch.setattr(pm_module, "check_internet", lambda **kwargs: True)
+    passing = pm_module.doctor_check_connectivity()[0]
+    monkeypatch.setattr(pm_module, "check_internet", lambda **kwargs: False)
+    failing = pm_module.doctor_check_connectivity()[0]
+
+    assert (passing.status, passing.label, passing.detail) == ("PASS", "The connectivity endpoint is reachable", "Endpoint: https://probe.example/ping")
+    assert (failing.status, failing.label, failing.detail) == ("FAIL", "The connectivity endpoint could not be reached", "Endpoint: https://probe.example/ping")
+
+
+# Verifies the output rows wait for the target instead of checking a placeholder path that is never written
+def test_the_output_rows_wait_for_a_target(pm_module, psn_session, doctor_run, monkeypatch):
+    psn_session([presence_payload(status="online")])
+    monkeypatch.setattr(pm_module, "PSN_STATUS_FILE", "")
+    monkeypatch.setattr(pm_module, "PSN_LOGFILE", "psn_monitor")
+    monkeypatch.setattr(pm_module, "DISABLE_LOGGING", False)
+
+    _, without_target = doctor_run()
+    _, with_target = doctor_run(psn_user_id=USER_ID)
+
+    assert "[PASS] Status file will be finalized after a target is selected" in without_target
+    assert "[PASS] Log destination will be finalized after a target is selected" in without_target
+    assert "Path: psn_<psn_user_id>_last_status.json" not in without_target
+    assert "Path: psn_monitor_<psn_user_id>.log" not in without_target
+    assert "[PASS] Status file is writable" in with_target
+    assert "[PASS] Log file is writable" in with_target
