@@ -5199,6 +5199,7 @@ WIZARD_SECTIONS = (
     ("Email", "Email notifications", "Change SMTP details and which events are mailed.", WIZARD_SMTP_CONFIG_KEYS + WIZARD_EMAIL_NOTIFICATION_KEYS, ("SMTP_PASSWORD",)),
     ("Webhook", "Webhook notifications", "Change the Discord or ntfy destination and which events are sent.", ("WEBHOOK_ENABLED", "WEBHOOK_PROVIDER") + WIZARD_WEBHOOK_NOTIFICATION_KEYS, ("WEBHOOK_URL", "NTFY_ACCESS_TOKEN")),
     ("Output", "Output files", "Change the log, CSV and status file destinations.", ("DISABLE_LOGGING", "CSV_FILE", "PSN_STATUS_FILE"), ()),
+    ("Destinations", "File destinations", "Change the configuration or dotenv output path.", (), ()),
 )
 
 
@@ -5376,6 +5377,50 @@ def _wizard_email_answer_missing(state, key):
     return True
 
 
+# Reports whether a usable secret is already saved, without reading its value into the transcript
+def _wizard_existing_secret(key, env_path):
+    value = None
+    if Path(env_path).is_file():
+        try:
+            from dotenv import dotenv_values
+
+            value = dotenv_values(str(env_path), interpolate=False).get(key)
+        except Exception as exc:
+            debug_print("Reading the dotenv file for an existing secret", path=str(env_path), key=key, outcome="failed", error=f"{type(exc).__name__}: {exc}")
+            value = None
+    if value is None:
+        value = os.environ.get(key)
+    return secret_is_set(value)
+
+
+# Collects an optional ntfy access token without displaying it or contacting the service
+def _wizard_collect_ntfy_access_token(state, input_func=None, getpass_func=None):
+    if _wizard_existing_secret("NTFY_ACCESS_TOKEN", state.env_path):
+        choice = _wizard_ask_choice("Which ntfy authentication should be used?", [
+            ("Keep the saved access token", "Keeps the private value without displaying or changing it."),
+            ("Paste a new access token", "Uses a hidden prompt then saves the replacement in .env."),
+            ("Do not use an access token", "Disables the saved token. Authentication in the topic URL still works."),
+        ], input_func=input_func)
+        if choice == 0:
+            return
+        if choice == 2:
+            state.secret_updates["NTFY_ACCESS_TOKEN"] = ""
+            print("  The saved ntfy access token will be disabled without being displayed.")
+            return
+    elif not _wizard_ask_yes_no("Authenticate this ntfy topic with a separate access token?", default=False, input_func=input_func):
+        print("  No separate access token selected. Authentication already present in the topic URL still works.")
+        return
+    while True:
+        token = _wizard_ask_secret("Paste the ntfy access token only", getpass_func=getpass_func)
+        if not token or ("\r" not in token and "\n" not in token and not token.casefold().startswith(("bearer ", "basic "))):
+            if token:
+                state.secret_updates["NTFY_ACCESS_TOKEN"] = token
+            return
+        print("  Paste only the access token without a Bearer or Basic prefix.")
+        if not _wizard_offer_retry("ntfy access token", input_func=input_func):
+            return
+
+
 # Asks whether to send webhook alerts and collects only the settings that choice needs
 def _wizard_collect_webhook_section(state, input_func=None, getpass_func=None):
     if not _wizard_ask_yes_no("Set up webhook alerts (Discord, ntfy etc.)?", default=bool(state.config_values.get("WEBHOOK_ENABLED")), input_func=input_func):
@@ -5391,35 +5436,35 @@ def _wizard_collect_webhook_section(state, input_func=None, getpass_func=None):
         print("  In Discord: Edit Channel > Integrations > Webhooks > New Webhook > Copy Webhook URL.")
     else:
         print("  In ntfy: choose a hard-to-guess topic. Paste its complete topic URL, or just the topic name when it is hosted on ntfy.sh.")
-    while True:
-        entered = _wizard_ask_secret("Paste the Discord webhook URL" if provider == "discord" else "Paste the ntfy topic URL or ntfy.sh topic name", getpass_func=getpass_func)
-        webhook_url = normalize_ntfy_topic_url(entered) if provider == "ntfy" else str(entered).strip()
-        if validate_webhook_url(webhook_url):
-            _wizard_queue_secret(state, "WEBHOOK_URL", webhook_url, input_func=input_func)
-            break
-        # Nothing can be delivered without a destination, so giving up has to stay reachable from the prompt
-        if not webhook_url:
-            if not _wizard_offer_retry("webhook URL", "Webhook alerts stay off until one is set", input_func=input_func):
+    replace_webhook = True
+    if _wizard_existing_secret("WEBHOOK_URL", state.env_path):
+        url_choice = _wizard_ask_choice("Which webhook URL should be used?", [
+            ("Keep the saved URL", "Keeps the private value without displaying or changing it."),
+            ("Paste a new URL", "Uses a hidden prompt then saves the new private value in .env."),
+        ], input_func=input_func)
+        replace_webhook = url_choice == 1
+    if replace_webhook:
+        while True:
+            entered = _wizard_ask_secret("Paste the Discord webhook URL" if provider == "discord" else "Paste the ntfy topic URL or ntfy.sh topic name", getpass_func=getpass_func)
+            webhook_url = normalize_ntfy_topic_url(entered) if provider == "ntfy" else str(entered).strip()
+            if validate_webhook_url(webhook_url):
+                state.secret_updates["WEBHOOK_URL"] = webhook_url
+                break
+            # Nothing can be delivered without a destination, so giving up has to stay reachable from the prompt
+            if not webhook_url:
+                if not _wizard_offer_retry("webhook URL", "Webhook alerts stay off until one is set", input_func=input_func):
+                    _wizard_disable_webhook(state)
+                    return
+                continue
+            if provider == "ntfy":
+                print("  Enter a complete HTTPS ntfy topic URL or a topic name containing up to 64 letters, numbers, dashes or underscores.")
+            else:
+                print("  That does not look like a complete HTTPS webhook URL. Copy it from the webhook service and try again.")
+            if not _wizard_offer_retry("webhook URL", input_func=input_func):
                 _wizard_disable_webhook(state)
                 return
-            continue
-        if provider == "ntfy":
-            print("  Enter a complete HTTPS ntfy topic URL or a topic name containing up to 64 letters, numbers, dashes or underscores.")
-        else:
-            print("  That does not look like a complete HTTPS webhook URL. Copy it from the webhook service and try again.")
-        if not _wizard_offer_retry("webhook URL", input_func=input_func):
-            _wizard_disable_webhook(state)
-            return
-    if provider == "ntfy" and _wizard_ask_yes_no("Authenticate this ntfy topic with a separate access token?", default=False, input_func=input_func):
-        while True:
-            token = _wizard_ask_secret("Paste the ntfy access token only", getpass_func=getpass_func)
-            if not token or ("\r" not in token and "\n" not in token and not token.casefold().startswith(("bearer ", "basic "))):
-                if token:
-                    _wizard_queue_secret(state, "NTFY_ACCESS_TOKEN", token, input_func=input_func)
-                break
-            print("  Paste only the access token without a Bearer or Basic prefix.")
-            if not _wizard_offer_retry("ntfy access token", input_func=input_func):
-                break
+    if provider == "ntfy":
+        _wizard_collect_ntfy_access_token(state, input_func=input_func, getpass_func=getpass_func)
     state.config_values["WEBHOOK_ENABLED"] = True
     preset = _wizard_ask_choice("Which webhook alerts should be sent?", [
         ("Status and errors, recommended", "Online and offline changes, game changes and monitoring errors."),
@@ -5461,6 +5506,49 @@ def _wizard_collect_output_section(state, input_func=None):
     state.config_values["PSN_STATUS_FILE"] = _wizard_ask_text("Optional status file path (blank uses the default next to the tool)", default=str(state.config_values.get("PSN_STATUS_FILE") or ""), input_func=input_func)
 
 
+# Changes where setup writes, re-asking the sections that hold secrets when the dotenv destination moves
+def _wizard_collect_destination_section(state, input_func=None, getpass_func=None):
+    while True:
+        config_text = _wizard_ask_text("Configuration file destination", default=str(state.config_path), required=True, input_func=input_func)
+        try:
+            selected_config = _wizard_validate_destination(config_text, "Configuration destination")
+            break
+        except ValueError as exc:
+            print(f"  {exc}.")
+    # Both sides are compared resolved, so an unchanged answer written a different way is not read as a move
+    if selected_config != Path(state.config_path).expanduser().resolve():
+        chosen_config = _wizard_choose_config_destination(selected_config, input_func=input_func)
+        # Giving up on every offered path keeps the current destination rather than cancelling the whole setup
+        if chosen_config is not None:
+            state.config_path = chosen_config
+    while True:
+        env_text = _wizard_ask_text("Dotenv file destination", default=str(state.env_path), required=True, input_func=input_func)
+        if env_text.casefold() == "none":
+            print("  Setup needs a writable dotenv file and cannot use 'none'.")
+            continue
+        try:
+            selected_env = _wizard_validate_destination(env_text, "Dotenv destination")
+        except ValueError as exc:
+            print(f"  {exc}.")
+            continue
+        # One file cannot hold both, since saving the configuration would overwrite the secrets beside it
+        if selected_env == Path(state.config_path).expanduser().resolve():
+            print("  The dotenv file has to be a different file from the configuration.")
+            continue
+        break
+    state.config_values["DOTENV_FILE"] = str(selected_env)
+    if selected_env == Path(state.env_path).expanduser().resolve():
+        return
+    state.env_path = selected_env
+    # A secret kept rather than retyped was never queued, so it would be missing from a dotenv file that just moved
+    print("  The dotenv destination changed. Re-enter authentication and notification settings that may contain secrets.")
+    _wizard_collect_auth_section(state, input_func=input_func, getpass_func=getpass_func)
+    print()
+    _wizard_collect_email_section(state, input_func=input_func, getpass_func=getpass_func)
+    print()
+    _wizard_collect_webhook_section(state, input_func=input_func, getpass_func=getpass_func)
+
+
 # Runs one editable section again after resetting only the keys it owns
 def _wizard_edit_setup_section(state, input_func=None, getpass_func=None):
     options = [(label, description) for _name, label, description, _config_keys, _secret_keys in WIZARD_SECTIONS]
@@ -5480,6 +5568,7 @@ def _wizard_edit_setup_section(state, input_func=None, getpass_func=None):
         "Email": lambda: _wizard_collect_email_section(state, input_func=input_func, getpass_func=getpass_func),
         "Webhook": lambda: _wizard_collect_webhook_section(state, input_func=input_func, getpass_func=getpass_func),
         "Output": lambda: _wizard_collect_output_section(state, input_func=input_func),
+        "Destinations": lambda: _wizard_collect_destination_section(state, input_func=input_func, getpass_func=getpass_func),
     }
     collectors[name]()
 

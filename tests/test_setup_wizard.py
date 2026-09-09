@@ -834,3 +834,58 @@ def test_the_recommended_preset_switches_on_every_supported_type(collect, keys, 
     # The notification menu is the last choice each section asks, so two options there means the preset stands alone
     assert [prompt for prompt in terminal.prompts if prompt.startswith("Choose [")][-1] == "Choose [1-2]: "
     assert "2. Custom" in capsys.readouterr().out
+
+
+# Verifies a saved webhook URL and ntfy token are offered by name instead of the generic replace question
+def test_saved_webhook_secrets_are_offered_as_named_choices(tmp_path, capsys):
+    env_path = tmp_path / ".env"
+    env_path.write_text('WEBHOOK_URL="https://ntfy.sh/old-topic"\nNTFY_ACCESS_TOKEN="tk_saved_token"\n', encoding="utf-8")
+    state = monitor.WizardSetupState(tmp_path / "psn_monitor.conf", env_path, dict(vars(monitor)))
+    terminal = ScriptedTerminal("y", "2", "1", "3", "1")
+
+    monitor._wizard_collect_webhook_section(state, input_func=terminal.answer, getpass_func=terminal.secret)
+
+    transcript = capsys.readouterr().out
+    assert "Which webhook URL should be used?" in transcript
+    assert "Which ntfy authentication should be used?" in transcript
+    # Keeping the saved URL queues nothing, so the value already in the file is never rewritten
+    assert "WEBHOOK_URL" not in state.secret_updates
+    assert state.secret_updates["NTFY_ACCESS_TOKEN"] == ""
+
+
+# Verifies the review can move the configuration file, since the summary shows a destination it could not change
+def test_the_destination_section_moves_the_configuration_file(tmp_path):
+    moved = tmp_path / "elsewhere"
+    moved.mkdir()
+    state = monitor.WizardSetupState(tmp_path / "psn_monitor.conf", tmp_path / ".env", dict(vars(monitor)))
+
+    monitor._wizard_collect_destination_section(state, input_func=ScriptedTerminal(str(moved / "psn_monitor.conf"), "").answer)
+
+    assert state.config_path == moved / "psn_monitor.conf"
+    assert state.env_path == tmp_path / ".env"
+    assert state.config_values["DOTENV_FILE"] == str(tmp_path / ".env")
+
+
+# Verifies moving the dotenv re-asks every section holding a secret, since a kept secret was never queued
+def test_moving_the_dotenv_destination_re_asks_the_secret_sections(tmp_path, monkeypatch, capsys):
+    asked = []
+    for name in ("_wizard_collect_auth_section", "_wizard_collect_email_section", "_wizard_collect_webhook_section"):
+        monkeypatch.setattr(monitor, name, lambda state, section=name, **kwargs: asked.append(section))
+    state = monitor.WizardSetupState(tmp_path / "psn_monitor.conf", tmp_path / ".env", dict(vars(monitor)))
+
+    monitor._wizard_collect_destination_section(state, input_func=ScriptedTerminal("", str(tmp_path / ".env-moved")).answer)
+
+    assert state.env_path == tmp_path / ".env-moved"
+    assert state.config_values["DOTENV_FILE"] == str(tmp_path / ".env-moved")
+    assert asked == ["_wizard_collect_auth_section", "_wizard_collect_email_section", "_wizard_collect_webhook_section"]
+    assert "The dotenv destination changed" in capsys.readouterr().out
+
+
+# Verifies one file cannot hold both, since saving the configuration would overwrite the secrets beside it
+def test_the_dotenv_destination_cannot_be_the_configuration_file(tmp_path, capsys):
+    state = monitor.WizardSetupState(tmp_path / "psn_monitor.conf", tmp_path / ".env", dict(vars(monitor)))
+
+    monitor._wizard_collect_destination_section(state, input_func=ScriptedTerminal("", str(tmp_path / "psn_monitor.conf"), "").answer)
+
+    assert state.env_path == tmp_path / ".env"
+    assert "has to be a different file" in capsys.readouterr().out

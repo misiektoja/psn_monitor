@@ -243,6 +243,7 @@ CLASSIFIER_EXEMPTIONS = {
     "sanitize_error_text(message)": "the debug and verbose printers, whose content the redactor guard covers",
     "Cannot clear the screen contents": "a cosmetic notice with nothing for the operator to recover from",
     "Rebuilt the PSNAWP session after": "reports the recovery action taken, printed under the classified advice",
+    "Setup needs a writable dotenv file": "an answer hint inside the question that re-asks, where the next prompt is the recovery",
 }
 
 # Words that mark a printed line as a report of something going wrong
