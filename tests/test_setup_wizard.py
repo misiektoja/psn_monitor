@@ -209,6 +209,18 @@ def test_an_empty_npsso_answer_is_asked_again():
     assert terminal.asked("Continue without the NPSSO code?")
 
 
+# Verifies the wait for PlayStation Network is announced, so a slow check does not read as a hung wizard
+def test_the_npsso_check_says_it_is_waiting_on_playstation_network(capsys):
+    terminal = ScriptedTerminal(*happy_path())
+
+    run_wizard(terminal)
+
+    output = capsys.readouterr().out
+    assert "Checking the NPSSO code with PlayStation Network ..." in output
+    # Announced before the answer arrives, which is the whole point of the line
+    assert output.index("Checking the NPSSO code") < output.index("PlayStation Network accepted the code")
+
+
 # Verifies a code PSN rejects is asked again instead of being written
 def test_a_rejected_npsso_code_is_asked_again(tmp_path, monkeypatch):
     attempts = ["bad-code", NPSSO]

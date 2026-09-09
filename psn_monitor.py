@@ -5104,6 +5104,8 @@ def _wizard_collect_auth_section(state, input_func=None, getpass_func=None, vali
             if not _wizard_offer_retry("NPSSO code", "Nothing can be monitored until one is set", input_func=input_func):
                 return
             continue
+        # PSN exchanges the code for a token before it answers, which takes long enough to look like a hang
+        print("  Checking the NPSSO code with PlayStation Network ...")
         try:
             account = validate(npsso)
         except RecoveryError as exc:
@@ -5228,7 +5230,7 @@ def _wizard_collect_webhook_section(state, input_func=None, getpass_func=None):
     if provider == "discord":
         print("  In Discord: Edit Channel > Integrations > Webhooks > New Webhook > Copy Webhook URL.")
     else:
-        print("  In ntfy: choose a hard-to-guess topic. Paste its name for ntfy.sh or use the complete HTTPS URL for a self-hosted server.")
+        print("  In ntfy: choose a hard-to-guess topic. Paste its complete topic URL, or just the topic name when it is hosted on ntfy.sh.")
     while True:
         entered = _wizard_ask_secret("Paste the Discord webhook URL" if provider == "discord" else "Paste the ntfy topic URL or ntfy.sh topic name", getpass_func=getpass_func)
         webhook_url = normalize_ntfy_topic_url(entered) if provider == "ntfy" else str(entered).strip()
