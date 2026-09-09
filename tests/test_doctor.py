@@ -12,6 +12,11 @@ import pytest
 from conftest import presence_payload
 
 
+# Builds the minimal advice a WARN or FAIL row is required to carry
+def actionable_advice(pm_module):
+    return pm_module.make_recovery_advice("unknown", "a summary", "do the thing", False)
+
+
 # Fails the test if Doctor tries to sign in on a path that must never reach the network
 def _unreachable_smtp(*args, **kwargs):
     raise AssertionError("Doctor must not open an SMTP connection when the sign-in cannot be attempted")
@@ -226,8 +231,8 @@ def test_a_failed_delivery_test_reaches_the_summary(pm_module, psn_session, monk
 ])
 # Verifies each outcome gets its own sentence, since a bare count leaves the reader to decide what it means
 def test_the_summary_says_what_the_counts_mean(pm_module, failures, warnings, sentence):
-    checks = [pm_module.make_doctor_check("Environment", "FAIL", "f") for _ in range(failures)]
-    checks += [pm_module.make_doctor_check("Environment", "WARN", "w") for _ in range(warnings)]
+    checks = [pm_module.make_doctor_check("Environment", "FAIL", "f", "", actionable_advice(pm_module)) for _ in range(failures)]
+    checks += [pm_module.make_doctor_check("Environment", "WARN", "w", "", actionable_advice(pm_module)) for _ in range(warnings)]
 
     assert sentence in pm_module.render_doctor_summary(checks)
 
@@ -814,7 +819,7 @@ def test_the_report_names_the_status_file(pm_module, doctor_run, monkeypatch, tm
 def test_a_row_never_prints_its_summary_twice(pm_module):
     repeated = "WEBHOOK_URL must contain a complete HTTPS link"
 
-    check = pm_module.make_doctor_check("Notifications", "WARN", repeated, repeated)
+    check = pm_module.make_doctor_check("Notifications", "WARN", repeated, repeated, actionable_advice(pm_module))
 
     assert check.label == repeated
     assert check.detail == ""
@@ -891,9 +896,18 @@ def test_a_detail_that_repeats_its_label_is_dropped(pm_module):
 
 
 # Verifies only the four shared markers can reach a report
+def test_an_actionable_row_is_rejected_without_a_fix(pm_module):
+    for status in ("WARN", "FAIL"):
+        with pytest.raises(ValueError):
+            pm_module.make_doctor_check("Configuration", status, "a label", "some detail")
+
+    assert pm_module.make_doctor_check("Configuration", "SKIP", "a label").status == "SKIP"
+
+
+# Verifies only the four shared markers can reach a report
 def test_only_the_four_shared_markers_are_accepted(pm_module):
     assert pm_module.DOCTOR_STATUSES == MARKERS
-    assert [pm_module.make_doctor_check("Configuration", status, "a label").status for status in MARKERS] == list(MARKERS)
+    assert [pm_module.make_doctor_check("Configuration", status, "a label", "", actionable_advice(pm_module)).status for status in MARKERS] == list(MARKERS)
 
     with pytest.raises(ValueError):
         pm_module.make_doctor_check("Configuration", "INFO", "a label")
