@@ -5831,9 +5831,9 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     print_labelled_command(start_label, tool_command(*target_arguments, *paths))
     print(f"Guide: {QUICK_START_GUIDE_URL}\n")
 
-    npsso_ready = "PSN_NPSSO" in state.secret_updates or secret_is_set(state.config_values.get("PSN_NPSSO"))
     try:
-        start_monitoring = bool(state.target and npsso_ready and _wizard_ask_yes_no("Start monitoring now? Monitoring will continue until Ctrl+C.", default=True, input_func=input_func))
+        # Only a doctor run that passed proves the saved setup can monitor, so the launch offer waits for it
+        start_monitoring = bool(state.target and doctor_exit == 0 and _wizard_ask_yes_no("Start monitoring now? Monitoring will continue until Ctrl+C.", default=True, input_func=input_func))
     except (EOFError, KeyboardInterrupt):
         # The files are already written, so an interrupt here only skips the optional launch
         print(colorize("warning", "Setup is saved. Start monitoring with the command above when ready."))
@@ -6575,11 +6575,11 @@ def main():
         print_doctor_next_steps(args.psn_user_id, PSN_USER_ID, doctor_exit)
         sys.exit(doctor_exit)
 
-    if not check_internet():
-        sys.exit(1)
-
     if args.setup:
         sys.exit(run_setup_wizard(initial_target=args.psn_user_id, config_file=args.config_file, env_file=args.env_file))
+
+    if not check_internet():
+        sys.exit(1)
 
     if args.set_npsso:
         try:

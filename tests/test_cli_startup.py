@@ -694,3 +694,14 @@ def test_the_test_messages_use_the_shared_wording(pm_module, monkeypatch, sent_e
 
     assert (sent_emails[0]["subject"], sent_emails[0]["body"]) == ("psn_monitor: test email", "This test email was sent by --send-test-email. Your SMTP settings work.")
     assert (sent_webhooks[0]["title"], sent_webhooks[0]["description"]) == ("psn_monitor: test webhook", "This test notification was sent by --send-test-webhook. Your webhook settings work.")
+
+
+# Verifies --setup runs before the connectivity probe, since it writes files and needs no network
+def test_setup_runs_before_the_connectivity_probe(pm_module, monkeypatch, isolated_working_directory):
+    def refuse_probe(*args, **kwargs):
+        raise AssertionError("the connectivity probe ran before setup")
+
+    monkeypatch.setattr(pm_module, "check_internet", refuse_probe)
+    monkeypatch.setattr(pm_module, "run_setup_wizard", lambda **kwargs: 0)
+
+    assert run_main(pm_module, monkeypatch, ["--setup", "--config-file", "custom.conf"]) == 0

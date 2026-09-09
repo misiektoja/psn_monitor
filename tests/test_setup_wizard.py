@@ -575,8 +575,9 @@ def test_interrupting_the_doctor_offer_keeps_the_saved_setup(tmp_path, capsys):
 
 
 # Verifies an interrupt at the launch offer reports the saved setup and points at the printed command
-def test_interrupting_the_launch_offer_keeps_the_saved_setup(tmp_path, capsys):
-    exit_code = run_wizard(InterruptedTerminal(*happy_path()[:-1]))
+def test_interrupting_the_launch_offer_keeps_the_saved_setup(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(monitor, "run_doctor", lambda **kwargs: 0)
+    exit_code = run_wizard(InterruptedTerminal(*happy_path(doctor="y")[:-1]))
 
     output = capsys.readouterr().out
     assert exit_code == 0
@@ -959,3 +960,39 @@ def test_a_rejected_target_answer_offers_a_retry_and_keeps_the_previous_target(t
     assert state.target == USER_ID
     assert terminal.asked("Try entering the PlayStation online ID to monitor again?")
     assert terminal.asked("Persist this target")
+
+
+# Verifies the launch offer only follows a doctor run that passed, so a declined doctor ends at the printed commands
+def test_declining_the_doctor_removes_the_launch_offer(monkeypatch):
+    launched = []
+    monkeypatch.setattr(monitor, "_wizard_launch_monitor", lambda arguments: launched.append(arguments) or 0)
+    terminal = ScriptedTerminal(*happy_path(doctor="n", monitor_now="y"))
+
+    assert run_wizard(terminal) == 0
+    assert launched == []
+    assert not terminal.asked("Start monitoring now?")
+
+
+# Verifies a doctor run that passed is what unlocks the launch offer
+def test_a_passed_doctor_run_unlocks_the_launch_offer(monkeypatch):
+    launched = []
+    monkeypatch.setattr(monitor, "run_doctor", lambda **kwargs: 0)
+    monkeypatch.setattr(monitor, "_wizard_launch_monitor", lambda arguments: launched.append(arguments) or 0)
+    terminal = ScriptedTerminal(*happy_path(doctor="y", monitor_now="y"))
+
+    assert run_wizard(terminal) == 0
+    assert len(launched) == 1
+    assert terminal.asked("Start monitoring now?")
+
+
+# Verifies a doctor run that failed keeps the launch offer away and labels the command to run after the fix
+def test_a_failed_doctor_run_removes_the_launch_offer(monkeypatch, capsys):
+    launched = []
+    monkeypatch.setattr(monitor, "run_doctor", lambda **kwargs: 1)
+    monkeypatch.setattr(monitor, "_wizard_launch_monitor", lambda arguments: launched.append(arguments) or 0)
+    terminal = ScriptedTerminal(*happy_path(doctor="y", monitor_now="y"))
+
+    assert run_wizard(terminal) == 0
+    assert launched == []
+    assert not terminal.asked("Start monitoring now?")
+    assert "After Doctor passes, start monitoring:" in capsys.readouterr().out
