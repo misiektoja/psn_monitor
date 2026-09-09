@@ -391,6 +391,28 @@ def test_an_ntfy_access_token_is_saved_when_offered(tmp_path):
     assert 'NTFY_ACCESS_TOKEN="tk_a_real_looking_token"' in (tmp_path / ".env").read_text(encoding="utf-8")
 
 
+# Verifies a rejected ntfy topic is explained, rather than being reported as though nothing was entered
+def test_a_rejected_ntfy_topic_is_explained(capsys):
+    script = before_webhook_section() + ("y", "2", "n") + after_webhook_section()
+
+    assert run_wizard(ScriptedTerminal(*script, secrets=secrets_for("bad topic!!"))) == 0
+
+    output = capsys.readouterr().out
+    assert "Enter a complete HTTPS ntfy topic URL or a topic name containing up to 64 letters" in output
+    assert "Webhook alerts stay off until one is set" not in output
+
+
+# Verifies an empty answer still reaches the give-up question, which is the only way out of the prompt
+def test_an_empty_ntfy_answer_still_offers_the_way_out(capsys):
+    script = before_webhook_section() + ("y", "2", "y") + after_webhook_section()
+
+    assert run_wizard(ScriptedTerminal(*script, secrets=secrets_for("   "))) == 0
+
+    output = capsys.readouterr().out
+    assert "Webhook alerts stay off until one is set" in output
+    assert "Enter a complete HTTPS ntfy topic URL" not in output
+
+
 # Verifies declining the webhook section leaves the channel and every alert it owns switched off
 def test_declining_webhooks_turns_every_alert_off(tmp_path, monkeypatch):
     # The error alert ships on, so declining has to switch it off rather than carry the shipped default through

@@ -216,6 +216,62 @@ def test_the_smtp_password_is_checked_by_signing_in(tmp_path, smtp_double, capsy
     assert env_file.read_text(encoding="utf-8") == f'SMTP_PASSWORD="{SMTP_SECRET}"\n'
 
 
+# Verifies incomplete mail settings are reported before the password is asked for, not after the sign-in fails
+def test_incomplete_mail_settings_are_refused_before_the_prompt(tmp_path, monkeypatch, pm_module, smtp_double):
+    env_file = tmp_path / ".env"
+    monkeypatch.setattr(pm_module, "SENDER_EMAIL", "")
+    monkeypatch.setattr(pm_module, "RECEIVER_EMAIL", "")
+
+    with pytest.raises(monitor.RecoveryError) as raised:
+        monitor.run_set_smtp_password(env_file=str(env_file), interactive=True, getpass_func=lambda prompt: pytest.fail("hidden prompt used"))
+
+    assert raised.value.advice.summary == "The mail server settings are incomplete, SENDER_EMAIL and RECEIVER_EMAIL are not set"
+    assert "Set SENDER_EMAIL and RECEIVER_EMAIL in the config file" in raised.value.advice.fix
+    assert smtp_double.last is None
+    assert not env_file.exists()
+
+
+# Verifies a host still holding its shipped placeholder counts as unset, so a first run is not sent to it
+def test_a_placeholder_mail_host_is_refused_before_the_prompt(tmp_path, monkeypatch, pm_module, smtp_double):
+    env_file = tmp_path / ".env"
+    monkeypatch.setattr(pm_module, "SMTP_HOST", "your_smtp_server_ssl")
+
+    with pytest.raises(monitor.RecoveryError) as raised:
+        monitor.run_set_smtp_password(env_file=str(env_file), interactive=True, getpass_func=lambda prompt: pytest.fail("hidden prompt used"))
+
+    assert raised.value.advice.summary == "The mail server settings are incomplete, SMTP_HOST is not set"
+
+
+# Verifies a secret cleared by its owner leaves the file rather than staying behind as an empty value
+def test_a_cleared_secret_is_removed_rather_than_emptied(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text('UNRELATED=stay\nNTFY_ACCESS_TOKEN="tk_old"\n', encoding="utf-8")
+
+    monitor.update_dotenv_value(env_file, "NTFY_ACCESS_TOKEN", "")
+
+    assert env_file.read_text(encoding="utf-8") == "UNRELATED=stay\n"
+
+
+# Verifies clearing a secret the file never held does not add an empty line for it
+def test_clearing_an_absent_secret_writes_nothing(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("UNRELATED=stay\n", encoding="utf-8")
+
+    monitor.update_dotenv_value(env_file, "NTFY_ACCESS_TOKEN", "")
+
+    assert env_file.read_text(encoding="utf-8") == "UNRELATED=stay\n"
+
+
+# Verifies an exported assignment is removed too, so a cleared secret cannot survive in the environment
+def test_a_cleared_exported_secret_is_removed(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text('export NTFY_ACCESS_TOKEN="tk_old"\nUNRELATED=stay\n', encoding="utf-8")
+
+    monitor.update_dotenv_value(env_file, "NTFY_ACCESS_TOKEN", "")
+
+    assert env_file.read_text(encoding="utf-8") == "UNRELATED=stay\n"
+
+
 # Verifies a password the mail server rejects is never written
 def test_a_rejected_smtp_password_is_not_saved(tmp_path, monkeypatch, pm_module):
     env_file = tmp_path / ".env"

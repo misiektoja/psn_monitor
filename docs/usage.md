@@ -246,9 +246,9 @@ COLOR_THEME = {
 | `timestamp_label` | *(empty)* | The `Timestamp:` label, left uncoloured by default |
 | `timestamp_value` | `cyan` | The timestamp itself |
 | `info` | `cyan` | `To fix:` lines, notes, prompts and default markers |
-| `warning` | `yellow` | `* Warning:` lines and `[WARN]` rows |
+| `warning` | `yellow` | The opening `Warning:` word of a `* Warning:` line and `[WARN]` rows. The rest of the line keeps the colours of the values in it |
 | `error` | `red` | `* Error:` lines and `[FAIL]` rows |
-| `signal` | `yellow` | `* Signal ... received` lines |
+| `signal` | `yellow` | The name of the signal in a `* Signal ... received` line |
 | `email` | `bright_cyan` | Lines reporting an email being sent |
 | `webhook` | `bright_blue` | Lines reporting a webhook being sent |
 | `date` | `magenta` | Single dates and times |

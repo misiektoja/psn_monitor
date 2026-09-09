@@ -136,14 +136,31 @@ def test_diagnostic_details_and_recovery_notices_are_not_error_colored(colored, 
 # Verifies the lines that really report a problem are still painted end to end
 @pytest.mark.parametrize("line,part", [
     ("* Error: PlayStation Network rejected the NPSSO code", "error"),
-    ("* Warning: dotenv file '/home/me/.env' does not exist", "warning"),
     ("* Note: Config file contains settings this version no longer uses", "info"),
-    ("* Signal SIGUSR1 received", "signal"),
     ("Sending email notification to alerts@example.test", "email"),
     ("Sending webhook notification", "webhook"),
 ])
 def test_only_problem_lines_are_painted_end_to_end(colored, line, part):
     assert monitor._colorize_line(line).startswith(colored[part])
+
+
+# Warning and signal lines mark their own opening word instead of being painted end to end, so a value
+# inside them keeps the colour that says what it is
+def test_a_warning_marks_its_opening_word_and_leaves_the_rest(colored):
+    assert monitor._colorize_line("* Warning: dotenv file '/home/me/.env' does not exist") == f"* {colored['warning']}Warning:{monitor.ANSI_RESET} dotenv file '/home/me/.env' does not exist"
+
+
+def test_a_signal_line_marks_the_signal_it_reports(colored):
+    assert monitor._colorize_line("* Signal SIGUSR1 received") == f"* Signal {colored['signal']}SIGUSR1{monitor.ANSI_RESET} received"
+
+
+# The words reporting an activity change are the yellow the warning line used to paint over, so a change
+# named inside a warning was indistinguishable from the line around it
+def test_a_warning_row_still_shows_the_change_inside_it(colored):
+    rendered = monitor._colorize_line("* Warning: someuser changed status while the check was failing")
+
+    assert f"{colored['status_change']}changed status{monitor.ANSI_RESET}" in rendered
+    assert not rendered.startswith(colored["warning"])
 
 
 # Verifies a static count stays plain. This tool reports no numeric change, so it ships no counter colours and

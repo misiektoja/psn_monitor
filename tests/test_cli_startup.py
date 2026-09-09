@@ -237,6 +237,27 @@ def test_a_long_check_interval_keeps_the_configured_liveness_interval(pm_module,
     assert pm_module.LIVENESS_REMINDER_SECONDS == pm_module.LIVENESS_CHECK_INTERVAL
 
 
+# Verifies a liveness interval set in a config file reaches the loop, without --check-interval on the same run
+def test_a_configured_liveness_interval_reaches_the_loop_on_its_own(pm_module, monkeypatch, monitor_calls, isolated_working_directory):
+    config = isolated_working_directory / "liveness.conf"
+    config.write_text('PSN_NPSSO = "npsso-from-config"\nLIVENESS_CHECK_INTERVAL = 900\n', encoding="utf-8")
+
+    assert run_main(pm_module, monkeypatch, ["--config-file", str(config), USER_ID]) == 0
+
+    assert pm_module.LIVENESS_CHECK_INTERVAL == 900
+    assert pm_module.LIVENESS_REMINDER_SECONDS == 900
+
+
+# Verifies a liveness interval switched off in a config file reaches the loop as a disabled reminder
+def test_a_disabled_liveness_reminder_reaches_the_loop(pm_module, monkeypatch, monitor_calls, isolated_working_directory):
+    config = isolated_working_directory / "quiet.conf"
+    config.write_text('PSN_NPSSO = "npsso-from-config"\nLIVENESS_CHECK_INTERVAL = 0\n', encoding="utf-8")
+
+    assert run_main(pm_module, monkeypatch, ["--config-file", str(config), USER_ID]) == 0
+
+    assert pm_module.LIVENESS_REMINDER_SECONDS == 0
+
+
 # Verifies the notification flags switch on exactly the alerts they name
 def test_notification_flags_switch_on_the_named_alerts(pm_module, monkeypatch, monitor_calls):
     assert run_main(pm_module, monkeypatch, ["-a", "-g", USER_ID]) == 0

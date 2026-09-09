@@ -74,7 +74,7 @@ python3 -c "import pytz; print('\n'.join(pytz.all_timezones))"
 
 If you want to use email notifications functionality, configure SMTP settings in the `psn_monitor.conf` file: `SMTP_HOST`, `SMTP_PORT`, `SMTP_SSL`, `SMTP_USER`, `SENDER_EMAIL` and `RECEIVER_EMAIL`.
 
-Store the password with `psn_monitor --set-smtp-password`, which signs in to your mail server to check it before writing anything and keeps it out of your shell history.
+Store the password with `psn_monitor --set-smtp-password`, which signs in to your mail server to check it before writing anything and keeps it out of your shell history. It reports incomplete mail settings before asking for the password, naming the ones still to set.
 
 Verify your SMTP settings with the `--send-test-email` flag, which sends a real test message:
 
@@ -160,7 +160,7 @@ psn_monitor --set-smtp-password
 psn_monitor --set-webhook-url
 ```
 
-Each asks for the value with the input hidden, checks it before saving anything, then writes it to your dotenv file with permissions that allow only you to read it. `--set-npsso` signs in to PlayStation Network and reports which account the code belongs to. `--set-smtp-password` signs in to your mail server without sending anything. `--set-webhook-url` checks the URL shape without contacting the service. If the check fails, nothing is written, so a working setup is never replaced by a broken one. Replacing a value that is already saved is confirmed first, and an existing `export PSN_NPSSO=...` line is rewritten in place rather than having a second assignment appended below it. All three need an interactive terminal.
+Each asks for the value with the input hidden, checks it before saving anything, then writes it to your dotenv file with permissions that allow only you to read it. `--set-npsso` signs in to PlayStation Network and reports which account the code belongs to. `--set-smtp-password` signs in to your mail server without sending anything. `--set-webhook-url` checks the URL shape without contacting the service. If the check fails, nothing is written, so a working setup is never replaced by a broken one. Replacing a value that is already saved is confirmed first, and an existing `export PSN_NPSSO=...` line is rewritten in place rather than having a second assignment appended below it. A secret you clear, such as declining the ntfy access token during setup, has its line removed from the file rather than left behind as an empty value. All three need an interactive terminal.
 
 Use `--env-file` to choose which file they write to.
 
