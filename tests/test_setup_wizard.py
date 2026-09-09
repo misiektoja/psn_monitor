@@ -803,6 +803,30 @@ def test_the_csv_answer_gains_a_csv_extension_when_it_has_none(tmp_path):
     assert state.config_values["CSV_FILE"] == str(tmp_path / "activity.txt")
 
 
+# Verifies the status file question names the working directory, since the default is relative to where the tool runs
+def test_the_status_file_question_names_the_working_directory(tmp_path):
+    state = monitor.WizardSetupState(tmp_path / "psn_monitor.conf", tmp_path / ".env", dict(vars(monitor)))
+    prompts = []
+
+    def answer(prompt):
+        prompts.append(prompt)
+        return ""
+
+    monitor._wizard_collect_output_section(state, input_func=answer)
+    assert any("Optional status file path (blank uses the default name in the working directory)" in prompt for prompt in prompts)
+
+
+# Verifies a status file answer without an extension is saved as a .json file while an explicit extension is left alone
+def test_the_status_file_answer_gains_a_json_extension_when_it_has_none(tmp_path):
+    state = monitor.WizardSetupState(tmp_path / "psn_monitor.conf", tmp_path / ".env", dict(vars(monitor)))
+
+    monitor._wizard_collect_output_section(state, input_func=ScriptedTerminal("y", "", str(tmp_path / "profile")).answer)
+    assert state.config_values["PSN_STATUS_FILE"] == str(tmp_path / "profile.json")
+
+    monitor._wizard_collect_output_section(state, input_func=ScriptedTerminal("y", "", str(tmp_path / "profile.txt")).answer)
+    assert state.config_values["PSN_STATUS_FILE"] == str(tmp_path / "profile.txt")
+
+
 # Verifies a declined email section clears the mail server, so the written config cannot contradict the summary
 def test_a_declined_email_section_clears_the_mail_server(tmp_path):
     baseline = dict(vars(monitor))
