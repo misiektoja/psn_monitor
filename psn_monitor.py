@@ -5130,10 +5130,9 @@ def _wizard_collect_email_section(state, input_func=None, getpass_func=None):
             break
     preset = _wizard_ask_choice("Which email notifications should be enabled?", [
         ("Status and errors, recommended", "Online and offline changes, game changes and monitoring errors."),
-        ("Every supported event", "Enables all email notification types."),
         ("Custom", "Choose each notification type separately."),
     ], input_func=input_func)
-    if preset in (0, 1):
+    if preset == 0:
         selected = {name: True for name in WIZARD_EMAIL_NOTIFICATION_KEYS}
     else:
         print()
@@ -5244,10 +5243,9 @@ def _wizard_collect_webhook_section(state, input_func=None, getpass_func=None):
     state.config_values["WEBHOOK_ENABLED"] = True
     preset = _wizard_ask_choice("Which webhook alerts should be sent?", [
         ("Status and errors, recommended", "Online and offline changes, game changes and monitoring errors."),
-        ("Every supported alert", "Enables all webhook alert types."),
         ("Custom", "Choose each webhook alert separately."),
     ], input_func=input_func)
-    if preset in (0, 1):
+    if preset == 0:
         selected = {name: True for name in WIZARD_WEBHOOK_NOTIFICATION_KEYS}
     else:
         print()
