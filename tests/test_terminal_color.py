@@ -571,6 +571,13 @@ def test_the_account_name_uses_the_name_colour_everywhere(colored, line):
     assert colored["game"] not in result
 
 
+# Verifies the startup line colours the account name and not the words that introduce it
+def test_the_startup_line_colours_only_the_account_name(colored):
+    result = monitor._colorize_line("Monitoring user with PSN ID misiektoja")
+
+    assert result == f"Monitoring user with PSN ID {colored['username']}misiektoja{monitor.ANSI_RESET}"
+
+
 # Verifies the numeric account ID keeps its own colour, so the two identifiers stay distinguishable
 def test_the_account_id_uses_the_id_colour(colored):
     assert colored["user_uri_id"] in monitor._colorize_line("PSN account ID:\t\t\t1234567890123456789")

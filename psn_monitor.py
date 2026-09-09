@@ -1346,8 +1346,9 @@ _LABEL_STYLES = (
 )
 
 # Pre-compiled regexes used for line-level colourisation
-# The separator is a space in prose and an equals sign in the key=value diagnostic fields
-_USER_TAG_RE = re.compile(r"((?:PSN user|PlayStation user|for user|by user|of user|Monitoring user|\buser):?)([\t ]+|=)((?!ID\b)[\w.-]+)")
+# The separator is a space in prose and an equals sign in the key=value diagnostic fields. An intervening
+# "with PSN ID" is part of the tag, so the name after it is coloured instead of the connecting words
+_USER_TAG_RE = re.compile(r"((?:PSN user|PlayStation user|for user|by user|of user|Monitoring user|\buser)(?:[\t ]+with(?:[\t ]+(?:PSN|PlayStation))?[\t ]+ID)?:?)([\t ]+|=)((?!ID\b)[\w.-]+)")
 
 # A quoted value right after "user" or "for" names the monitored account, the same value the "PlayStation ID:"
 # row reports. Every "for '<value>'" line this tool prints names either that account or a file
