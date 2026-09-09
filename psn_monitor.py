@@ -698,6 +698,17 @@ def recovery_fix_with_guide(fix, guide_url):
     return f"{fix}\nGuide: {guide_url}"
 
 
+# Returns the advice a cancelled secret entry reports, worded the same way by every one-shot secret command
+def secret_entry_cancelled_advice(subject, flag, guide_url):
+    return make_recovery_advice("secret.entry", f"{subject[:1].upper()}{subject[1:]} setup was cancelled and the dotenv file was not changed", recovery_fix_with_guide(f"Run {flag} again when you have the value ready", guide_url), False)
+
+
+# Returns the advice a declined secret replacement reports, worded the same way by every one-shot secret command
+def secret_replacement_declined_advice(subject, flag, guide_url, plural=False):
+    kept = "were left as they are" if plural else "was left as it is"
+    return make_recovery_advice("secret.entry", f"The saved {subject} {kept} and the dotenv file was not changed", recovery_fix_with_guide(f"Run {flag} again and answer y to replace the saved value", guide_url), False)
+
+
 # Returns the command that installs one optional library into the interpreter running this tool
 def pip_install_command(requirement):
     return render_command([sys.executable or "python3", "-m", "pip", "install", requirement])
@@ -5608,7 +5619,7 @@ def print_secret_next_steps(env_path, config_path=None, psn_user_id=None, test_s
 
 
 # Collects one secret through a hidden prompt, checks it with the given validator and writes it only then
-def run_set_secret(key, flag, guidance, prompt_text, validator, describe_success, env_file=None, config_path=None, psn_user_id=None, interactive=None, input_func=None, getpass_func=None, normalize=None, test_step=None):
+def run_set_secret(key, flag, subject, guide_url, guidance, prompt_text, validator, describe_success, env_file=None, config_path=None, psn_user_id=None, interactive=None, input_func=None, getpass_func=None, normalize=None, test_step=None):
     global DEBUG_MODE
 
     destination = resolve_secret_env_path(env_file, flag)
@@ -5619,12 +5630,12 @@ def run_set_secret(key, flag, guidance, prompt_text, validator, describe_success
     ask = input if input_func is None else input_func
     if dotenv_contains_key(destination, key):
         try:
-            confirmed = str(ask(f"{key} is already set in '{destination}'. Replace it? [y/N]: ")).strip().casefold() in ("y", "yes")
+            confirmed = str(read_interactively(ask, f"{key} is already set in '{destination}'. Replace it? [y/N]: ")).strip().casefold() in ("y", "yes")
         except (EOFError, KeyboardInterrupt):
             print()
-            confirmed = False
+            raise RecoveryError(secret_entry_cancelled_advice(subject, flag, guide_url)) from None
         if not confirmed:
-            raise RecoveryError(classify_recovery_error(context="secret.entry", detail=f"{key} was left as it is and the dotenv file was not changed"))
+            raise RecoveryError(secret_replacement_declined_advice(subject, flag, guide_url))
 
     print(guidance)
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
@@ -5635,7 +5646,7 @@ def run_set_secret(key, flag, guidance, prompt_text, validator, describe_success
         entered = read_interactively(hidden_prompt, prompt_text)
     except (EOFError, KeyboardInterrupt):
         print()
-        raise RecoveryError(classify_recovery_error(context="secret.entry", detail=f"{key} entry was cancelled and the dotenv file was not changed")) from None
+        raise RecoveryError(secret_entry_cancelled_advice(subject, flag, guide_url)) from None
     finally:
         DEBUG_MODE = previous_debug_mode
 
@@ -5656,7 +5667,7 @@ def run_set_secret(key, flag, guidance, prompt_text, validator, describe_success
 
 # Stores one validated NPSSO code in the dotenv file, so it never has to be typed on a command line
 def run_set_npsso(env_file=None, config_path=None, psn_user_id=None, interactive=None, input_func=None, getpass_func=None):
-    return run_set_secret("PSN_NPSSO", "--set-npsso", f"* Sign in at https://my.playstation.com then copy the npsso value from: {NPSSO_SOURCE_URL}", "Enter the NPSSO code (input hidden): ", validate_npsso_code, lambda account: f"PlayStation Network accepted the code, signed in as {account}", env_file, config_path, psn_user_id, interactive, input_func, getpass_func)
+    return run_set_secret("PSN_NPSSO", "--set-npsso", "NPSSO code", NPSSO_GUIDE_URL, f"* Sign in at https://my.playstation.com then copy the npsso value from: {NPSSO_SOURCE_URL}", "Enter the NPSSO code (input hidden): ", validate_npsso_code, lambda account: f"PlayStation Network accepted the code, signed in as {account}", env_file, config_path, psn_user_id, interactive, input_func, getpass_func)
 
 
 # Accepts a complete webhook URL, or a bare ntfy.sh topic name when ntfy is the selected provider
@@ -5681,12 +5692,12 @@ def validate_webhook_destination(value):
 
 # Stores one webhook destination in the dotenv file, so the private URL never has to appear on a command line
 def run_set_webhook_url(env_file=None, config_path=None, psn_user_id=None, interactive=None, input_func=None, getpass_func=None):
-    return run_set_secret("WEBHOOK_URL", "--set-webhook-url", "* Discord: Edit Channel > Integrations > Webhooks > New Webhook > Copy Webhook URL\n* ntfy: the complete topic URL, or just the topic name when it is hosted on ntfy.sh", "Enter the webhook URL (input hidden): ", validate_webhook_destination, lambda provider: f"The entered value looks like a valid {provider} destination", env_file, config_path, psn_user_id, interactive, input_func, getpass_func, normalize_webhook_destination, ("Send a test webhook:", "--send-test-webhook"))
+    return run_set_secret("WEBHOOK_URL", "--set-webhook-url", "webhook URL", WEBHOOK_GUIDE_URL, "* Discord: Edit Channel > Integrations > Webhooks > New Webhook > Copy Webhook URL\n* ntfy: the complete topic URL, or just the topic name when it is hosted on ntfy.sh", "Enter the webhook URL (input hidden): ", validate_webhook_destination, lambda provider: f"The entered value looks like a valid {provider} destination", env_file, config_path, psn_user_id, interactive, input_func, getpass_func, normalize_webhook_destination, ("Send a test webhook:", "--send-test-webhook"))
 
 
 # Stores one SMTP password in the dotenv file after the mail server has actually accepted it
 def run_set_smtp_password(env_file=None, config_path=None, psn_user_id=None, interactive=None, input_func=None, getpass_func=None):
-    return run_set_secret("SMTP_PASSWORD", "--set-smtp-password", f"* The password is checked by signing in to {SMTP_HOST} as {SMTP_USER}. Nothing is sent", "Enter the SMTP password (input hidden): ", smtp_sign_in, lambda user: f"The mail server accepted the password for {user}", env_file, config_path, psn_user_id, interactive, input_func, getpass_func)
+    return run_set_secret("SMTP_PASSWORD", "--set-smtp-password", "SMTP password", SMTP_GUIDE_URL, f"* The password is checked by signing in to {SMTP_HOST} as {SMTP_USER}. Nothing is sent", "Enter the SMTP password (input hidden): ", smtp_sign_in, lambda user: f"The mail server accepted the password for {user}", env_file, config_path, psn_user_id, interactive, input_func, getpass_func)
 
 
 def main():
