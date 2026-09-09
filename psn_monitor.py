@@ -815,8 +815,8 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         # Classified from the error, because the detail names the endpoint rather than the failure
         cause = str(error or "").lower()
         if "timed out" in cause or "timeout" in cause:
-            return make_recovery_advice("network.timeout", "The connectivity endpoint did not answer in time", recovery_fix_with_guide("Check network, DNS, proxy and CHECK_INTERNET_URL settings", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
-        return make_recovery_advice("network.unavailable", "The connectivity endpoint could not be reached", recovery_fix_with_guide("Check network, DNS, proxy and CHECK_INTERNET_URL settings", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+            return make_recovery_advice("network.timeout", "The connectivity endpoint did not answer in time", "Check network, DNS, proxy and CHECK_INTERNET_URL settings", True, safe_detail)
+        return make_recovery_advice("network.unavailable", "The connectivity endpoint could not be reached", "Check network, DNS, proxy and CHECK_INTERNET_URL settings", True, safe_detail)
 
     types = recovery_exception_types()
 
