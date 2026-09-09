@@ -4728,6 +4728,16 @@ def print_labelled_command(label, command, suffix=""):
     print(f"    {colorize('section', command)}{colorize('info', suffix) if suffix else ''}\n")
 
 
+# Prints the command that starts monitoring with the files this run checked, so a report read on its own
+# ends with the next action rather than leaving the reader to assemble the command
+def print_doctor_next_steps(psn_user_id=None, doctor_exit=0):
+    print("\n" + colorize("header", "Next steps") + "\n")
+    label = "After Doctor passes, start monitoring:" if doctor_exit else "Start monitoring:"
+    print_labelled_command(label, tool_command(*([str(psn_user_id)] if psn_user_id else [])))
+    print(f"Guide: {QUICK_START_GUIDE_URL}\n")
+
+
+
 
 # A PlayStation online ID is 3 to 16 characters and never contains an at sign or a space
 PSN_ONLINE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,15}$")
@@ -6260,7 +6270,10 @@ def main():
         LOCAL_TIMEZONE = "UTC"
 
     if doctor_mode:
-        sys.exit(run_doctor(args.psn_user_id, cfg_path, env_path, config_advice, timezone_advice))
+        doctor_exit = run_doctor(args.psn_user_id, cfg_path, env_path, config_advice, timezone_advice)
+        # A target the config file already carries is left out, so the command stays as short as the wizard's
+        print_doctor_next_steps(None if args.psn_user_id == PSN_USER_ID else args.psn_user_id, doctor_exit)
+        sys.exit(doctor_exit)
 
     if not check_internet():
         sys.exit(1)
