@@ -393,7 +393,8 @@ EXPORTED_SECRET_KEYS = frozenset()
 # Default value for timeouts in alarm signal handler; in seconds
 FUNCTION_TIMEOUT = 15
 
-LIVENESS_CHECK_COUNTER = LIVENESS_CHECK_INTERVAL / PSN_CHECK_INTERVAL
+# Whole checks, so a check interval longer than the liveness interval still waits one check instead of reporting on every check
+LIVENESS_CHECK_COUNTER = max(1, -(-LIVENESS_CHECK_INTERVAL // PSN_CHECK_INTERVAL)) if LIVENESS_CHECK_INTERVAL else 0
 
 stdout_bck = None
 csvfieldnames = ['Date', 'Status', 'Game name']
@@ -4170,8 +4171,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         game_name_old = game_name
         alive_counter += 1
 
-        if LIVENESS_CHECK_COUNTER and alive_counter >= LIVENESS_CHECK_COUNTER and (status == "offline" or not status):
-            verbose_print(f"Monitoring healthy for {psn_user_id}. The user is still offline with no activity change")
+        if LIVENESS_CHECK_COUNTER and alive_counter >= LIVENESS_CHECK_COUNTER:
+            verbose_print(f"Monitoring healthy for {psn_user_id}. The user is {status or 'unknown'} with no activity change since the last check")
             print_cur_ts("Liveness check, timestamp:\t")
             alive_counter = 0
 
@@ -6399,7 +6400,7 @@ def main():
 
     if args.check_interval:
         PSN_CHECK_INTERVAL = args.check_interval
-        LIVENESS_CHECK_COUNTER = LIVENESS_CHECK_INTERVAL / PSN_CHECK_INTERVAL
+        LIVENESS_CHECK_COUNTER = max(1, -(-LIVENESS_CHECK_INTERVAL // PSN_CHECK_INTERVAL)) if LIVENESS_CHECK_INTERVAL else 0
 
     if args.active_interval:
         PSN_ACTIVE_CHECK_INTERVAL = args.active_interval

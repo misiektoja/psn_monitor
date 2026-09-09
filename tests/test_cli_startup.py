@@ -230,6 +230,13 @@ def test_interval_flags_override_the_configuration(pm_module, monkeypatch, monit
     assert pm_module.LIVENESS_CHECK_COUNTER == pm_module.LIVENESS_CHECK_INTERVAL / 600
 
 
+# Verifies a check interval longer than the liveness interval still waits one whole check
+def test_a_long_check_interval_leaves_the_liveness_counter_at_one_check(pm_module, monkeypatch, monitor_calls):
+    assert run_main(pm_module, monkeypatch, ["-c", "86400", USER_ID]) == 0
+
+    assert pm_module.LIVENESS_CHECK_COUNTER == 1
+
+
 # Verifies the notification flags switch on exactly the alerts they name
 def test_notification_flags_switch_on_the_named_alerts(pm_module, monkeypatch, monitor_calls):
     assert run_main(pm_module, monkeypatch, ["-a", "-g", USER_ID]) == 0

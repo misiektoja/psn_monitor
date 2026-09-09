@@ -393,6 +393,20 @@ def test_liveness_check_reports_the_loop_is_alive(pm_module, psn_session, fake_c
     assert "Liveness check, timestamp:" in capsys.readouterr().out
 
 
+# Verifies an online user still reports the liveness line, since nothing changed there either
+def test_liveness_check_reports_an_online_user(pm_module, psn_session, fake_clock, monkeypatch, capsys):
+    monkeypatch.setattr(pm_module, "LIVENESS_CHECK_COUNTER", 2)
+    monkeypatch.setattr(pm_module, "VERBOSE_MODE", True)
+    psn_session([presence_payload(status="online")] * 4)
+
+    run_monitor(pm_module)
+
+    output = capsys.readouterr().out
+    assert "Monitoring healthy for" in output
+    assert "The user is online with no activity change since the last check" in output
+    assert "Liveness check, timestamp:" in output
+
+
 # Verifies the offline interval is used while the user is away and the shorter one once they appear
 def test_polling_interval_follows_the_user_status(pm_module, psn_session, fake_clock, monkeypatch):
     monkeypatch.setattr(pm_module, "PSN_CHECK_INTERVAL", 180)
