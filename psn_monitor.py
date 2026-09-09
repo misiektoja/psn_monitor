@@ -4611,32 +4611,39 @@ def ask_yes_no(question, default=False):
         print("  Please answer 'y' or 'n'.")
 
 
+# Prints one result the way the report renders it, so a row printed after the report matches the rows above it
+def print_doctor_check(check):
+    print(f"[{check.status}] {check.label}")
+    if check.detail:
+        print(f"  {check.detail}")
+
+
 # Offers a real delivery test for each channel that already passed, approved separately from the other
 def offer_doctor_delivery_tests(report):
     if not (report.email_ready or report.webhook_ready) or not sys.stdin.isatty() or not sys.stdout.isatty():
         return []
-    print("\nOptional delivery tests\n")
+    print("\n" + colorize("section", "Optional delivery tests") + "\n")
     print("Doctor will not write files. Each approved test sends one real message.\n")
     offered = []
     if report.email_ready:
         if ask_yes_no("Send one test email now? This will deliver a real message"):
             delivered = send_email("psn_monitor: doctor test email", "This test email was sent after approval in --doctor. Your SMTP delivery settings work.", "", SMTP_SSL, smtp_timeout=5) == 0
-            check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "PASS" if delivered else "FAIL", "Doctor test email delivered" if delivered else "Doctor test email delivery failed", "One real test email was sent after confirmation" if delivered else "The approved test email could not be delivered")
+            check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "PASS" if delivered else "FAIL", "Doctor test email delivered" if delivered else "Doctor test email delivery failed", "One real test email was sent after confirmation" if delivered else "The approved test email could not be delivered. Review the SMTP error above")
         else:
-            check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "SKIP", "Test email was not sent")
+            check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "SKIP", "Test email was not sent", "You declined the real delivery test. Run doctor again and approve the email test when ready")
         offered.append(check)
     if report.webhook_ready:
         provider = webhook_provider_display_name()
         if ask_yes_no(f"Send one test webhook through {provider} now? This will publish a real notification"):
             delivered = send_webhook("psn_monitor: doctor test webhook", "This test notification was sent after approval in --doctor. Your webhook delivery settings work.", "status", force=True) == 0
-            check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "PASS" if delivered else "FAIL", f"Doctor test webhook through {provider} delivered" if delivered else f"Doctor test webhook through {provider} delivery failed", f"One real test notification was sent to {webhook_destination_host()}" if delivered else "The approved test webhook could not be delivered")
+            check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "PASS" if delivered else "FAIL", f"Doctor test webhook through {provider} delivered" if delivered else f"Doctor test webhook through {provider} delivery failed", "One real test webhook was sent after confirmation" if delivered else "The approved test webhook could not be delivered. Review the webhook error above")
         else:
-            check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "SKIP", f"Test webhook through {provider} was not sent")
+            check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "SKIP", f"Test webhook through {provider} was not sent", "You declined the real delivery test. Run doctor again and approve the webhook test when ready")
         offered.append(check)
     # Recorded on the report so the summary sentence and the exit code cannot disagree about the same run
     for check in offered:
         report.checks.append(check)
-        print(f"[{check.status}] {check.label}")
+        print_doctor_check(check)
     return offered
 
 

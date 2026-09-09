@@ -698,6 +698,27 @@ def test_an_approved_webhook_test_sends_one_notification(pm_module, monkeypatch,
     assert sent_webhooks[0]["force"] is True
 
 
+# Verifies the delivery rows print the same label and detail the sibling tools print
+def test_the_delivery_rows_print_the_shared_label_and_detail(pm_module, monkeypatch, sent_emails, sent_webhooks):
+    monkeypatch.setattr(pm_module, "ask_yes_no", lambda question, default=False: "webhook" not in question)
+    monkeypatch.setattr(pm_module.sys, "stdin", FakeTerminal())
+    stdout = FakeTerminal()
+    monkeypatch.setattr(pm_module.sys, "stdout", stdout)
+    report = pm_module.DoctorReport(email_ready=True, webhook_ready=True)
+
+    pm_module.offer_doctor_delivery_tests(report)
+    output = "".join(stdout.chunks)
+    provider = pm_module.webhook_provider_display_name()
+
+    assert "Optional delivery tests" in output
+    assert "[PASS] Doctor test email delivered" in output
+    assert "  One real test email was sent after confirmation" in output
+    assert f"[SKIP] Test webhook through {provider} was not sent" in output
+    assert "  You declined the real delivery test. Run doctor again and approve the webhook test when ready" in output
+    assert len(sent_emails) == 1
+    assert sent_webhooks == []
+
+
 # Verifies nothing is offered when the output is redirected, where no one could answer the prompt
 def test_no_delivery_test_is_offered_without_a_terminal(pm_module, monkeypatch, sent_emails):
     monkeypatch.setattr(pm_module.sys, "stdin", FakeTerminal(interactive=False))
