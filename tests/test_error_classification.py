@@ -459,6 +459,23 @@ def test_printed_commands_carry_the_files_this_run_was_given(pm_module, monkeypa
     assert f"then run: {pm_module.tool_command('--send-test-webhook')}" in pm_module.classify_recovery_error_offline(ValueError("bad"), context="webhook").fix
 
 
+# Verifies the missing-target fix carries this run's files and leaves the placeholder readable
+def test_the_missing_target_command_carries_the_files_and_the_placeholder(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "CLI_CONFIG_PATH", "/etc/psn.conf")
+    monkeypatch.setattr(pm_module, "DOTENV_FILE", "/etc/psn.env")
+
+    fix = pm_module.classify_recovery_error_offline(context="target.missing").fix
+
+    assert "psn_monitor.py <psn_user_id> --config-file /etc/psn.conf --env-file /etc/psn.env" in fix
+    assert "'<psn_user_id>'" not in fix
+
+
+# Verifies a <placeholder> is printed for the reader to replace rather than quoted as a literal value
+def test_a_placeholder_argument_is_left_unquoted(pm_module):
+    assert pm_module.render_command(["<psn_user_id>", "-n", "<npsso_code>"]) == "<psn_user_id> -n <npsso_code>"
+    assert pm_module.render_command(["a value"]) == "'a value'"
+
+
 # Verifies --generate-config keeps the paths out, since it writes the new file at the name in the command
 def test_the_generate_config_command_leaves_this_run_out(pm_module, monkeypatch):
     monkeypatch.setattr(pm_module, "CLI_CONFIG_PATH", "/etc/psn.conf")

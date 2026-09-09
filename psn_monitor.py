@@ -612,10 +612,18 @@ def install_method_display_name(method=None):
     return {"pip": "PyPI install", "manual": "downloaded script"}.get(method or detect_install_method(), "unknown install")
 
 
+# Returns one command argument quoted for the shell of the host operating system
+def quote_command_argument(argument):
+    text = str(argument)
+    # A <placeholder> is documentation for the reader to replace, so quoting it would only be noise
+    if text.startswith("<") and text.endswith(">"):
+        return text
+    return subprocess.list2cmdline([text]) if platform.system() == "Windows" else shlex.quote(text)
+
+
 # Renders command arguments quoted for the shell of the host operating system
 def render_command(arguments):
-    values = [str(argument) for argument in arguments]
-    return subprocess.list2cmdline(values) if platform.system() == "Windows" else shlex.join(values)
+    return " ".join(quote_command_argument(argument) for argument in arguments)
 
 
 # Returns the bare command that starts this tool on the detected install, without arguments
@@ -736,7 +744,7 @@ def missing_dependency_advice(package, effect, alternative=""):
 
 # Returns install-aware guidance for replacing the NPSSO code, which differs once monitoring has started
 def npsso_recovery_fix(monitoring=False):
-    command = f"{tool_command_prefix()} <psn_user_id> -n <npsso_code>"
+    command = tool_command("<psn_user_id>", "-n", "<npsso_code>")
     if monitoring:
         return f"Generate a fresh NPSSO code, put it in PSN_NPSSO in your dotenv file then send SIGHUP to this process. To restart instead, run: {command}"
     return f"Generate a fresh NPSSO code, then put it in PSN_NPSSO in your dotenv file or pass it directly: {command}"
@@ -783,7 +791,7 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         return make_recovery_advice("secret.missing", safe_detail or "A required credential is missing", recovery_fix_with_guide(npsso_recovery_fix(), SECRETS_GUIDE_URL), False, safe_detail)
 
     if context == "target.missing":
-        return make_recovery_advice("target.missing", safe_detail or "No PlayStation ID was given", recovery_fix_with_guide(f"Pass the account to watch: {tool_command_prefix()} <psn_user_id>. Use the {PSN_TARGET_FORMS}", QUICK_START_GUIDE_URL), False, safe_detail)
+        return make_recovery_advice("target.missing", safe_detail or "No PlayStation ID was given", recovery_fix_with_guide(f"Pass the account to watch: {tool_command('<psn_user_id>')}. Use the {PSN_TARGET_FORMS}", QUICK_START_GUIDE_URL), False, safe_detail)
 
     if context == "secret.entry":
         return make_recovery_advice("secret.entry", safe_detail or "The value was not entered, so nothing was written", recovery_fix_with_guide("Run the command again from an interactive terminal and enter the value when prompted", SECRETS_GUIDE_URL), False, safe_detail)
