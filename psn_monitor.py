@@ -4092,7 +4092,10 @@ class DoctorReport:
 def make_doctor_check(section, status, label, detail="", advice=None):
     if status not in DOCTOR_STATUSES:
         raise ValueError(f"Unsupported doctor status: {status}")
-    return DoctorCheck(section, status, sanitize_error_text(label), sanitize_error_text(detail), advice)
+    safe_label = sanitize_error_text(label)
+    safe_detail = sanitize_error_text(detail)
+    # Several advice objects carry the same text as their summary, and printing it twice reads as two problems
+    return DoctorCheck(section, status, safe_label, "" if safe_detail == safe_label else safe_detail, advice)
 
 
 # Reports whether one module could be imported, without importing it
@@ -4498,7 +4501,9 @@ def build_startup_summary(psn_user_id=None, config_path=None, env_path=None, log
     supplied = doctor_secret_sources()
     from_dotenv = sorted(supplied.get("dotenv file", ()))
     from_environment = sorted(supplied.get("environment", ()))
-    from_config = sorted(name for source, names in supplied.items() if source not in ("dotenv file", "environment") for name in names)
+    # Bucketed by exact source rather than by "everything else", so a command-line secret is not filed as config
+    from_config = sorted(supplied.get("configuration file", ()))
+    from_command_line = sorted(supplied.get("command line", ()))
     output_state = str(log_path) if log_path else "Terminal only (logging disabled)"
     return [
         StartupSummaryRow("Target", str(psn_user_id) if psn_user_id else "None", concise=True),
@@ -4519,6 +4524,7 @@ def build_startup_summary(psn_user_id=None, config_path=None, env_path=None, log
         StartupSummaryRow("Secrets from dotenv", ", ".join(from_dotenv) if from_dotenv else "None"),
         StartupSummaryRow("Secrets from environment", ", ".join(from_environment) if from_environment else "None"),
         StartupSummaryRow("Secrets from config file", ", ".join(from_config) if from_config else "None"),
+        StartupSummaryRow("Secrets from command line", ", ".join(from_command_line) if from_command_line else "None"),
         StartupSummaryRow("TLS verification", "On" if VERIFY_SSL else "Off, server certificates are not checked", concise=not VERIFY_SSL),
         StartupSummaryRow("ASCII log separators", f"{ascii_log_separators_enabled()} (mode: {ASCII_LOG_SEPARATORS})"),
         # The resolved state, not the setting: colour also switches itself off when the output is not a terminal

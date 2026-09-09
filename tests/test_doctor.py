@@ -746,3 +746,14 @@ def test_the_report_names_the_status_file(pm_module, doctor_run, monkeypatch, tm
 
     assert "[PASS] Status file is writable" in raw
     assert str(destination) in raw
+
+
+# Verifies a row whose advice repeats its own summary prints that text once rather than as two problems
+def test_a_row_never_prints_its_summary_twice(pm_module):
+    repeated = "WEBHOOK_URL must contain a complete HTTPS link"
+
+    check = pm_module.make_doctor_check("Notifications", "WARN", repeated, repeated)
+
+    assert check.label == repeated
+    assert check.detail == ""
+    assert pm_module.render_doctor_sections(pm_module.DoctorReport(checks=[check])).count(repeated) == 1

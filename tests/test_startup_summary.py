@@ -276,7 +276,7 @@ def test_the_real_logger_splits_the_summary(pm_module, monkeypatch, tmp_path, su
 
 
 # The rows shared with the sibling monitors, in the order every one of them prints
-SHARED_ROW_ORDER = ("Target", "Polling intervals", "Notifications (email)", "Notifications (webhook)", "Output", "Output logging", "Config", "Dotenv", "Liveness output", "CSV output", "Terminal truncation", "Local timezone", "Install method", "Secrets from dotenv", "Secrets from environment", "Secrets from config file", "TLS verification", "ASCII log separators", "Coloured output", "Verbose mode", "Debug mode", "More details")
+SHARED_ROW_ORDER = ("Target", "Polling intervals", "Notifications (email)", "Notifications (webhook)", "Output", "Output logging", "Config", "Dotenv", "Liveness output", "CSV output", "Terminal truncation", "Local timezone", "Install method", "Secrets from dotenv", "Secrets from environment", "Secrets from config file", "Secrets from command line", "TLS verification", "ASCII log separators", "Coloured output", "Verbose mode", "Debug mode", "More details")
 
 
 # Verifies the shared rows keep the order and the label column width every sibling monitor prints
@@ -360,3 +360,19 @@ def test_placeholder_secrets_are_not_reported_as_loaded(pm_module, monkeypatch):
 
     assert "WEBHOOK_URL" not in reported
     assert "SMTP_PASSWORD" not in reported
+
+
+# Verifies each source that can supply a secret gets its own row, so none of them is filed under another
+@pytest.mark.parametrize("source, label", [("dotenv file", "Secrets from dotenv"), ("environment", "Secrets from environment"), ("configuration file", "Secrets from config file"), ("command line", "Secrets from command line")])
+def test_each_secret_source_is_reported_under_its_own_row(pm_module, monkeypatch, source, label):
+    for name in pm_module.SECRET_KEYS:
+        monkeypatch.setattr(pm_module, name, "your_placeholder")
+    monkeypatch.setattr(pm_module, "SECRET_SOURCES", {"PSN_NPSSO": source})
+    monkeypatch.setattr(pm_module, "PSN_NPSSO", "npsso-code-value")
+
+    rows = pm_module.build_startup_summary("misiektoja")
+
+    assert row_named(rows, label).value == "PSN_NPSSO"
+    for other in ("Secrets from dotenv", "Secrets from environment", "Secrets from config file", "Secrets from command line"):
+        if other != label:
+            assert row_named(rows, other).value == "None"
