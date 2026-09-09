@@ -103,6 +103,15 @@ def test_the_report_is_printed_in_the_documented_order(pm_module, psn_session, d
     assert notice < progress < heading
 
 
+# Verifies the preflight notice names both channels the delivery tests can offer, so neither is a surprise
+def test_the_preflight_notice_names_both_delivery_channels(pm_module, psn_session, doctor_run):
+    psn_session([presence_payload(status="online")])
+
+    _, raw = doctor_run(psn_user_id=USER_ID)
+
+    assert "Running preflight checks. No files will be written. Interactive email and webhook tests run only after separate approval." in raw
+
+
 # Verifies the transient progress line leaves nothing behind in the report the user reads
 def test_the_progress_line_is_cleared_before_the_report(pm_module, psn_session, doctor_run):
     psn_session([presence_payload(status="online")])
