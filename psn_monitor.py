@@ -364,6 +364,10 @@ DISABLE_LOGGING = False
 ASCII_LOG_SEPARATORS = "Auto"
 VERBOSE_MODE = False
 DEBUG_MODE = False
+
+# True once monitoring has printed its header, so a verbose notice after that closes its own block
+MONITORING_ACTIVE = False
+
 TRUNCATE_CHARS = 0
 HORIZONTAL_LINE = 0
 CLEAR_SCREEN = False
@@ -1016,7 +1020,15 @@ def verbose_notice(*messages):
         return
     for message in messages:
         verbose_print(message)
-    print_cur_ts("Timestamp:\t\t\t")
+    # Before monitoring starts the notice belongs to the startup screen, which the monitoring header closes
+    if MONITORING_ACTIVE:
+        print_cur_ts("Timestamp:\t\t\t")
+
+
+# Marks the point where output stops being the startup screen, so later notices close their own block
+def mark_monitoring_started():
+    global MONITORING_ACTIVE
+    MONITORING_ACTIVE = True
 
 
 # Applies the diagnostic flags that were actually typed, leaving the rest to the config file
@@ -3440,6 +3452,8 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
 # Main function that monitors gaming activity of the specified PSN user
 def psn_monitor_user(psn_user_id, csv_file_name):
 
+    mark_monitoring_started()
+
     alive_counter = 0
     status_ts = 0
     status_ts_old = 0
@@ -3743,7 +3757,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             psnawp = psn_client()
             psn_user = psnawp.user(online_id=psn_user_id)
             last_recreate_ts = now
-            verbose_print("Recreated the PSNAWP session")
+            verbose_notice("Recreated the PSNAWP session")
             return True
         except Exception as diag_exc:
             debug_print("Recreating the PSNAWP session", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")

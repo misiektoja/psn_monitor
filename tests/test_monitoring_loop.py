@@ -373,6 +373,16 @@ def test_a_verbose_notice_closes_with_a_timestamp(pm_module, psn_session, fake_c
     assert set(lines[notice + 2]) == {"\u2500"}
 
 
+# Verifies a notice printed before monitoring starts stays a bare line, since the monitoring header closes that block
+def test_a_verbose_notice_stays_bare_on_the_startup_screen(pm_module, monkeypatch, capsys):
+    monkeypatch.setattr(pm_module, "VERBOSE_MODE", True)
+    monkeypatch.setattr(pm_module, "MONITORING_ACTIVE", False)
+
+    pm_module.verbose_notice("Recreated the PSNAWP session")
+
+    assert capsys.readouterr().out == "* Recreated the PSNAWP session\n"
+
+
 # Verifies the liveness line is printed while an offline user produces no other output
 def test_liveness_check_reports_the_loop_is_alive(pm_module, psn_session, fake_clock, monkeypatch, capsys):
     monkeypatch.setattr(pm_module, "LIVENESS_CHECK_COUNTER", 2)
