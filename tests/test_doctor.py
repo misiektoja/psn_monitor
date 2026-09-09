@@ -211,8 +211,8 @@ def test_delivery_tests_are_offered_before_the_summary(pm_module, psn_session, m
     assert displayed.index("Summary") < displayed.index(f"Guide: {pm_module.DOCTOR_GUIDE_URL}")
 
 
-# Verifies a failed delivery test reaches the summary, so the last sentence cannot contradict the exit code
-def test_a_failed_delivery_test_reaches_the_summary(pm_module, psn_session, monkeypatch, doctor_run):
+# Verifies a failed delivery test fails the whole run, so the exit code and the last sentence agree
+def test_a_failed_delivery_test_changes_the_exit_code(pm_module, psn_session, monkeypatch, doctor_run):
     monkeypatch.setattr(pm_module, "GAME_CHANGE_NOTIFICATION", True)
     monkeypatch.setattr(pm_module, "ask_yes_no", lambda question, default=False: True)
     monkeypatch.setattr(pm_module, "send_email", lambda *args, **kwargs: 1)

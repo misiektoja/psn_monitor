@@ -4,7 +4,6 @@ import re
 
 import signal
 import types
-from pathlib import Path
 import pytest
 
 import psn_monitor as monitor
