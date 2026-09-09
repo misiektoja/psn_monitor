@@ -888,3 +888,37 @@ def test_the_action_lines_sit_indented_under_their_marker(pm_module, monkeypatch
     rows = lines[lines.index("[WARN] a warning row"):]
 
     assert rows[:5] == ["[WARN] a warning row", "  a detail worth keeping", "  To fix: do the thing", f"  Guide: {pm_module.DOCTOR_GUIDE_URL}", "[PASS] a passing row"]
+
+
+# Verifies an approved delivery test that failed reaches the summary, so a failing run cannot report a clean one
+def test_a_failed_delivery_test_reaches_the_summary(pm_module, monkeypatch):
+    terminal = FakeTerminal(True)
+    monkeypatch.setattr(pm_module.sys, "stdout", terminal)
+    monkeypatch.setattr(pm_module.sys, "stdin", terminal)
+    monkeypatch.setattr(pm_module, "ask_yes_no", lambda question: True)
+    monkeypatch.setattr(pm_module, "send_email", lambda *args, **kwargs: 1)
+    report = pm_module.DoctorReport(email_ready=True)
+
+    pm_module.offer_doctor_delivery_tests(report)
+
+    assert [(check.section, check.status, check.label) for check in report.checks] == [(pm_module.DOCTOR_DELIVERY_SECTION, "FAIL", "Doctor test email delivery failed")]
+    assert "1 check(s) failed, 0 warning(s)." in pm_module.render_doctor_summary(report.checks)
+
+
+# Verifies every doctor entry point renders its summary after the delivery tests, so the sentence and the exit code describe one run
+def test_the_summary_is_rendered_after_the_delivery_tests(pm_module):
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(pm_module))
+    checked = 0
+    for function in [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]:
+        calls = [(call.lineno, ast.unparse(call.func)) for call in ast.walk(function) if isinstance(call, ast.Call)]
+        offers = [lineno for lineno, name in calls if name.endswith("offer_doctor_delivery_tests")]
+        summaries = [lineno for lineno, name in calls if name.endswith("render_doctor_summary")]
+        if not offers or not summaries:
+            continue
+        checked += 1
+        assert max(offers) < min(summaries), f"{function.name} renders the summary before the delivery tests"
+
+    assert checked, "no doctor entry point runs the delivery tests and then the summary"
