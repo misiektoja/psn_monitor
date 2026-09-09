@@ -4744,6 +4744,27 @@ def emit_startup_summary(rows, show_full=False, stream=None):
     destination.flush()
 
 
+# Reads only the persisted target from a config file, so a printed command can omit a positional the config already supplies
+def config_file_target(config_path):
+    if not config_path or str(config_path).casefold() == "none":
+        return ""
+    namespace = {}
+    if not load_config_file(config_path, namespace=namespace, report_errors=False):
+        return ""
+    return str(namespace.get("PSN_USER_ID") or "")
+
+
+# Returns the targets for the printed doctor and monitoring commands, dropping one the effective config already supplies
+def command_targets(explicit_target=None, saved_target=None, placeholder="<psn_user_id>"):
+    saved = str(saved_target or "")
+    known = str(explicit_target or "") or saved
+    if not known:
+        # Monitoring cannot run without a target, so it keeps the placeholder while the doctor reports the gap itself
+        return None, placeholder
+    printed = None if known == saved else known
+    return printed, printed
+
+
 # Prints one labelled command on its own indented line, the shared shape across these tools
 def print_labelled_command(label, command, suffix=""):
     print(label)
@@ -4752,10 +4773,11 @@ def print_labelled_command(label, command, suffix=""):
 
 # Prints the command that starts monitoring with the files this run checked, so a report read on its own
 # ends with the next action rather than leaving the reader to assemble the command
-def print_doctor_next_steps(psn_user_id=None, doctor_exit=0):
+def print_doctor_next_steps(psn_user_id=None, saved_target=None, doctor_exit=0):
     print("\n" + colorize("header", "Next steps") + "\n")
     label = "After Doctor passes, start monitoring:" if doctor_exit else "Start monitoring:"
-    print_labelled_command(label, tool_command(*([str(psn_user_id)] if psn_user_id else [])))
+    monitor_target = command_targets(psn_user_id, saved_target)[1]
+    print_labelled_command(label, tool_command(*([monitor_target] if monitor_target else [])))
     # No trailing blank line: the command printer already left one and the report must not end on two
     print(f"Guide: {QUICK_START_GUIDE_URL}")
 
@@ -5763,13 +5785,12 @@ def print_secret_next_steps(env_path, config_path=None, psn_user_id=None, test_s
     if config_path:
         paths.extend(("--config-file", str(config_path)))
     paths.extend(("--env-file", str(env_path)))
-    # Only a target this run was given is printed, so the commands stay pasteable rather than carrying a placeholder
-    target_arguments = (psn_user_id,) if psn_user_id else ()
+    doctor_target, monitor_target = command_targets(psn_user_id, config_file_target(config_path or find_config_file()))
     print()
     if test_step:
         print_labelled_command(test_step[0], tool_command(test_step[1], *paths))
-    print_labelled_command("Check setup again:", tool_command("--doctor", *target_arguments, *paths))
-    print_labelled_command("Once the checks pass, start monitoring:", tool_command(*target_arguments, *paths))
+    print_labelled_command("Check setup again:", tool_command("--doctor", *((doctor_target,) if doctor_target else ()), *paths))
+    print_labelled_command("Once the checks pass, start monitoring:", tool_command(*((monitor_target,) if monitor_target else ()), *paths))
 
 
 # Collects one secret through a hidden prompt, checks it with the given validator and writes it only then
@@ -6300,7 +6321,7 @@ def main():
     if doctor_mode:
         doctor_exit = run_doctor(args.psn_user_id, cfg_path, env_path, config_advice, timezone_advice)
         # A target the config file already carries is left out, so the command stays as short as the wizard's
-        print_doctor_next_steps(None if args.psn_user_id == PSN_USER_ID else args.psn_user_id, doctor_exit)
+        print_doctor_next_steps(args.psn_user_id, PSN_USER_ID, doctor_exit)
         sys.exit(doctor_exit)
 
     if not check_internet():

@@ -23,7 +23,7 @@ Every `[WARN]` and `[FAIL]` row carries the `To fix:` line described in [Error M
 
 If a channel passes and you are on an interactive terminal, the doctor offers to send one real test email and one real test webhook. Each is approved separately, and nothing is delivered without a `y`. Ctrl+C at either prompt ends the run rather than declining one test and asking the next.
 
-The report ends with a **Next steps** block naming the command that starts monitoring, carrying the same `--config-file` and `--env-file` this run checked. While a check is failing it asks for the failures first.
+The report ends with a **Next steps** block naming the command that starts monitoring, carrying the same `--config-file` and `--env-file` this run checked. It carries the target this run used, leaves it out when the configuration file already supplies one and otherwise shows `<psn_user_id>` for you to replace. While a check is failing it asks for the failures first.
 
 ## Error Messages and Recovery
 

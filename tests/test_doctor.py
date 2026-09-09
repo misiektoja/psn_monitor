@@ -966,7 +966,8 @@ def test_the_report_ends_with_the_command_that_starts_monitoring(pm_module, monk
     transcript = capsys.readouterr().out
     assert "Next steps" in transcript
     assert "Start monitoring:" in transcript
-    assert "psn_monitor.py --config-file /etc/psn.conf --env-file /etc/psn.env" in transcript
+    # Nothing supplies a target here, so the command keeps the placeholder rather than printing one that cannot run
+    assert "psn_monitor.py <psn_user_id> --config-file /etc/psn.conf --env-file /etc/psn.env" in transcript
     assert transcript.rstrip().endswith(pm_module.QUICK_START_GUIDE_URL)
 
 
