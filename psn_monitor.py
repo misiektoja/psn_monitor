@@ -4595,9 +4595,13 @@ def ask_yes_no(question, default=False):
     while True:
         try:
             answer = read_interactively(input, f"{question} {hint}: ").strip().casefold()
-        except (EOFError, KeyboardInterrupt):
+        except EOFError:
             print()
             return False
+        except KeyboardInterrupt:
+            # Ctrl+C ends the run here the way it does anywhere else, rather than only declining this one test
+            signal_handler(signal.SIGINT, None)
+            raise
         if not answer:
             return default
         if answer in ("y", "yes"):
@@ -5759,12 +5763,13 @@ def print_secret_next_steps(env_path, config_path=None, psn_user_id=None, test_s
     if config_path:
         paths.extend(("--config-file", str(config_path)))
     paths.extend(("--env-file", str(env_path)))
-    target = psn_user_id or "<psn_user_id>"
+    # Only a target this run was given is printed, so the commands stay pasteable rather than carrying a placeholder
+    target_arguments = (psn_user_id,) if psn_user_id else ()
     print()
     if test_step:
         print_labelled_command(test_step[0], tool_command(test_step[1], *paths))
-    print_labelled_command("Check setup again:", tool_command("--doctor", target, *paths))
-    print_labelled_command("Once the checks pass, start monitoring:", tool_command(target, *paths))
+    print_labelled_command("Check setup again:", tool_command("--doctor", *target_arguments, *paths))
+    print_labelled_command("Once the checks pass, start monitoring:", tool_command(*target_arguments, *paths))
 
 
 # Collects one secret through a hidden prompt, checks it with the given validator and writes it only then
