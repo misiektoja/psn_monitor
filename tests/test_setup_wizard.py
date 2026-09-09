@@ -791,6 +791,33 @@ def test_the_saved_timezone_is_resolved_before_doctor_reads_it(monkeypatch):
     assert monitor.TIMEZONE_CHECK_LABELS[monitor.LOCAL_TIMEZONE_STATE] == "Local timezone can be detected"
 
 
+# Verifies a CSV answer without an extension is saved as a .csv file while an explicit extension is left alone
+def test_the_csv_answer_gains_a_csv_extension_when_it_has_none(tmp_path):
+    state = monitor.WizardSetupState(tmp_path / "psn_monitor.conf", tmp_path / ".env", dict(vars(monitor)))
+
+    monitor._wizard_collect_output_section(state, input_func=ScriptedTerminal("y", str(tmp_path / "activity"), "").answer)
+    assert state.config_values["CSV_FILE"] == str(tmp_path / "activity.csv")
+
+    monitor._wizard_collect_output_section(state, input_func=ScriptedTerminal("y", str(tmp_path / "activity.txt"), "").answer)
+    assert state.config_values["CSV_FILE"] == str(tmp_path / "activity.txt")
+
+
+# Verifies a declined email section clears the mail server, so the written config cannot contradict the summary
+def test_a_declined_email_section_clears_the_mail_server(tmp_path):
+    baseline = dict(vars(monitor))
+    baseline.update({"SMTP_HOST": "smtp.example.test", "SMTP_USER": "monitor@example.test", "SENDER_EMAIL": "monitor@example.test", "RECEIVER_EMAIL": "alerts@example.test"})
+    state = monitor.WizardSetupState(tmp_path / "psn_monitor.conf", tmp_path / ".env", baseline)
+    state.secret_updates["SMTP_PASSWORD"] = "private-password"
+    terminal = ScriptedTerminal("n")
+
+    monitor._wizard_collect_email_section(state, input_func=terminal.answer, getpass_func=terminal.secret)
+
+    defaults = monitor._config_template_defaults()
+    assert all(state.config_values[name] == defaults[name] for name in monitor.WIZARD_SMTP_CONFIG_KEYS)
+    assert "SMTP_PASSWORD" not in state.secret_updates
+    assert "smtp.example.test" not in monitor.generate_config_with_current_values(state.config_values)
+
+
 # Verifies the recommended preset switches on every supported type and is offered alone, since an "everything"
 # option beside it would enable exactly the same set on this tool
 @pytest.mark.parametrize("collect, keys, answers", (
