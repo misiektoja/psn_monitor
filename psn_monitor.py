@@ -4569,7 +4569,12 @@ def _wizard_print_default_guidance():
 # that nothing was written
 def _wizard_input(prompt_text, input_func=None):
     prompt = input if input_func is None else input_func
-    return prompt(colorize("info", prompt_text))
+    try:
+        return prompt(colorize("info", prompt_text))
+    except (EOFError, KeyboardInterrupt):
+        # The interrupted prompt owns the line break, so every handler prints its message alone
+        print()
+        raise
 
 
 # Asks one free-text question, returning the shown default when the answer is empty
@@ -4668,7 +4673,11 @@ def _wizard_ask_duration(question, default, input_func=None):
 # Asks one secret through a hidden prompt, so it never reaches the screen or the shell history
 def _wizard_ask_secret(question, getpass_func=None):
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
-    return str(hidden_prompt(f"{question}: ")).strip()
+    try:
+        return str(hidden_prompt(f"{question}: ")).strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        raise
 
 
 # Renders one setting for the generated config, keeping a mapping readable instead of on one very long line
@@ -5168,11 +5177,11 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
         _wizard_collect_output_section(state, input_func=input_func)
         saved = _wizard_review_setup(state, input_func=input_func, getpass_func=getpass_func)
     except (EOFError, KeyboardInterrupt):
-        print("\nSetup cancelled. The destination files were not changed.")
+        print(colorize("warning", "Setup cancelled. Destination files were not changed."))
         return 1
 
     if not saved:
-        print("Setup cancelled. The destination files were not changed.")
+        print("\n" + colorize("warning", "Setup cancelled. Destination files were not changed."))
         return 1
 
     # Everything above only filled the state, so this is the first and only point anything reaches disk
@@ -5208,7 +5217,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
             doctor_exit = run_doctor(psn_user_id=state.target, config_path=str(state.config_path), env_path=str(state.env_path) if secrets_written else None)
     except (EOFError, KeyboardInterrupt):
         # The files are already written, so an interrupt here only skips the optional check
-        print()
+        print(colorize("warning", "Setup is saved. Use the commands below when ready."))
 
     env_arguments = ["--env-file", str(state.env_path)] if secrets_written else []
     # A saved target is already in the config file, so the printed commands stay short
@@ -5221,7 +5230,13 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     print(f"Guide: {QUICK_START_GUIDE_URL}\n")
 
     npsso_ready = "PSN_NPSSO" in state.secret_updates or secret_is_set(state.config_values.get("PSN_NPSSO"))
-    if state.target and npsso_ready and _wizard_ask_yes_no("Start monitoring now? Monitoring will continue until Ctrl+C.", default=True, input_func=input_func):
+    try:
+        start_monitoring = bool(state.target and npsso_ready and _wizard_ask_yes_no("Start monitoring now? Monitoring will continue until Ctrl+C.", default=True, input_func=input_func))
+    except (EOFError, KeyboardInterrupt):
+        # The files are already written, so an interrupt here only skips the optional launch
+        print(colorize("warning", "Setup is saved. Start monitoring with the command above when ready."))
+        return 0
+    if start_monitoring:
         launch_arguments = _wizard_local_command_args(target=None if state.persist_target else state.target, config_path=state.config_path, env_path=state.env_path if secrets_written else None)
         sys.stdout.flush()
         return _wizard_launch_monitor(launch_arguments)
@@ -5282,7 +5297,7 @@ def print_welcome_screen(input_func=None, interactive=None, config_file=None, en
             start_setup = _wizard_ask_yes_no("Run the guided setup wizard now?", default=True, input_func=input_func)
         except (EOFError, KeyboardInterrupt):
             # This prompt sits outside the wizard, which handles its own interrupts
-            print("\n" + colorize("warning", "Setup cancelled."))
+            print(colorize("warning", "Setup cancelled."))
             return 1
         if start_setup:
             print()

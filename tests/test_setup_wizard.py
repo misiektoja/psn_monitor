@@ -46,6 +46,15 @@ class ScriptedTerminal:
         return any(text in prompt for prompt in self.prompts)
 
 
+# Replays scripted answers and then interrupts the next prompt, the way Ctrl+C does
+class InterruptedTerminal(ScriptedTerminal):
+    # Interrupts instead of running out of answers, so a test can cancel at a chosen prompt
+    def answer(self, prompt):
+        if not self.remaining:
+            raise KeyboardInterrupt
+        return super().answer(prompt)
+
+
 # Runs the wizard against one scripted terminal and returns it, so a test can assert on what was asked
 def run_wizard(terminal, **kwargs):
     kwargs.setdefault("interactive", True)
@@ -527,3 +536,35 @@ def test_interrupting_the_welcome_offer_reports_a_cancellation(monkeypatch, caps
 
     assert monitor.print_welcome_screen(interactive=True, input_func=interrupt) == 1
     assert "Setup cancelled." in capsys.readouterr().out
+
+
+# Verifies an interrupt before the save says the destination files are untouched
+def test_interrupting_the_questions_reports_untouched_files(tmp_path, capsys):
+    exit_code = run_wizard(InterruptedTerminal())
+
+    assert exit_code == 1
+    assert "Setup cancelled. Destination files were not changed." in capsys.readouterr().out
+    assert not (tmp_path / "psn_monitor.conf").exists()
+
+
+# Verifies an interrupt at the doctor offer reports the saved setup instead of a cancellation
+def test_interrupting_the_doctor_offer_keeps_the_saved_setup(tmp_path, capsys):
+    exit_code = run_wizard(InterruptedTerminal(*happy_path()[:-2]))
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Setup is saved. Use the commands below when ready." in output
+    assert "Setup cancelled" not in output
+    assert "Next steps" in output
+    assert (tmp_path / "psn_monitor.conf").is_file()
+
+
+# Verifies an interrupt at the launch offer reports the saved setup and points at the printed command
+def test_interrupting_the_launch_offer_keeps_the_saved_setup(tmp_path, capsys):
+    exit_code = run_wizard(InterruptedTerminal(*happy_path()[:-1]))
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Setup is saved. Start monitoring with the command above when ready." in output
+    assert "Setup cancelled" not in output
+    assert (tmp_path / "psn_monitor.conf").is_file()
