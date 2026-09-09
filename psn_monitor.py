@@ -1070,14 +1070,6 @@ def secret_is_set(value):
     return isinstance(value, str) and bool(value.strip()) and not value.startswith("your_")
 
 
-# The settings a sign-in needs before a password can be checked against the mail server
-MAIL_SIGN_IN_SETTINGS = ("SMTP_HOST", "SMTP_USER", "SENDER_EMAIL", "RECEIVER_EMAIL")
-
-
-# Returns the mail settings a sign-in needs that are still empty or still hold their shipped placeholder
-def mail_sign_in_settings_missing():
-    return [name for name in MAIL_SIGN_IN_SETTINGS if not secret_is_set(str(globals().get(name) or ""))]
-
 
 # Joins setting names into the phrase a message reads out, for example "SMTP_HOST and SMTP_USER"
 def join_setting_names(names, conjunction):
@@ -6055,6 +6047,15 @@ def validate_npsso_code(npsso):
         return psn_client(candidate).me().online_id
     except Exception as exc:
         raise RecoveryError(classify_recovery_error(exc, context="startup"), exc) from None
+
+
+# The settings a sign-in needs before a password can be checked against the mail server
+MAIL_SIGN_IN_SETTINGS = ("SMTP_HOST", "SMTP_USER", "SENDER_EMAIL", "RECEIVER_EMAIL")
+
+
+# Returns the mail settings a sign-in needs that are still empty or still hold their shipped placeholder
+def mail_sign_in_settings_missing():
+    return [name for name in MAIL_SIGN_IN_SETTINGS if not secret_is_set(str(globals().get(name) or ""))]
 
 
 # Signs in to the configured SMTP server with one candidate password, without sending a message
