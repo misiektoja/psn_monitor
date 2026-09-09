@@ -315,3 +315,22 @@ def test_only_debug_mode_keeps_the_screen(pm_module, monkeypatch, monitor_calls,
     run_main(pm_module, monkeypatch, ["test-user", "--env-file", "none", flag])
 
     assert cleared == [expected]
+
+
+# Verifies the one-shot commands keep whatever is already on the screen, so their output stays scrollable
+@pytest.mark.parametrize(("argv", "expected"), ((["psn_monitor", "--doctor"], True), (["psn_monitor", "--set-npsso"], True), (["psn_monitor", "--send-test-email"], True), (["psn_monitor", "--help"], True), (["psn_monitor", "test-user"], False)))
+def test_one_shot_commands_keep_the_terminal_history(pm_module, monkeypatch, argv, expected):
+    monkeypatch.setattr(pm_module.sys, "argv", argv)
+
+    assert pm_module.keep_terminal_history() is expected
+
+
+# Verifies a redirected stdout is never cleared, so no escape sequence or TERM warning reaches the captured output
+def test_a_redirected_stdout_is_never_cleared(pm_module, monkeypatch):
+    commands = []
+    monkeypatch.setattr(pm_module.sys.stdout, "isatty", lambda: False, raising=False)
+    monkeypatch.setattr(pm_module.os, "system", lambda command: commands.append(command))
+
+    pm_module.clear_screen(True)
+
+    assert commands == []
