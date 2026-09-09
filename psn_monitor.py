@@ -4396,6 +4396,22 @@ def doctor_secret_checks():
     return [make_doctor_check("Configuration", "PASS", f"Secrets loaded from the {source}", ", ".join(names)) for source, names in sorted(grouped.items())]
 
 
+# Returns all type and range errors in settings that control runtime timing or counts
+def runtime_configuration_errors():
+    errors = []
+    positive_numbers = (("PSN_CHECK_INTERVAL", PSN_CHECK_INTERVAL), ("PSN_ACTIVE_CHECK_INTERVAL", PSN_ACTIVE_CHECK_INTERVAL), ("CHECK_INTERNET_TIMEOUT", CHECK_INTERNET_TIMEOUT))
+    nonnegative_numbers = (("OFFLINE_INTERRUPT", OFFLINE_INTERRUPT), ("LIVENESS_CHECK_INTERVAL", LIVENESS_CHECK_INTERVAL))
+    for name, value in positive_numbers:
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+            errors.append(f"{name} must be a number greater than zero, not {value!r}")
+    for name, value in nonnegative_numbers:
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+            errors.append(f"{name} must be a number zero or greater, not {value!r}")
+    if not isinstance(SMTP_PORT, int) or isinstance(SMTP_PORT, bool) or not 1 <= SMTP_PORT <= 65535:
+        errors.append(f"SMTP_PORT must be an integer from 1 through 65535, not {SMTP_PORT!r}")
+    return errors
+
+
 # Reports the effective settings and the files the tool would write, without writing any of them
 def doctor_check_configuration(config_path=None, env_path=None, config_advice=None, timezone_advice=None, psn_user_id=None):
     checks = []
@@ -4429,6 +4445,12 @@ def doctor_check_configuration(config_path=None, env_path=None, config_advice=No
     else:
         advice = make_recovery_advice("config.insecure", "TLS certificate verification is off", recovery_fix_with_guide("Set VERIFY_SSL back to True unless this network intercepts TLS with its own certificate authority", TLS_GUIDE_URL), False)
         checks.append(make_doctor_check("Configuration", "WARN", "TLS certificate verification is off", "VERIFY_SSL is False, so an intercepted connection cannot be told apart from the real service", advice))
+
+    numeric_errors = runtime_configuration_errors()
+    if numeric_errors:
+        numeric_detail = "Invalid numeric settings: " + "; ".join(numeric_errors)
+        advice = make_recovery_advice("config.invalid", "One or more numeric settings are invalid", recovery_fix_with_guide("Correct the reported settings in the configuration file", CONFIG_GUIDE_URL), False, numeric_detail)
+        checks.append(make_doctor_check("Configuration", "FAIL", "One or more numeric settings are invalid", numeric_detail, advice))
 
     try:
         ascii_log_separators_enabled()
