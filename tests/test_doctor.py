@@ -761,7 +761,7 @@ def test_an_invalid_timezone_is_reported_not_fatal(pm_module, psn_session, monke
 
     output = capsys.readouterr().out
     assert code == 1
-    assert "[FAIL] Local timezone is invalid\n  Mars/Olympus_Mons" in output
+    assert "[FAIL] Local timezone is invalid\n  Time zone: Mars/Olympus_Mons" in output
     assert "Notifications" in output
 
 
@@ -985,3 +985,15 @@ def test_a_command_line_target_is_carried_into_the_command(pm_module, monkeypatc
     pm_module.print_doctor_next_steps("someone", doctor_exit=0)
 
     assert "psn_monitor.py someone" in capsys.readouterr().out
+
+
+# Verifies the row names the state the shared resolver settled on, so it says what a restart would say
+def test_the_timezone_row_follows_the_shared_resolver(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "LOCAL_TIMEZONE", "Mars/Olympus_Mons")
+    monkeypatch.setattr(pm_module, "LOCAL_TIMEZONE_STATE", "config")
+
+    advice = pm_module.resolve_local_timezone()
+
+    assert pm_module.LOCAL_TIMEZONE_STATE == "invalid"
+    row = next(item for item in pm_module.doctor_check_configuration(timezone_advice=advice) if item.label in pm_module.TIMEZONE_CHECK_LABELS.values())
+    assert (row.status, row.label, row.detail) == ("FAIL", "Local timezone is invalid", "Time zone: Mars/Olympus_Mons")

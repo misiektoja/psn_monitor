@@ -1119,7 +1119,7 @@ def resolve_local_timezone():
             timezone_advice = make_recovery_advice("config.invalid", "The local timezone could not be detected", recovery_fix_with_guide("Set LOCAL_TIMEZONE to a pytz timezone name such as 'Europe/Warsaw'", TIMEZONE_GUIDE_URL), False, "tzlocal did not return a supported timezone")
     elif not is_valid_timezone(LOCAL_TIMEZONE):
         LOCAL_TIMEZONE_STATE = "invalid"
-        timezone_advice = make_recovery_advice("config.invalid", f"Configured LOCAL_TIMEZONE '{LOCAL_TIMEZONE}' is not valid", recovery_fix_with_guide("Set LOCAL_TIMEZONE to a pytz timezone name such as 'Europe/Warsaw'", TIMEZONE_GUIDE_URL), False, str(LOCAL_TIMEZONE))
+        timezone_advice = make_recovery_advice("config.invalid", f"Configured LOCAL_TIMEZONE '{LOCAL_TIMEZONE}' is not valid", recovery_fix_with_guide("Set LOCAL_TIMEZONE to a pytz timezone name such as 'Europe/Warsaw'", TIMEZONE_GUIDE_URL), False, f"Time zone: {LOCAL_TIMEZONE}")
     return timezone_advice
 
 
