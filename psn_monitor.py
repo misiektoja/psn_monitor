@@ -4559,10 +4559,13 @@ def doctor_check_email_notifications(report):
     problem = email_settings_problem()
     # An error alert is on by default, so on its own it cannot make a fresh install look configured
     deliberate = ACTIVE_INACTIVE_NOTIFICATION or GAME_CHANGE_NOTIFICATION
-    if not deliberate and not (ERROR_NOTIFICATION and problem is None):
+    if not deliberate and problem is not None:
         return [make_doctor_check("Notifications", "PASS", "Email notifications are disabled", "No SMTP connection was attempted and no email was sent")]
     if problem is not None:
         return [doctor_email_unusable_check(*problem)]
+    if not deliberate and not ERROR_NOTIFICATION:
+        advice = make_recovery_advice("smtp.invalid", "Email is configured but no alert types are selected", recovery_fix_with_guide("Turn on at least one email alert in the configuration file", SMTP_GUIDE_URL), False)
+        return [make_doctor_check("Notifications", "WARN", advice.summary, "Nothing would ever be emailed", advice)]
     try:
         smtp_sign_in(SMTP_PASSWORD, timeout=DOCTOR_SMTP_TIMEOUT)
     except RecoveryError as exc:
@@ -4580,10 +4583,7 @@ def doctor_check_webhook_notifications(report):
     if not WEBHOOK_ENABLED:
         if not deliberate:
             return [make_doctor_check("Notifications", "PASS", "Webhook alerts are disabled")]
-        advice = make_recovery_advice("webhook.invalid", "Webhook alerts are selected but the channel is switched off", recovery_fix_with_guide("Set WEBHOOK_ENABLED to True, or turn the selected webhook alerts off", WEBHOOK_GUIDE_URL), False)
-        return [make_doctor_check("Notifications", "WARN", advice.summary, "Nothing would ever be delivered", advice)]
-    if not selected:
-        advice = make_recovery_advice("webhook.invalid", "Webhook alerts are on but no alert type is selected", recovery_fix_with_guide("Turn on at least one WEBHOOK_ notification setting, or set WEBHOOK_ENABLED to False", WEBHOOK_GUIDE_URL), False)
+        advice = make_recovery_advice("webhook.invalid", "Webhook alert types are selected but webhooks are switched off", recovery_fix_with_guide("Set WEBHOOK_ENABLED to True, or turn the alert types off", WEBHOOK_GUIDE_URL), False)
         return [make_doctor_check("Notifications", "WARN", advice.summary, "Nothing would ever be delivered", advice)]
     provider = normalized_webhook_provider()
     if not provider:
@@ -4596,6 +4596,9 @@ def doctor_check_webhook_notifications(report):
         if validation_error is not None:
             advice = classify_recovery_error(context="webhook", detail=validation_error)
             return [make_doctor_check("Notifications", "FAIL", advice.summary, advice.detail, advice)]
+    if not selected:
+        advice = make_recovery_advice("webhook.invalid", "Webhook alerts are on but no alert types are selected", recovery_fix_with_guide("Turn on at least one webhook alert in the configuration file, or set WEBHOOK_ENABLED to False", WEBHOOK_GUIDE_URL), False)
+        return [make_doctor_check("Notifications", "WARN", advice.summary, "Nothing would ever be delivered", advice)]
     report.webhook_ready = True
     return [make_doctor_check("Notifications", "PASS", f"{WEBHOOK_READY_CHECK_LABEL} for {webhook_provider_display_name()}", f"Alerts: {', '.join(selected)}. The private link was not displayed. No webhook was sent during this passive check")]
 

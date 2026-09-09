@@ -5,6 +5,7 @@ them, so the contract tests drive the whole run and read the transcript a user s
 """
 
 import re
+from unittest.mock import Mock
 import smtplib
 
 import pytest
@@ -1091,3 +1092,35 @@ def test_invalid_numeric_settings_are_reported_in_one_row(pm_module, monkeypatch
 
     assert [item.status for item in rows] == ["FAIL"]
     assert all(name in rows[0].detail for name in ("PSN_CHECK_INTERVAL", "LIVENESS_CHECK_INTERVAL", "SMTP_PORT"))
+
+
+# Verifies configured mail settings with no alert types selected warn, since nothing would ever be emailed
+def test_email_configured_but_nothing_selected_warns(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "ACTIVE_INACTIVE_NOTIFICATION", False)
+    monkeypatch.setattr(pm_module, "GAME_CHANGE_NOTIFICATION", False)
+    monkeypatch.setattr(pm_module, "ERROR_NOTIFICATION", False)
+    monkeypatch.setattr(pm_module, "SMTP_HOST", "smtp.example.test")
+    monkeypatch.setattr(pm_module, "SMTP_USER", "monitor")
+    monkeypatch.setattr(pm_module, "SMTP_PASSWORD", "private-password")
+    monkeypatch.setattr(pm_module, "SENDER_EMAIL", "monitor@example.test")
+    monkeypatch.setattr(pm_module, "RECEIVER_EMAIL", "alerts@example.test")
+    monkeypatch.setattr(pm_module, "smtp_sign_in", Mock(side_effect=AssertionError("SMTP was contacted")))
+    report = pm_module.DoctorReport()
+
+    check = pm_module.doctor_check_email_notifications(report)[0]
+
+    assert (check.status, check.label) == ("WARN", "Email is configured but no alert types are selected")
+    assert check.detail == "Nothing would ever be emailed"
+    assert check.advice is not None and check.advice.code == "smtp.invalid"
+    assert report.email_ready is False
+
+
+# Verifies webhook alert types selected while the channel is off warn with the wording every sibling uses
+def test_webhook_alerts_selected_but_switched_off_warn(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", False)
+    monkeypatch.setattr(pm_module, "WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION", True)
+
+    check = pm_module.doctor_check_webhook_notifications(pm_module.DoctorReport())[0]
+
+    assert (check.status, check.label) == ("WARN", "Webhook alert types are selected but webhooks are switched off")
+    assert check.advice is not None and "WEBHOOK_ENABLED" in check.advice.fix
