@@ -676,13 +676,13 @@ def test_current_theme_key_wins_over_the_legacy_name(monkeypatch):
 # Verifies the guided setup surface is coloured, not only the monitoring output. The install method decides
 # every command shown afterwards, and the commands themselves are what the user has to copy
 def test_setup_surface_is_coloured(colored, capsys, monkeypatch):
-    monkeypatch.setattr(monitor, "install_method_display_name", lambda: "pip package")
+    monkeypatch.setattr(monitor, "detect_install_method", lambda: "pip")
 
     monitor._wizard_print_setup_destinations(Path("psn_monitor.conf"), Path(".env"))
     monitor.print_labelled_command("Check setup before monitoring:", "psn_monitor --doctor <psn_user_id>")
     output = capsys.readouterr().out
 
-    assert f"Detected install method: {colored['username']}pip package{monitor.ANSI_RESET}" in output
+    assert f"Detected install method: {colored['username']}pip{monitor.ANSI_RESET}" in output
     assert f"{colored['section']}psn_monitor --doctor <psn_user_id>{monitor.ANSI_RESET}" in output
 
 

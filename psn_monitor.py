@@ -4982,7 +4982,7 @@ def _wizard_collect_polling_section(state, input_func=None):
 
 # Asks for the NPSSO code through a hidden prompt and checks it against PSN before accepting it
 def _wizard_collect_auth_section(state, input_func=None, getpass_func=None, validator=None):
-    print(f"* Sign in at https://my.playstation.com then copy the npsso value from: {NPSSO_SOURCE_URL}")
+    print(f"Sign in at https://my.playstation.com then copy the npsso value from: {NPSSO_SOURCE_URL}")
     if secret_is_set(state.config_values.get("PSN_NPSSO")) and not _wizard_ask_yes_no("Replace the NPSSO code already configured?", default=False, input_func=input_func):
         return
     validate = validate_npsso_code if validator is None else validator
@@ -5278,9 +5278,9 @@ def _wizard_review_setup(state, input_func=None, getpass_func=None):
 
 # Prints where setup will write and which install method the printed commands are written for
 def _wizard_print_setup_destinations(config_path, env_path):
-    print(f"Detected install method: {colorize('username', install_method_display_name())}")
-    print(f"Configuration:           {config_path}")
-    print(f"Dotenv:                  {env_path}\n")
+    print(f"Detected install method: {colorize('username', detect_install_method())}")
+    print(f"Configuration:          {config_path}")
+    print(f"Dotenv:                 {env_path}\n")
 
 
 # Puts the values setup just saved into effect, so doctor checks the written files instead of the earlier state

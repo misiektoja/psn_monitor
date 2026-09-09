@@ -713,3 +713,19 @@ def test_a_hidden_wizard_answer_is_read_with_debug_output_off(monkeypatch):
     assert answer == "secret"
     assert seen == [False]
     assert monitor.DEBUG_MODE is True
+
+
+# Verifies the destination block states the raw install method key in the column the siblings print
+def test_the_setup_header_uses_the_shared_destination_column(capsys):
+    monitor._wizard_print_setup_destinations("psn_monitor.conf", ".env")
+
+    assert capsys.readouterr().out == f"Detected install method: {monitor.detect_install_method()}\nConfiguration:          psn_monitor.conf\nDotenv:                 .env\n\n"
+
+
+# Verifies the credential guidance opens its own group without the bullet the one-shot commands use
+def test_the_credential_guidance_opens_its_own_group(capsys):
+    run_wizard(InterruptedTerminal(USER_ID, "", "", "", secrets=lambda prompt: ""))
+
+    transcript = capsys.readouterr().out
+    assert f"\n\nSign in at https://my.playstation.com then copy the npsso value from: {monitor.NPSSO_SOURCE_URL}\n" in transcript
+    assert "* Sign in at" not in transcript
