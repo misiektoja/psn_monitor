@@ -1124,3 +1124,16 @@ def test_webhook_alerts_selected_but_switched_off_warn(pm_module, monkeypatch):
 
     assert (check.status, check.label) == ("WARN", "Webhook alert types are selected but webhooks are switched off")
     assert check.advice is not None and "WEBHOOK_ENABLED" in check.advice.fix
+
+
+# Two results printed after the last question read as one block that answers neither, so each sits under its own
+def test_a_delivery_result_is_printed_under_its_own_question(pm_module, monkeypatch, sent_emails, sent_webhooks):
+    stdout = FakeTerminal()
+    monkeypatch.setattr(pm_module, "ask_yes_no", lambda question, default=False: bool(stdout.write(question)) or True)
+    monkeypatch.setattr(pm_module.sys, "stdin", FakeTerminal())
+    monkeypatch.setattr(pm_module.sys, "stdout", stdout)
+
+    pm_module.offer_doctor_delivery_tests(pm_module.DoctorReport(email_ready=True, webhook_ready=True))
+    output = "".join(stdout.chunks)
+
+    assert output.index("[PASS] Doctor test email delivered") < output.index("Send one test webhook")

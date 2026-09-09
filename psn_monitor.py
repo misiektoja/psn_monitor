@@ -4762,6 +4762,9 @@ def offer_doctor_delivery_tests(report):
         else:
             check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "SKIP", "Test email was not sent", "You declined the real delivery test. Run doctor again and approve the email test when ready")
         offered.append(check)
+        # Recorded on the report so the summary sentence and the exit code cannot disagree about the same run
+        report.checks.append(check)
+        print_doctor_check(check)
     if report.webhook_ready:
         provider = webhook_provider_display_name()
         if ask_yes_no(f"Send one test webhook through {provider} now? This will publish a real notification"):
@@ -4774,8 +4777,6 @@ def offer_doctor_delivery_tests(report):
         else:
             check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "SKIP", f"Test webhook through {provider} was not sent", "You declined the real delivery test. Run doctor again and approve the webhook test when ready")
         offered.append(check)
-    # Recorded on the report so the summary sentence and the exit code cannot disagree about the same run
-    for check in offered:
         report.checks.append(check)
         print_doctor_check(check)
     return offered
