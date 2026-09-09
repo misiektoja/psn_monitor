@@ -949,6 +949,54 @@ def recovery_email_body(advice, error_streak=0):
     return "\n".join(lines) + get_cur_ts("\n\nTimestamp: ")
 
 
+# Decides how a lasting failure is reported: in full when it is new, then on the liveness cadence while it lasts
+class OutageReporter:
+    # Starts with no failure recorded, so the first failure of any category is reported in full
+    def __init__(self):
+        self.code = None
+        self.since = 0
+        self.checks = 0
+
+    # Records one failed check and returns "full" for a new failure, "degraded" on the liveness cadence,
+    # "repeat" while the liveness banner is switched off or "" while the same failure is merely continuing
+    def failed(self, advice, liveness_counter):
+        if advice.code != self.code:
+            self.code = advice.code
+            self.since = int(time.time())
+            self.checks = 0
+            return "full"
+        self.checks += 1
+        # With the liveness banner off there is nothing to carry the reminder, so the summary keeps its old cadence
+        if not liveness_counter:
+            return "repeat"
+        if self.checks >= liveness_counter:
+            self.checks = 0
+            return "degraded"
+        return ""
+
+    # Clears the failure after a successful check and returns how long it lasted, or None when none was active
+    def recovered(self):
+        if not self.code:
+            return None
+        lasted = int(time.time()) - self.since
+        self.code = None
+        self.since = 0
+        self.checks = 0
+        return lasted
+
+
+# Reports a lasting failure on the liveness cadence, so a broken run still says it is alive without repeating itself
+def print_outage_liveness(target, advice, since):
+    print(f"* Monitoring degraded for {target}. {advice.summary} since {get_date_from_ts(since)}")
+    print_cur_ts("Liveness check, timestamp:\t")
+
+
+# Reports that a failure cleared, since a throttled failure no longer stops printing when it is over
+def print_outage_recovery(target, lasted):
+    print(f"* Monitoring recovered for {target} after {display_time(max(1, lasted))}")
+    print_cur_ts("Timestamp:\t\t\t")
+
+
 # Suppresses a repeated fix paragraph until the failure category changes or a check succeeds
 class RecoveryHintTracker:
     # Starts with no category recorded, so the first failure is always reported in full
@@ -3855,6 +3903,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
     m_subject = m_body = ""
     error_streak = 0
+    outage = OutageReporter()
     # A recovery is only worth reporting when the failure it recovers from was reported or alerted on
     failure_announced = False
     last_recreate_ts = 0
@@ -4000,8 +4049,13 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             # A failure nothing here can retry away is worth reporting at once rather than after a streak
             alert_after = policy["alert_after"] if advice.retryable else 1
 
-            if error_streak >= policy["report_after"]:
+            # A failure that has not changed is left to the liveness cadence rather than repeated every check
+            outage_outcome = outage.failed(advice, LIVENESS_CHECK_COUNTER) if error_streak >= policy["report_after"] else ""
+            if outage_outcome in ("full", "repeat"):
                 print_recovery_advice(advice, recovery_hints, f"retrying in {display_time(sleep_interval)}")
+                failure_announced = True
+            elif outage_outcome == "degraded":
+                print_outage_liveness(psn_user_id, advice, outage.since)
                 failure_announced = True
 
             if error_streak >= policy["recreate_after"] and _recreate_session_rate_limited():
@@ -4013,18 +4067,19 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 error_webhook_sent = error_webhook_sent or webhook_delivered
                 failure_announced = failure_announced or email_delivered or webhook_delivered
 
-            if error_streak >= policy["report_after"]:
+            if error_streak >= policy["report_after"] and outage_outcome in ("full", "repeat"):
                 print_cur_ts("Timestamp:\t\t\t")
             debug_print("Waiting", interval=display_time(sleep_interval), reason=f"{kind} failure", streak=error_streak)
             time.sleep(sleep_interval)
             continue
 
         else:
+            outage_lasted = outage.recovered()
             if error_streak:
                 debug_print("Recovered", streak=error_streak, reported=failure_announced)
                 # A streak nobody was told about needs no recovery line, since nothing reported it as broken
-                if failure_announced:
-                    verbose_notice(f"Recovered after {error_streak} failed {'check' if error_streak == 1 else 'checks'} in a row")
+                if failure_announced and outage_lasted is not None:
+                    print_outage_recovery(psn_user_id, outage_lasted)
             recovery_hints.reset()
             error_email_sent = False
             error_webhook_sent = False

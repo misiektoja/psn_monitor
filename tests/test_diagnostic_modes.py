@@ -161,13 +161,12 @@ def test_debug_reports_each_sleep_with_its_interval_and_reason(pm_module, psn_se
 
 
 # Verifies recovering from a run of failures is reported, since nothing else marks the end of a streak
-def test_verbose_reports_recovery_after_a_reported_failure_streak(pm_module, psn_session, fake_clock, monkeypatch, capsys):
-    monkeypatch.setattr(pm_module, "VERBOSE_MODE", True)
+def test_recovery_after_a_reported_failure_streak_is_reported(pm_module, psn_session, fake_clock, capsys):
     psn_session([presence_payload(status="offline"), requests.exceptions.ConnectionError("first"), requests.exceptions.ConnectionError("second"), requests.exceptions.ConnectionError("third"), presence_payload(status="offline")])
 
     run_monitor(pm_module)
 
-    assert "* Recovered after 3 failed checks in a row" in capsys.readouterr().out
+    assert f"* Monitoring recovered for {USER_ID} after " in capsys.readouterr().out
 
 
 # Verifies a blip too short to be reported produces no recovery line either, so verbose stays quiet on both sides
@@ -178,18 +177,17 @@ def test_verbose_stays_quiet_when_the_streak_was_never_reported(pm_module, psn_s
     run_monitor(pm_module)
 
     output = capsys.readouterr().out
-    assert "Recovered after" not in output
+    assert "Monitoring recovered for" not in output
     assert "connection reset" not in output
 
 
-# Verifies a reported single failure recovers with a singular check count rather than "1 failed checks"
-def test_a_single_reported_failure_recovers_in_the_singular(pm_module, psn_session, fake_clock, monkeypatch, capsys):
-    monkeypatch.setattr(pm_module, "VERBOSE_MODE", True)
+# Verifies a single reported failure reports its recovery too, so one bad check does not read as a lasting outage
+def test_a_single_reported_failure_reports_its_recovery(pm_module, psn_session, fake_clock, capsys):
     psn_session([presence_payload(status="offline"), presence_payload(status=None), presence_payload(status="offline")])
 
     run_monitor(pm_module)
 
-    assert "* Recovered after 1 failed check in a row" in capsys.readouterr().out
+    assert f"* Monitoring recovered for {USER_ID} after " in capsys.readouterr().out
 
 
 # Verifies the config file and the source of every secret are reported, which is what a wrong-credential report needs
@@ -266,7 +264,7 @@ def test_neither_mode_prints_anything_when_both_are_off(pm_module, psn_session, 
 
     output = capsys.readouterr().out
     assert "[DEBUG " not in output
-    assert "Recovered after" not in output
+    assert "Monitoring recovered for" not in output
     assert "Waiting:" not in output
 
 

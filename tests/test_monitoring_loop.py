@@ -300,6 +300,20 @@ def test_longer_network_outage_recreates_the_session(pm_module, psn_session, fak
     assert "could not be reached (retrying in" in output
 
 
+# Verifies a lasting outage reports itself once and then only on the liveness cadence
+def test_a_lasting_outage_rides_the_liveness_cadence(pm_module, psn_session, fake_clock, monkeypatch, capsys):
+    monkeypatch.setattr(pm_module, "LIVENESS_CHECK_COUNTER", 2)
+    outage = [requests.exceptions.ConnectionError("connection reset by peer")] * 8
+    psn_session([presence_payload(status="offline"), *outage])
+
+    run_monitor(pm_module)
+
+    output = capsys.readouterr().out
+    assert output.count("To fix: ") == 1
+    assert f"* Monitoring degraded for {USER_ID}. " in output
+    assert "could not be reached since " in output
+
+
 # Verifies rebuilding the session closes the HTTP session of the replaced client instead of leaking its connection pool
 def test_session_recreation_closes_the_previous_session(pm_module, psn_session, fake_clock):
     broken = presence_payload(status="offline")
