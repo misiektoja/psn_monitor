@@ -4692,14 +4692,14 @@ def render_doctor_summary(checks):
     return "\n".join(("", colorize("header", "Summary"), sentence, "", f"Guide: {DOCTOR_GUIDE_URL}"))
 
 
-# Asks one yes or no question, treating a closed or interrupted input as no
+# Asks for delivery consent, treating a closed or interrupted input as no
 def ask_yes_no(question, default=False):
     hint = "[Y/n]" if default else "[y/N]"
     while True:
         try:
             answer = read_interactively(input, f"{question} {hint}: ").strip().casefold()
         except EOFError:
-            print()
+            print("\nDelivery test skipped.")
             return False
         except KeyboardInterrupt:
             # Ctrl+C ends the run here the way it does anywhere else, rather than only declining this one test

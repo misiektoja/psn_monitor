@@ -1036,6 +1036,17 @@ def test_a_delivery_prompt_interrupt_ends_the_run(pm_module, monkeypatch):
     assert raised.value.code == 0
 
 
+# Verifies a closed input at a delivery prompt says the test was skipped rather than ending on a bare newline
+def test_a_closed_delivery_prompt_says_the_test_was_skipped(pm_module, monkeypatch, capsys):
+    def closed(prompt=""):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", closed)
+
+    assert pm_module.ask_yes_no("Send one test") is False
+    assert "Delivery test skipped." in capsys.readouterr().out
+
+
 # Verifies every unusable timing or count setting is named in one row, so a fix does not need one run per setting
 def test_invalid_numeric_settings_are_reported_in_one_row(pm_module, monkeypatch):
     monkeypatch.setattr(pm_module, "PSN_CHECK_INTERVAL", 0)
