@@ -536,7 +536,11 @@ def test_missing_smtp_credentials_warn_without_connecting(pm_module, monkeypatch
 
     check = pm_module.doctor_check_notifications(report)[0]
 
-    assert (check.status, check.label) == ("WARN", "Email alerts are on but cannot be delivered")
+    assert (check.status, check.label) == ("WARN", pm_module.EMAIL_UNUSABLE_CHECK_LABEL)
+    assert check.detail == "SMTP_USER or SMTP_PASSWORD is empty or still set to its placeholder"
+    assert check.advice is not None
+    assert "Set SMTP_USER and SMTP_PASSWORD or turn the email alerts off" in check.advice.fix
+    assert pm_module.SMTP_GUIDE_URL in check.advice.fix
     assert report.email_ready is False
 
 
