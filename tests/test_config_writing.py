@@ -15,12 +15,17 @@ import psn_monitor as monitor
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-# Returns the CONFIG_BLOCK template one release tag shipped, or None when that tag predates the template
+# Returns the CONFIG_BLOCK template one release tag shipped, or None when that tag predates the template or this interpreter cannot parse its source
 def template_from_tag(tag):
     source = subprocess.run(["git", "show", f"{tag}:psn_monitor.py"], cwd=PROJECT_ROOT, check=False, capture_output=True, text=True)
     if source.returncode != 0 or not source.stdout:
         return None
-    for statement in ast.parse(source.stdout).body:
+    try:
+        # v1.2 and v1.3 nest same-type quotes inside f-strings, which needs Python 3.12 or newer to parse. Both predate CONFIG_BLOCK, so skipping them loses no coverage
+        released = ast.parse(source.stdout)
+    except SyntaxError:
+        return None
+    for statement in released.body:
         if isinstance(statement, ast.Assign) and getattr(statement.targets[0], "id", "") == "CONFIG_BLOCK" and isinstance(statement.value, ast.Constant):
             template = statement.value.value
             return template if isinstance(template, str) else None
