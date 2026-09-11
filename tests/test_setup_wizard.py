@@ -1149,3 +1149,9 @@ def test_a_rebuilt_config_leaves_the_default_theme_commented():
     rendered = monitor.generate_config_with_current_values(dict(monitor._config_template_defaults()))
 
     assert "\nCOLOR_THEME = {" not in rendered
+
+
+@pytest.fixture(autouse=True)
+# Starts each setup scenario without file ownership left by another test
+def isolated_dotenv_ownership(monkeypatch):
+    monkeypatch.setattr(monitor, "DOTENV_RELOAD_STATE", {})
