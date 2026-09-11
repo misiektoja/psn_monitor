@@ -2020,6 +2020,11 @@ def colorize_links(text):
     return _sub_outside_color(_URL_RE, lambda mo: colorize("link", mo.group(0)), text)
 
 
+# Colours one line of a fix block the way the output stream colours it, keeping its guide line a link
+def colorize_fix_line(line):
+    return colorize_links(line) if line.lstrip().startswith("Guide: ") else colorize("info", line)
+
+
 # Sanitizing stdout wrapper installed before the logging policy is known, so early output is covered too
 class TerminalStream(object):
     # Stores the wrapped terminal stream
@@ -4987,11 +4992,11 @@ def render_doctor_sections(report):
         for check in section_checks:
             lines.append(f"{render_doctor_marker(check.status)} {check.label}")
             if check.detail:
-                lines.append(f"  {check.detail}")
+                lines.append(f"  {colorize_links(check.detail)}")
             if check.advice is not None and check.status != "PASS":
                 # The fix carries its own guide line, so each line is indented and styled on its own rather
                 # than leaving one colour sequence open across the newline
-                lines.extend(f"  {colorize('info', advice_line)}" for advice_line in f"To fix: {check.advice.fix}".splitlines())
+                lines.extend(f"  {colorize_fix_line(advice_line)}" for advice_line in f"To fix: {check.advice.fix}".splitlines())
     return sanitize_error_text("\n".join(lines))
 
 
@@ -5005,7 +5010,7 @@ def render_doctor_summary(checks):
         sentence = colorize("warning", f"  All critical checks passed with {warnings} warning(s). Review the warnings above.")
     else:
         sentence = colorize("boolean_true", "  All checks passed. You are good to go!")
-    return "\n".join(("", colorize("header", "Summary"), sentence, "", colorize("info", f"Guide: {DOCTOR_GUIDE_URL}")))
+    return "\n".join(("", colorize("header", "Summary"), sentence, "", colorize_links(f"Guide: {DOCTOR_GUIDE_URL}")))
 
 
 # Asks for delivery consent, treating a closed or interrupted input as no
@@ -5034,7 +5039,7 @@ def ask_yes_no(question, default=False):
 def print_doctor_check(check):
     print(f"{render_doctor_marker(check.status)} {check.label}")
     if check.detail:
-        print(f"  {check.detail}")
+        print(f"  {colorize_links(check.detail)}")
 
 
 # Offers a real delivery test for each channel that already passed, approved separately from the other
