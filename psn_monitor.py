@@ -2015,6 +2015,11 @@ def apply_color_to_text(text):
     return "".join(parts)
 
 
+# Colours every link in a line, for the screens printed before the output stream colouriser is installed
+def colorize_links(text):
+    return _sub_outside_color(_URL_RE, lambda mo: colorize("link", mo.group(0)), text)
+
+
 # Sanitizing stdout wrapper installed before the logging policy is known, so early output is covered too
 class TerminalStream(object):
     # Stores the wrapped terminal stream
@@ -5246,7 +5251,7 @@ def print_doctor_next_steps(psn_user_id=None, saved_target=None, doctor_exit=0):
     monitor_target = command_targets(psn_user_id, saved_target)[1]
     print_labelled_command(label, render_command([*([monitor_target] if monitor_target else [])]))
     # No trailing blank line: the command printer already left one and the report must not end on two
-    print(f"Guide: {QUICK_START_GUIDE_URL}")
+    print(colorize_links(f"Guide: {QUICK_START_GUIDE_URL}"))
 
 
 # A PlayStation online ID is 3 to 16 characters and never contains an at sign or a space
@@ -5634,7 +5639,7 @@ def _wizard_collect_polling_section(state, input_func=None):
 
 # Asks for the NPSSO code through a hidden prompt and checks it against PSN before accepting it
 def _wizard_collect_auth_section(state, input_func=None, getpass_func=None, validator=None):
-    print(f"Sign in at https://my.playstation.com then copy the npsso value from: {NPSSO_SOURCE_URL}")
+    print(colorize_links(f"Sign in at https://my.playstation.com then copy the npsso value from: {NPSSO_SOURCE_URL}"))
     if secret_is_set(state.config_values.get("PSN_NPSSO")) and not _wizard_ask_yes_no("Replace the NPSSO code already configured?", default=False, input_func=input_func):
         return
     validate = validate_npsso_code if validator is None else validator
@@ -6106,7 +6111,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     if not terminal_is_interactive:
         print("The setup wizard needs an interactive terminal (TTY).")
         print("Run --setup from an interactive shell or use --generate-config and edit the files manually.")
-        print(f"Guide: {QUICK_START_GUIDE_URL}")
+        print(colorize_links(f"Guide: {QUICK_START_GUIDE_URL}"))
         return 1
 
     try:
@@ -6199,7 +6204,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     print_labelled_command("Check setup again:", render_command(["--doctor", *target_arguments, *paths]))
     start_label = "After Doctor passes, start monitoring:" if doctor_exit not in (None, 0) else "Start monitoring:"
     print_labelled_command(start_label, render_command([*target_arguments, *paths]))
-    print(f"Guide: {QUICK_START_GUIDE_URL}\n")
+    print(colorize_links(f"Guide: {QUICK_START_GUIDE_URL}\n"))
 
     try:
         # Only a doctor run that passed proves the saved setup can monitor, so the launch offer waits for it
@@ -6264,7 +6269,7 @@ def print_welcome_screen(input_func=None, interactive=None, config_file=None, en
     print_labelled_command("Check setup before monitoring:", f"{prefix} --doctor <psn_user_id>")
     print_labelled_command("Show profile details and exit:", f"{prefix} -i <psn_user_id>")
     print(f"Full options: {colorize('section', prefix + ' --help')}")
-    print(f"\nGuide:        {QUICK_START_GUIDE_URL}\n")
+    print(colorize_links(f"\nGuide:        {QUICK_START_GUIDE_URL}\n"))
     if terminal_is_interactive:
         try:
             start_setup = _wizard_ask_yes_no("Run the guided setup wizard now?", default=True, input_func=input_func)
