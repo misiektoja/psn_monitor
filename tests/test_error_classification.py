@@ -1,5 +1,6 @@
 """Tests for the recovery classifier, the advice it renders and the NPSSO auth probe."""
 
+from command_expectations import runtime_command
 import ast
 import inspect
 import re
@@ -314,10 +315,10 @@ def test_the_install_method_is_detected_from_the_entry_point(pm_module, monkeypa
 
 # Verifies a printed command matches the install, so a downloaded script is never told to run a console script
 def test_printed_commands_match_the_install(pm_module):
-    assert pm_module.install_command_prefix(method="pip") == ["psn_monitor"]
-    assert pm_module.install_command_prefix(method="manual")[-1] == "psn_monitor.py"
-    assert pm_module.install_command_prefix(method="manual")[0].startswith("python")
-    assert pm_module.render_command(["--generate-config", "psn_monitor.conf"], method="pip") == "psn_monitor --generate-config psn_monitor.conf"
+    assert pm_module.install_command_prefix(method="pip") == [pm_module.sys.executable, "-m", "psn_monitor"]
+    assert pm_module.install_command_prefix(method="manual")[-1] == str(Path(pm_module.__file__).resolve())
+    assert pm_module.install_command_prefix(method="manual")[0] == pm_module.sys.executable
+    assert pm_module.render_command(["--generate-config", "psn_monitor.conf"], method="pip") == runtime_command("psn_monitor --generate-config psn_monitor.conf")
 
 
 # Verifies an argument that needs quoting is quoted, so the printed command survives a copy and paste
@@ -482,7 +483,7 @@ def test_printed_commands_carry_the_files_this_run_was_given(pm_module, monkeypa
     monkeypatch.setattr(pm_module, "CLI_CONFIG_PATH", "/etc/psn.conf")
     monkeypatch.setattr(pm_module, "DOTENV_FILE", "/etc/psn.env")
 
-    assert pm_module.render_command(["--send-test-webhook"], method="pip") == "psn_monitor --send-test-webhook --config-file /etc/psn.conf --env-file /etc/psn.env"
+    assert pm_module.render_command(["--send-test-webhook"], method="pip") == runtime_command("psn_monitor --send-test-webhook --config-file /etc/psn.conf --env-file /etc/psn.env")
     assert f"then run: {pm_module.render_command(['--send-test-webhook'])}" in pm_module.classify_recovery_error_offline(ValueError("bad"), context="webhook").fix
 
 
@@ -499,10 +500,10 @@ def test_the_missing_target_command_carries_the_files_and_the_placeholder(pm_mod
 
 # Verifies a <placeholder> is printed for the reader to replace rather than quoted as a literal value
 def test_a_placeholder_argument_is_left_unquoted(pm_module):
-    assert pm_module.render_command(["<psn_user_id>", "-n", "<npsso_code>"], include_paths=False, method="pip") == "psn_monitor <psn_user_id> -n <npsso_code>"
-    assert pm_module.render_command(["a value"], include_paths=False, method="pip") == "psn_monitor 'a value'"
+    assert pm_module.render_command(["<psn_user_id>", "-n", "<npsso_code>"], include_paths=False, method="pip") == runtime_command("psn_monitor <psn_user_id> -n <npsso_code>")
+    assert pm_module.render_command(["a value"], include_paths=False, method="pip") == runtime_command("psn_monitor 'a value'")
     # A value only shaped like a placeholder is user input, so pasting the rendered command must not run a substitution
-    assert pm_module.render_command(["<$(echo>marker)>"], include_paths=False, method="pip") == "psn_monitor '<$(echo>marker)>'"
+    assert pm_module.render_command(["<$(echo>marker)>"], include_paths=False, method="pip") == runtime_command("psn_monitor '<$(echo>marker)>'")
 
 
 # Verifies --generate-config keeps the paths out, since it writes the new file at the name in the command
@@ -510,7 +511,7 @@ def test_the_generate_config_command_leaves_this_run_out(pm_module, monkeypatch)
     monkeypatch.setattr(pm_module, "CLI_CONFIG_PATH", "/etc/psn.conf")
     monkeypatch.setattr(pm_module, "DOTENV_FILE", "/etc/psn.env")
 
-    assert pm_module.render_command(["--generate-config", "psn_monitor.conf"], method="pip", include_paths=False) == "psn_monitor --generate-config psn_monitor.conf"
+    assert pm_module.render_command(["--generate-config", "psn_monitor.conf"], method="pip", include_paths=False) == runtime_command("psn_monitor --generate-config psn_monitor.conf")
 
 
 # Verifies the disabled dotenv search reaches the commands that accept it and stays out of the ones that refuse it
@@ -518,9 +519,9 @@ def test_a_disabled_dotenv_search_is_carried_only_where_it_is_accepted(pm_module
     monkeypatch.setattr(pm_module, "CLI_CONFIG_PATH", None)
     monkeypatch.setattr(pm_module, "DOTENV_FILE", "none")
 
-    assert pm_module.render_command(["--doctor"], method="pip") == "psn_monitor --doctor --env-file none"
-    assert pm_module.render_command(["--set-npsso"], method="pip") == "psn_monitor --set-npsso"
-    assert pm_module.render_command(["--setup"], method="pip") == "psn_monitor --setup"
+    assert pm_module.render_command(["--doctor"], method="pip") == runtime_command("psn_monitor --doctor --env-file none")
+    assert pm_module.render_command(["--set-npsso"], method="pip") == runtime_command("psn_monitor --set-npsso")
+    assert pm_module.render_command(["--setup"], method="pip") == runtime_command("psn_monitor --setup")
 
 
 # Verifies the disabled config search reaches the commands that accept it and stays out of the ones that refuse it
@@ -529,10 +530,10 @@ def test_a_disabled_config_search_is_carried_only_where_it_is_accepted(pm_module
     monkeypatch.setattr(pm_module, "CONFIG_DISCOVERY_DISABLED", True)
     monkeypatch.setattr(pm_module, "DOTENV_FILE", "")
 
-    assert pm_module.render_command(["--doctor"], method="pip") == "psn_monitor --doctor --config-file none"
-    assert pm_module.render_command(["--set-npsso"], method="pip") == "psn_monitor --set-npsso --config-file none"
-    assert pm_module.render_command(["--setup"], method="pip") == "psn_monitor --setup"
-    assert pm_module.render_command(["--doctor"], method="pip", include_paths=False) == "psn_monitor --doctor"
+    assert pm_module.render_command(["--doctor"], method="pip") == runtime_command("psn_monitor --doctor --config-file none")
+    assert pm_module.render_command(["--set-npsso"], method="pip") == runtime_command("psn_monitor --set-npsso --config-file none")
+    assert pm_module.render_command(["--setup"], method="pip") == runtime_command("psn_monitor --setup")
+    assert pm_module.render_command(["--doctor"], method="pip", include_paths=False) == runtime_command("psn_monitor --doctor")
 
 
 # Verifies a caller that already names a file is not given a second copy of it
@@ -542,7 +543,7 @@ def test_a_path_the_caller_passed_is_not_repeated(pm_module, monkeypatch):
 
     rendered = pm_module.render_command(["--doctor", "--config-file", "/tmp/other.conf"], method="pip")
 
-    assert rendered == "psn_monitor --doctor --config-file /tmp/other.conf --env-file /etc/psn.env"
+    assert rendered == runtime_command("psn_monitor --doctor --config-file /tmp/other.conf --env-file /etc/psn.env")
 
 
 # Verifies added context does not replace the error text the rules read, which used to make every such failure unknown

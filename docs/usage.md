@@ -13,7 +13,7 @@ Examples use the PyPI command. For a downloaded script, run commands from the di
 
 For example, `psn_monitor --setup` becomes `python3 psn_monitor.py --setup` on macOS or Linux. Use `python` on Windows. Replace placeholders such as `<psn_user_id>` with a PlayStation Network online ID.
 
-The manual-script prefix names the file rather than its path, so run it from the directory holding `psn_monitor.py`. From another directory, use the full path instead, for example `python3 /opt/psn-monitor/psn_monitor.py --setup`. The commands the tool prints after setup and Doctor use the same short form.
+The manual-script examples assume the current directory contains `psn_monitor.py`. Commands printed by setup, Doctor and recovery messages use the running interpreter and the full script path. Packaged installations use the running interpreter with `-m psn_monitor`.
 
 For first-time configuration, follow [Setup & First Run](setup-and-first-run.md). Use [Doctor Preflight](troubleshooting.md#doctor-preflight) to check a setup before monitoring.
 

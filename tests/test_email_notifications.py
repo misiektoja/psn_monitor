@@ -157,7 +157,9 @@ def test_control_sequences_are_removed_from_the_delivered_message(pm_module, smt
 
     message = email.message_from_string(smtp_double.last.sent["message"])
     subject = str(make_header(decode_header(message["Subject"])))
-    body = next(part for part in message.walk() if part.get_content_type() == "text/plain").get_payload(decode=True).decode("utf-8")
+    payload = next(part for part in message.walk() if part.get_content_type() == "text/plain").get_payload(decode=True)
+    assert isinstance(payload, bytes)
+    body = payload.decode("utf-8")
     assert subject == "psn_monitor: Ghost"
     assert body == "started playing Ghost of Tsushima"
 

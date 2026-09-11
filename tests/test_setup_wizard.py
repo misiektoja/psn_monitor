@@ -813,11 +813,11 @@ def test_an_exported_secret_is_not_credited_to_the_dotenv_file(monkeypatch, tmp_
 
 
 # Verifies an Auto zone in the saved config is resolved before doctor reads it, as it is on a normal start
-def test_the_saved_timezone_is_resolved_before_doctor_reads_it(monkeypatch):
+def test_the_saved_timezone_is_resolved_before_doctor_reads_it(monkeypatch, tmp_path):
     monkeypatch.setattr(monitor, "LOCAL_TIMEZONE", "Europe/Warsaw")
     monkeypatch.setattr(monitor, "LOCAL_TIMEZONE_STATE", "config")
     monkeypatch.setattr(monitor, "get_localzone", lambda: "Europe/Warsaw")
-    state = types.SimpleNamespace(config_values={"LOCAL_TIMEZONE": "Auto"}, secret_updates={})
+    state = monitor.WizardSetupState(tmp_path / "settings.conf", tmp_path / "private.env", {"LOCAL_TIMEZONE": "Auto"})
 
     advice = monitor._wizard_apply_saved_values(state, env_path=None)
 
@@ -995,7 +995,7 @@ def test_a_rerun_keeps_loaded_secrets_out_of_the_configuration(wizard_environmen
 
 # Verifies the configuration renderer keeps the template placeholder for every secret whatever the values hold
 def test_the_configuration_renderer_never_writes_a_secret(pm_module):
-    values = {name: f"real-{name.lower()}" for name in pm_module.SECRET_KEYS}
+    values: dict = {name: f"real-{name.lower()}" for name in pm_module.SECRET_KEYS}
     values["PSN_CHECK_INTERVAL"] = 4321
 
     rendered = pm_module.generate_config_with_current_values(values)
@@ -1120,6 +1120,7 @@ def test_the_effective_secret_follows_the_startup_precedence(tmp_path, monkeypat
 
     assert monitor.effective_secret_after_setup("SMTP_PASSWORD", env_path, {}) == ("saved-in-file", False)
     assert monitor.effective_secret_after_setup("SMTP_PASSWORD", env_path, {"SMTP_PASSWORD": "accepted"}) == ("accepted", False)
+    monkeypatch.setattr(monitor, "SECRET_SOURCES", {})
     monkeypatch.setenv("SMTP_PASSWORD", "exported")
     assert monitor.effective_secret_after_setup("SMTP_PASSWORD", env_path, {"SMTP_PASSWORD": "accepted"}) == ("exported", True)
     monkeypatch.delenv("SMTP_PASSWORD", raising=False)
