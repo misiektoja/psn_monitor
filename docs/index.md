@@ -26,18 +26,29 @@ For the manual single-file method, dependencies and upgrade commands, see [Insta
 
 ## Features
 
-- **Real-time tracking** of PlayStation users' gaming activity, including when a user gets online or offline and which games they play
-- **Basic statistics for user activity**: duration in different states, time spent playing a game, overall time and number of games played in a session
-- **Detailed user information** display mode covering PlayStation/PSN IDs, online status and availability to play, platform information, PS+ subscription status, verification status, about me section, languages, friendship relation and mutual friends count, profile URL, recently played games with last played date and total play time, and optionally a trophy summary and the last earned trophies
-- **Email notifications** for various events: the user gets online or offline, starts, finishes or changes a game, and monitoring errors
-- **Webhook notifications** delivered to **Discord** or **ntfy**, switched on per event independently of email
-- **Guided setup** with `--setup`, and **preflight diagnostics** with `--doctor`
-- **CSV export** of every reported activity, with **status persistence** across restarts
-- **Smart session continuity**: short offline interruptions are handled and session statistics are preserved
-- **Coloured terminal output** with a configurable theme, switched off automatically when the output is redirected
-- **Flexible configuration** through config files, dotenv files, environment variables and command-line arguments
-- **Control of the running copy** through signals
-- **Functional, procedural Python** with minimal OOP
+### Activity Tracking
+
+* **Gaming activity**: Detect online and offline status, game starts, finishes and changes.
+* **Session statistics**: Measure time in each state, time per game and games played.
+* **Session continuity**: Preserve statistics through short offline interruptions.
+
+### Profile Insights
+
+* **Profile details**: View PSN IDs, status, platform, PS+ membership, bio, languages and friendship details.
+* **Recent games**: See recently played titles, last played dates and total playtime.
+* **Optional trophies**: Include a trophy summary and recently earned trophies.
+
+### Notifications and History
+
+* **Event alerts**: Configure email, Discord and ntfy notifications independently.
+* **CSV history**: Save reported activity with timestamps.
+* **Saved status**: Resume monitoring with state retained across restarts.
+
+### Setup and Configuration
+
+* **Guided setup**: Configure a target, credentials and alerts with `--setup`, then check them with `--doctor`.
+* **Flexible settings**: Use config files, dotenv files, environment variables and command-line options.
+* **Terminal and runtime controls**: Customize colours and adjust the running monitor through supported signals.
 
 ## Screenshots
 
