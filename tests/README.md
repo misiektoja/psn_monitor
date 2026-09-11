@@ -56,6 +56,7 @@ and again before anything is published to PyPI.
 | `test_terminal_transcripts.py` | What the doctor report, the welcome screen and the guided setup print on a real terminal |
 | `test_terminal_color.py` | The colour theme, which part colours which token, where colour must never reach and how it is switched off |
 | `test_setup_wizard.py` | The guided setup: what it asks, what it writes, when it writes nothing and the welcome screen offer |
+| `test_partial_setup_save.py` | Real wizard inputs and filesystem failures after configuration replacement |
 | `test_secret_commands.py` | The one-shot secret commands, their validation before writing and the dotenv file they update |
 | `test_runtime_controls.py` | Signal-driven toggles, interval changes, secret reload and the log output filter |
 | `test_time_formatting.py` | Durations, timespans, timestamp formats and timezone handling |
