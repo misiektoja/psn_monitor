@@ -571,6 +571,17 @@ def test_setup_reaches_the_wizard_with_the_selected_files(pm_module, monkeypatch
     assert seen[0]["config_file"] == "custom.conf"
 
 
+# Verifies a command that is about to create the dotenv file is not warned that it does not exist, since the
+# path it was given is that command's destination
+def test_a_command_that_writes_the_dotenv_file_is_not_warned_that_it_is_missing(pm_module, monkeypatch, isolated_working_directory, capsys):
+    pytest.importorskip("dotenv")
+    monkeypatch.setattr(pm_module, "run_setup_wizard", lambda **kwargs: 0)
+
+    assert run_main(pm_module, monkeypatch, ["--setup", "--env-file", str(isolated_working_directory / "absent.env"), "--config-file", "not-created-yet.conf"]) == 0
+
+    assert "does not exist" not in capsys.readouterr().out
+
+
 # Verifies a config path that does not exist yet is setup's destination rather than a reason to stop
 def test_setup_accepts_a_config_path_that_does_not_exist_yet(pm_module, monkeypatch, isolated_working_directory, capsys):
     monkeypatch.setattr(pm_module, "run_setup_wizard", lambda **kwargs: 0)
