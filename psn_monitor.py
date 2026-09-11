@@ -2501,7 +2501,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
             smtpObj.starttls(context=ssl_context)
         else:
             smtpObj = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=smtp_timeout)
-        smtpObj.login(SMTP_USER, SMTP_PASSWORD)
+        smtp_login(smtpObj, SMTP_USER, SMTP_PASSWORD)
         email_msg = MIMEMultipart('alternative')
         email_msg["From"] = SENDER_EMAIL
         email_msg["To"] = RECEIVER_EMAIL
@@ -6527,6 +6527,22 @@ def mail_sign_in_settings_missing():
     return [name for name in MAIL_SIGN_IN_SETTINGS if not secret_is_set(str(globals().get(name) or ""))]
 
 
+# Signs in while removing the attempted password from SMTP rejection replies before they can be rendered
+def smtp_login(connection, username, password):
+    try:
+        return connection.login(username, password)
+    except smtplib.SMTPResponseException as error:
+        reply = error.smtp_error
+        if password:
+            if isinstance(reply, bytes):
+                reply = reply.replace(str(password).encode("utf-8"), b"<redacted>")
+            else:
+                reply = str(reply).replace(str(password), "<redacted>")
+        error.smtp_error = reply
+        error.args = (error.smtp_code, reply)
+        raise
+
+
 # Signs in to the configured SMTP server with one candidate password, without sending a message
 def smtp_sign_in(password, timeout=15):
     global SMTP_PASSWORD
@@ -6545,7 +6561,7 @@ def smtp_sign_in(password, timeout=15):
         if SMTP_SSL:
             connection.starttls(context=smtp_ssl_context())
         try:
-            connection.login(SMTP_USER, candidate)
+            smtp_login(connection, SMTP_USER, candidate)
         finally:
             try:
                 connection.quit()
