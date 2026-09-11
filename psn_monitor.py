@@ -236,21 +236,6 @@ DISABLE_LOGGING = False
 #   "Off"  - preserve Unicode separators in logs
 ASCII_LOG_SEPARATORS = "Auto"
 
-# Whether to show rare operational events such as recoveries, resolved settings and delivery outcomes
-# Independent of DEBUG_MODE, so enable both to see everything
-# Can also be enabled via the --verbose flag
-VERBOSE_MODE = False
-
-# Whether to show technical diagnostics such as API calls, retries and internal state changes
-# Secrets are redacted before anything is printed
-# Independent of VERBOSE_MODE, so enable both to see everything
-# Can also be enabled via the --debug flag
-DEBUG_MODE = False
-
-# Whether verbose output confirms each delivered email and webhook alert
-# Applies only when VERBOSE_MODE is enabled
-DELIVERY_CONFIRMATIONS = True
-
 # Max characters per line when printing to screen to avoid line wrapping
 # Does not affect log file output
 # Set to 999 to auto-detect terminal width
@@ -323,6 +308,21 @@ COLORED_OUTPUT = True
 #     "help_default": "bright_black",
 # }
 
+# Whether to show rare operational events such as recoveries, resolved settings and delivery outcomes
+# Independent of DEBUG_MODE, so enable both to see everything
+# Can also be enabled via the --verbose flag
+VERBOSE_MODE = False
+
+# Whether to show technical diagnostics such as API calls, retries and internal state changes
+# Secrets are redacted before anything is printed
+# Independent of VERBOSE_MODE, so enable both to see everything
+# Can also be enabled via the --debug flag
+DEBUG_MODE = False
+
+# Whether verbose output confirms each delivered email and webhook alert
+# Applies only when VERBOSE_MODE is enabled
+DELIVERY_CONFIRMATIONS = True
+
 # Value used by signal handlers increasing/decreasing the check for player activity
 # when user is online (PSN_ACTIVE_CHECK_INTERVAL); in seconds
 PSN_ACTIVE_CHECK_SIGNAL_VALUE = 30  # 30 seconds
@@ -335,7 +335,6 @@ PSN_ACTIVE_CHECK_SIGNAL_VALUE = 30  # 30 seconds
 # Default dummy values so linters shut up
 # Do not change values below - modify them in the configuration section or config file instead
 PSN_USER_ID = ""
-PSN_STATUS_FILE = ""
 PSN_NPSSO = ""
 SMTP_HOST = ""
 SMTP_PORT = 0
@@ -356,37 +355,38 @@ WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION = False
 WEBHOOK_GAME_CHANGE_NOTIFICATION = False
 WEBHOOK_ERROR_NOTIFICATION = False
 WEBHOOK_HEADERS: dict = {}
+NTFY_ACCESS_TOKEN = ""
 WEBHOOK_TEMPLATE: dict = {}
 WEBHOOK_TRANSFORMS: list = []
-NTFY_ACCESS_TOKEN = ""
 PSN_CHECK_INTERVAL = 0
 PSN_ACTIVE_CHECK_INTERVAL = 0
 LOCAL_TIMEZONE = ""
+OFFLINE_INTERRUPT = 0
 
 # How the running timezone was arrived at, so Doctor can name the outcome the way the sibling monitors do
 LOCAL_TIMEZONE_STATE = "config"
-OFFLINE_INTERRUPT = 0
 LIVENESS_CHECK_INTERVAL = 0
 CHECK_INTERNET_URL = ""
 CHECK_INTERNET_TIMEOUT = 0
 VERIFY_SSL = True
 CSV_FILE = ""
+PSN_STATUS_FILE = ""
 DOTENV_FILE = ""
 PSN_LOGFILE = ""
 DISABLE_LOGGING = False
 ASCII_LOG_SEPARATORS = "Auto"
-VERBOSE_MODE = False
-DEBUG_MODE = False
-DELIVERY_CONFIRMATIONS = True
+TRUNCATE_CHARS = 0
+HORIZONTAL_LINE = 0
+CLEAR_SCREEN = False
 
 # True once monitoring has printed its header, so a verbose notice after that closes its own block
 MONITORING_ACTIVE = False
 
-TRUNCATE_CHARS = 0
-HORIZONTAL_LINE = 0
-CLEAR_SCREEN = False
 COLORED_OUTPUT = False
 COLOR_THEME: dict = {}
+VERBOSE_MODE = False
+DEBUG_MODE = False
+DELIVERY_CONFIRMATIONS = True
 PSN_ACTIVE_CHECK_SIGNAL_VALUE = 0
 
 exec(CONFIG_BLOCK, globals())
