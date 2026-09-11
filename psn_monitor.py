@@ -5783,7 +5783,7 @@ def _wizard_email_answer_missing(state, key):
     return True
 
 
-# Returns the secret stored in the dotenv file, or None when the file has no assignment for it
+# Returns the secret stored in the dotenv file or None when the file has no assignment for it
 def _wizard_saved_secret_value(key, env_path):
     value = None
     path = Path(env_path)
@@ -6515,7 +6515,7 @@ def run_set_secret(key, flag, subject, guide_url, guidance, prompt_text, validat
     print(f"* {describe_success(outcome)}")
     print(f"* Updated '{destination}', readable only by you")
     # Startup loads the dotenv file without overriding the environment, so a saved replacement that an export
-    # shadows would never be read, and the run would keep failing with the value that was just proven good
+    # shadows would never be read. The run would keep failing with the value that was just proven good
     if os.environ.get(key):
         print(f"* {key} is exported in this environment and an export wins at startup, so the next run uses that value rather than the one just saved")
         print(colorize("info", f"To fix: Unset the exported {key} to use the saved one"))
