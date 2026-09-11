@@ -892,7 +892,11 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         if isinstance(current, (AttributeError, TypeError)):
             return make_recovery_advice("psn.malformed_response", "PlayStation Network returned a presence response in an unexpected shape", recovery_fix_with_guide("Nothing to do in most cases, the tool rebuilds its session and retries. If it continues, upgrade PSNAWP and rerun with --debug", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
 
-    return make_recovery_advice("unknown", "Something unexpected went wrong", recovery_fix_with_guide("Rerun with --debug and check the technical detail it prints. If the problem continues, open an issue with that output", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+    return make_recovery_advice("unknown", "Something unexpected went wrong", recovery_fix_with_guide(unknown_failure_fix(), DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+
+# Returns the next step for a failure no rule recognized, since a run already printing the technical cause cannot be told to re-run for it
+def unknown_failure_fix(): return "Check the technical detail below, then open an issue with this output if the problem continues" if DEBUG_MODE else "Rerun with --debug and check the technical detail it prints. If the problem continues, open an issue with that output"
+
 
 
 # Classifies any failure into one stable recovery category, optionally asking PSN to explain a vague error
@@ -923,7 +927,8 @@ def render_recovery_advice(advice, debug=None, retry_note="", with_fix=True, lab
     lines = [f"* {label}: {advice.summary}" + (f" ({retry_note})" if retry_note else "")]
     if with_fix:
         lines.append(f"To fix: {advice.fix}")
-        if (DEBUG_MODE if debug is None else debug) and advice.detail:
+        # A detail that only repeats the summary spends a line saying nothing
+        if (DEBUG_MODE if debug is None else debug) and advice.detail and advice.detail != advice.summary:
             lines.append(f"Technical detail: {sanitize_error_text(advice.detail)}")
     return "\n".join(lines)
 
