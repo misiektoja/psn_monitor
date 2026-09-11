@@ -207,7 +207,6 @@ As a fallback, you can also store secrets in the configuration file or source co
 ```text
 [DEBUG 12:00:00] Secret resolution: name=PSN_NPSSO, source=environment, value=set, chars=64
 [DEBUG 12:00:00] Secret resolution: name=SMTP_PASSWORD, source=dotenv file, value=set
-[DEBUG 12:00:00] Secret resolution: name=WEBHOOK_URL, source=nowhere, value=not set
 ```
 
-Every supported secret gets a row, so one still holding its `your_...` placeholder reads `value=not set` rather than going unmentioned. A length appears only for the secrets whose length the provider issues, never for a password you chose.
+A secret no layer supplied is left out. A secret still holding its `your_...` placeholder counts as unset and is left out too. A run where nothing resolved says so in one line instead. A length appears only for the secrets whose length the provider issues, never for a password you chose.
