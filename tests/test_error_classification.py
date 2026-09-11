@@ -707,3 +707,14 @@ def test_the_renderer_with_no_arguments_prints_the_bare_command(pm_module):
     prefix = pm_module.render_command(include_paths=False)
     assert prefix and not prefix.endswith(" ")
     assert pm_module.render_command(["--doctor"], include_paths=False) == f"{prefix} --doctor"
+
+
+# A status code is matched as a whole number, so an id or a path that happens to contain the digits is not that status
+def test_a_status_code_inside_a_longer_number_is_not_matched(pm_module):
+    assert pm_module.classify_recovery_error_offline("request 14290 failed").code != "psn.rate_limited"
+    assert pm_module.classify_recovery_error_offline("delivery 14290 failed", context="webhook").code != "webhook.rate_limited"
+    assert pm_module.classify_recovery_error_offline("HTTP 429 returned").code == "psn.rate_limited"
+    assert pm_module.classify_recovery_error_offline("HTTP 429 returned", context="webhook").code == "webhook.rate_limited"
+    assert pm_module.mentions_status_code("429", "https://example.test/429/status") is False
+    assert pm_module.mentions_status_code("429", "HTTP 429 Too Many Requests") is True
+    assert pm_module.mentions_status_code("429", "request 14290 failed") is False

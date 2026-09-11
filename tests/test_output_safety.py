@@ -248,3 +248,19 @@ def test_csv_game_name_loses_control_sequences(pm_module, tmp_path):
     written = csv_path.read_text(encoding="utf-8")
     assert "\x1b" not in written
     assert "Ghost of Tsushima" in written
+
+
+# Verifies a cut line closes the colour it opened, so the truncated tail does not paint every line printed after it
+def test_a_truncated_line_closes_its_open_colour(pm_module):
+    pytest.importorskip("wcwidth")
+
+    assert pm_module.truncate_string_per_line("\x1b[31m0123456789ABCDEF\x1b[0m", 10) == "\x1b[31m0123456789" + pm_module.ANSI_RESET
+
+
+# Verifies no extra reset is added when the colour closed before the cut or the line was never cut
+def test_a_closed_or_uncut_colour_gains_no_extra_reset(pm_module):
+    pytest.importorskip("wcwidth")
+
+    assert pm_module.truncate_string_per_line("\x1b[31m0123\x1b[0m456789ABCDEF", 10) == "\x1b[31m0123\x1b[0m456789"
+    assert pm_module.truncate_string_per_line("\x1b[31m0123\x1b[0m", 10) == "\x1b[31m0123\x1b[0m"
+    assert pm_module.truncate_string_per_line("0123456789ABCDEF", 10) == "0123456789"
