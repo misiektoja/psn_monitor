@@ -157,7 +157,7 @@ def test_the_notification_row_names_what_is_enabled(pm_module, monkeypatch):
     monkeypatch.setattr(pm_module, "GAME_CHANGE_NOTIFICATION", False)
     monkeypatch.setattr(pm_module, "ERROR_NOTIFICATION", True)
 
-    assert pm_module.startup_notification_state() == "On (status changes, errors)"
+    assert pm_module.startup_notification_state() == "On (online and offline changes, errors)"
 
 
 # Verifies the rollup says so plainly when no email alert can fire
@@ -174,7 +174,7 @@ def test_the_webhook_row_names_the_alerts(pm_module, monkeypatch):
     monkeypatch.setattr(pm_module, "WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_ERROR_NOTIFICATION", True)
 
-    assert pm_module.startup_webhook_notification_state() == "On (status changes, errors)"
+    assert pm_module.startup_webhook_notification_state() == "On (online and offline changes, errors)"
 
 
 # Verifies the rollup reports the resolved state, so selected alerts with the channel off still read Off

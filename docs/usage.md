@@ -109,8 +109,8 @@ Monitoring mode prints the settings that are actually in effect before the first
 ```
 * Target:                       misiektoja
 * Polling intervals:            [offline: 3 minutes] [online: 1 minute]
-* Notifications (email):        On (status changes, game changes, errors)
-* Notifications (webhook):      On (status changes, errors)
+* Notifications (email):        On (online and offline changes, game changes, errors)
+* Notifications (webhook):      On (online and offline changes, errors)
 * Output:                       psn_monitor_misiektoja.log
 * Config:                       psn_monitor.conf
 * Dotenv:                       .env

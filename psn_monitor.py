@@ -2844,10 +2844,20 @@ def webhook_event_enabled(notification_type):
     return bool(WEBHOOK_ENABLED and settings.get(notification_type, False))
 
 
+# Returns the enabled email alert names, in the order the startup summary and doctor print them
+def email_notification_categories():
+    settings = (
+        (ACTIVE_INACTIVE_NOTIFICATION, "online and offline changes"),
+        (GAME_CHANGE_NOTIFICATION, "game changes"),
+        (ERROR_NOTIFICATION, "errors"),
+    )
+    return [label for enabled, label in settings if enabled]
+
+
 # Returns the enabled webhook alert names, in the order the startup summary and doctor print them
 def webhook_notification_categories():
     settings = (
-        (WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION, "status changes"),
+        (WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION, "online and offline changes"),
         (WEBHOOK_GAME_CHANGE_NOTIFICATION, "game changes"),
         (WEBHOOK_ERROR_NOTIFICATION, "errors"),
     )
@@ -5395,7 +5405,7 @@ def doctor_check_email_notifications(report):
         smtp_sign_in(SMTP_PASSWORD, timeout=DOCTOR_SMTP_TIMEOUT)
     except RecoveryError as exc:
         return [make_doctor_check("Notifications", "FAIL", exc.advice.summary, exc.advice.detail, exc.advice)]
-    alerts = ", ".join(name for name, enabled in (("status changes", ACTIVE_INACTIVE_NOTIFICATION), ("game changes", GAME_CHANGE_NOTIFICATION), ("errors", ERROR_NOTIFICATION)) if enabled)
+    alerts = ", ".join(email_notification_categories())
     report.email_ready = True
     return [make_doctor_check("Notifications", "PASS", SMTP_READY_CHECK_LABEL, f"Alerts: {alerts}. No email was sent during this passive check")]
 
@@ -5624,7 +5634,7 @@ def full_startup_summary_enabled():
 
 # Returns the email alert rollup, naming what is switched on rather than printing three separate booleans
 def startup_notification_state():
-    enabled = [name for name, on in (("status changes", ACTIVE_INACTIVE_NOTIFICATION), ("game changes", GAME_CHANGE_NOTIFICATION), ("errors", ERROR_NOTIFICATION)) if on]
+    enabled = email_notification_categories()
     return "On (" + ", ".join(enabled) + ")" if enabled else "Off"
 
 
