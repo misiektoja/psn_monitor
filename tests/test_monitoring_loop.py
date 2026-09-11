@@ -281,6 +281,29 @@ def test_malformed_response_recreates_the_session(pm_module, psn_session, fake_c
     assert "Rebuilt the PSNAWP session after 1 failed check in a row" in output
 
 
+# Verifies a failure the tool can retry away is alerted only once the outage has lasted the alert delay, so a blip
+# of a check or two reaches nobody while a real outage still does
+@pytest.mark.parametrize("failures,expected", [(2, 0), (3, 1)])
+def test_a_retryable_failure_is_alerted_once_the_outage_has_lasted(pm_module, psn_session, fake_clock, monkeypatch, sent_emails, failures, expected):
+    monkeypatch.setattr(pm_module, "ERROR_NOTIFICATION", True)
+    # Three minute polls put the third failing check past the five minute delay
+    psn_session([presence_payload(status="offline")] + [RuntimeError("unrecognized failure") for _ in range(failures)])
+
+    run_monitor(pm_module)
+
+    assert len(sent_emails) == expected
+
+
+# Verifies a failure nothing here can retry away is alerted on the first check, since waiting would change nothing
+def test_a_failure_that_cannot_clear_itself_is_alerted_at_once(pm_module, psn_session, fake_clock, monkeypatch, sent_emails):
+    monkeypatch.setattr(pm_module, "ERROR_NOTIFICATION", True)
+    psn_session([presence_payload(status="offline"), psnawp_exceptions.PSNAWPAuthenticationError("Your npsso code has expired")])
+
+    run_monitor(pm_module)
+
+    assert len(sent_emails) == 1
+
+
 # Verifies repeated malformed responses raise an alert only once the problem is clearly persistent
 def test_persistent_malformed_responses_alert_once(pm_module, psn_session, fake_clock, monkeypatch, sent_emails):
     monkeypatch.setattr(pm_module, "ERROR_NOTIFICATION", True)

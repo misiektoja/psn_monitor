@@ -398,6 +398,8 @@ FUNCTION_TIMEOUT = 15
 
 # Seconds rather than checks, because a failing run usually retries on a different interval than a healthy one
 LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_INTERVAL > 0 else 0
+# How long a failure the tool can retry away must last before it is alerted, a failure it cannot is alerted at once
+ERROR_ALERT_AFTER_SECONDS = 300  # 5 minutes
 
 stdout_bck = None
 csvfieldnames = ['Date', 'Status', 'Game name']
@@ -693,10 +695,10 @@ RECOVERY_CODE_POLL_KINDS = {
 
 # How long the monitoring loop waits before reporting, rebuilding the session and alerting, per retry policy
 RECOVERY_POLL_POLICY = {
-    "auth": {"report_after": 1, "recreate_after": 1, "alert_after": 1},
-    "malformed": {"report_after": 1, "recreate_after": 1, "alert_after": 3},
-    "transient": {"report_after": 3, "recreate_after": 3, "alert_after": 20},
-    "unknown": {"report_after": 1, "recreate_after": 3, "alert_after": 5},
+    "auth": {"report_after": 1, "recreate_after": 1},
+    "malformed": {"report_after": 1, "recreate_after": 1},
+    "transient": {"report_after": 3, "recreate_after": 3},
+    "unknown": {"report_after": 1, "recreate_after": 3},
 }
 
 # Categories where asking the PSN OAuth endpoint what it thinks can sharpen a vague library error
@@ -3965,6 +3967,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
     m_subject = m_body = ""
     error_streak = 0
+    error_since = 0
     outage = OutageReporter()
     # A recovery is only worth reporting when the failure it recovers from was reported or alerted on
     failure_announced = False
@@ -4109,10 +4112,12 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 sys.exit(2)
 
             error_streak += 1
+            if error_streak == 1:
+                error_since = int(time.time())
             policy = RECOVERY_POLL_POLICY[kind]
             sleep_interval = FUNCTION_TIMEOUT if kind == "transient" else (get_sleep_interval() if kind == "unknown" else max(60, get_sleep_interval()))
-            # A failure nothing here can retry away is worth reporting at once rather than after a streak
-            alert_after = policy["alert_after"] if advice.retryable else 1
+            # A failure the tool can retry away is alerted once the outage has lasted ERROR_ALERT_AFTER_SECONDS, one it cannot at once
+            alert_due = not advice.retryable or int(time.time()) - error_since >= ERROR_ALERT_AFTER_SECONDS
 
             # A failure that has not changed is left to the liveness cadence rather than repeated every check
             outage_outcome = outage.failed(advice, LIVENESS_REMINDER_SECONDS) if error_streak >= policy["report_after"] else ""
@@ -4129,7 +4134,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 rebuild_announced = True
                 printed_this_check = True
 
-            if error_streak >= alert_after and ((ERROR_NOTIFICATION and not error_email_sent) or (webhook_event_enabled("error") and not error_webhook_sent)):
+            if alert_due and ((ERROR_NOTIFICATION and not error_email_sent) or (webhook_event_enabled("error") and not error_webhook_sent)):
                 email_delivered, webhook_delivered = send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice, error_streak), email_enabled=ERROR_NOTIFICATION and not error_email_sent, webhook_enabled=webhook_event_enabled("error") and not error_webhook_sent)
                 error_email_sent = error_email_sent or email_delivered
                 error_webhook_sent = error_webhook_sent or webhook_delivered
