@@ -70,7 +70,7 @@ def test_first_run_records_the_status_file(pm_module, psn_session, fake_clock, i
 
 # Verifies a restart picks up the recorded status instead of treating the user as newly seen
 def test_restart_reads_the_recorded_status(pm_module, psn_session, fake_clock, isolated_working_directory, capsys):
-    (isolated_working_directory / LAST_STATUS_FILE).write_text(json.dumps([1767225600, "offline"]), encoding="utf-8")
+    (isolated_working_directory / LAST_STATUS_FILE).write_text(json.dumps([fake_clock.time() - 60, "offline"]), encoding="utf-8")
     psn_session([presence_payload(status="offline")])
 
     run_monitor(pm_module)
@@ -365,7 +365,9 @@ def test_a_halted_request_joins_the_outage(pm_module, psn_session, fake_clock, m
     run_monitor(pm_module)
 
     output = capsys.readouterr().out
-    assert f"psn_user.get_presence() did not answer within {pm_module.display_time(pm_module.FUNCTION_TIMEOUT)}" in output
+    assert "PlayStation Network took too long to answer" in output
+    assert "Technical detail:" not in output
+    assert "psn_user.get_presence() did not answer" in sent_emails[0]["body"]
     assert "Rebuilt the PSNAWP session after 3 failed checks in a row" in output
     assert "Monitoring recovered for" in output
     assert len(sent_emails) == 1

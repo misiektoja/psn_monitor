@@ -389,17 +389,13 @@ def test_an_unusable_webhook_url_is_not_saved(tmp_path):
     assert env_file.read_text(encoding="utf-8") == f'WEBHOOK_URL="{WEBHOOK_URL}"\n'
 
 
-# Verifies a URL for the other service is refused rather than silently saved against the wrong provider
-def test_a_url_for_the_other_service_is_refused(tmp_path, monkeypatch):
+# Accepts a recognized service URL consistently with provider detection at startup
+def test_recognized_url_selects_its_provider(tmp_path, monkeypatch):
     monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "ntfy")
     env_file = tmp_path / ".env"
 
-    with pytest.raises(monitor.RecoveryError) as raised:
-        monitor.run_set_webhook_url(env_file=str(env_file), interactive=True, getpass_func=lambda prompt: WEBHOOK_URL)
-
-    assert raised.value.advice.code == "webhook.invalid"
-    assert "WEBHOOK_PROVIDER" in raised.value.advice.detail
-    assert not env_file.exists()
+    monitor.run_set_webhook_url(env_file=str(env_file), interactive=True, getpass_func=lambda prompt: WEBHOOK_URL)
+    assert WEBHOOK_URL in env_file.read_text(encoding="utf-8")
 
 
 # Verifies an empty answer is reported as nothing entered rather than as a broken destination

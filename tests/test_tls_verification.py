@@ -76,12 +76,13 @@ def test_the_psn_session_honours_the_setting(pm_module, monkeypatch, psn_session
     assert client.authenticator.request_builder.session.verify is verify
 
 
-# Verifies a PSNAWP release that moves its session still returns a usable client instead of failing to start
-def test_a_psn_client_without_the_expected_session_still_starts(pm_module, monkeypatch):
+# Refuses a client that cannot honor the configured certificate policy
+def test_a_psn_client_without_tls_control_is_refused(pm_module, monkeypatch):
     monkeypatch.setattr(pm_module, "VERIFY_SSL", False)
     monkeypatch.setattr(pm_module, "PSNAWP", lambda npsso: SimpleNamespace(npsso=npsso))
 
-    assert pm_module.psn_client("a-code").npsso == "a-code"
+    with pytest.raises(pm_module.RecoveryError, match="cannot apply VERIFY_SSL"):
+        pm_module.psn_client("a-code")
 
 
 @pytest.mark.parametrize("verify", [True, False])

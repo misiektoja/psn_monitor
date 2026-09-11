@@ -497,6 +497,8 @@ MINIMUM_PYTHON_VERSION = (3, 10)
 MINIMUM_PYTHON_VERSION_TEXT = ".".join(str(part) for part in MINIMUM_PYTHON_VERSION)
 
 import sys
+import contextvars
+import functools
 
 if sys.version_info < MINIMUM_PYTHON_VERSION:
     print(f"* Error: Python version {MINIMUM_PYTHON_VERSION_TEXT} or higher required !")
@@ -1187,13 +1189,13 @@ def join_setting_names(names, conjunction):
 # Returns every redactable secret value currently known to the process, longest first so overlaps redact fully
 def known_secret_values():
     values = [value for key in SECRET_KEYS for value in (globals().get(key),) if isinstance(value, str) and secret_is_set(value) and len(value) >= MIN_REDACTABLE_SECRET_LENGTH]
-    return sorted(set(values), key=len, reverse=True)
+    return sorted(set(values) | set(_DELIVERY_SECRET_VALUES.get()), key=len, reverse=True)
 
 
 # Redacts credentials and secret-bearing assignments from arbitrary text before it is shown, logged or emailed
-def sanitize_error_text(value):
+def sanitize_error_text(value, extra_values=()):
     text = str(value or "")
-    for secret in known_secret_values():
+    for secret in sorted(set(known_secret_values()) | {str(value) for value in extra_values if value}, key=len, reverse=True):
         text = text.replace(secret, "<redacted>")
     patterns = (
         (r"(?m)(\b(?:PSN_NPSSO|SMTP_PASSWORD|WEBHOOK_URL|NTFY_ACCESS_TOKEN)\b\s*=\s*).*$", r"\1<redacted>"),
@@ -1457,7 +1459,7 @@ def apply_runtime_cli_overrides(args):
 
 # Rejects timestamps that cannot safely reach date conversion
 def valid_state_timestamp(value):
-    if not finite_number(value) or value < 0:
+    if not finite_number(value) or value < 0 or value > time.time() + 300:
         return False
     try:
         datetime.fromtimestamp(value)
@@ -1475,7 +1477,7 @@ def read_status_record(path):
     if not isinstance(record[1], str) or not record[1].strip():
         raise ValueError("the saved status must be nonempty text")
     if not valid_state_timestamp(record[0]):
-        raise ValueError("the saved timestamp must be finite, nonnegative and representable")
+        raise ValueError("the saved timestamp must be finite, nonnegative, representable and no more than five minutes in the future")
     return record
 
 
@@ -1883,7 +1885,7 @@ _STATUS_CHANGE_RE = re.compile(r"\b(?:changed status|changed game)\b")
 
 # Builds an ANSI escape sequence from a style description string
 def _build_ansi_sequence(style_str):
-    if not style_str:
+    if not isinstance(style_str, str) or not style_str:
         return ""
     parts = re.split(r"[+ ]+", style_str.strip().lower())
     codes = [_STYLE_CODES[part] for part in parts if part in _STYLE_CODES]
@@ -2311,8 +2313,7 @@ class Logger(object):
         # The log file stays plain text, so colour codes are stripped and tabs expanded before it is written
         self.logfile.write(normalize_log_separators(ANSI_ESCAPE_RE.sub("", message).expandtabs(8)))
         # Truncation runs before colouring, so escape sequences never count toward the visible width
-        if TRUNCATE_CHARS:
-            message = truncate_string_per_line(message, TRUNCATE_CHARS)
+        message = self._truncate_terminal(message)
         self.terminal.write(apply_color_to_text(message))
         self.terminal.flush()
         self.logfile.flush()
@@ -2325,14 +2326,47 @@ class Logger(object):
     # Writes text meant for the reader at the terminal, which the log file has its own version of
     def terminal_only(self, message):
         message = sanitize_terminal_text(message)
-        if TRUNCATE_CHARS:
-            message = truncate_string_per_line(message, TRUNCATE_CHARS)
+        message = self._truncate_terminal(message)
         self.terminal.write(apply_color_to_text(message))
         self.terminal.flush()
 
     def flush(self):
         self.terminal.flush()
         self.logfile.flush()
+
+
+    # Limits the terminal line across separate writes while leaving the log complete
+    def _truncate_terminal(self, message):
+        try:
+            from wcwidth import wcwidth
+        except ImportError:
+            wcwidth = len
+        column = getattr(self, "_terminal_column", 0)
+        clipped = getattr(self, "_terminal_clipped", False)
+        output = []
+        position = 0
+        while position < len(message):
+            escape = ANSI_ESCAPE_RE.match(message, position)
+            if escape:
+                output.append(escape.group(0))
+                position = escape.end()
+                continue
+            char = message[position]
+            position += 1
+            if char in ("\n", "\r"):
+                output.append(char)
+                column, clipped = 0, False
+                continue
+            width = 8 - column % 8 if char == "\t" else max(0, wcwidth(char))
+            if char == "\t" and TRUNCATE_CHARS:
+                width = min(width, max(0, TRUNCATE_CHARS - column))
+            if TRUNCATE_CHARS and (clipped or column + width > TRUNCATE_CHARS):
+                clipped = True
+                continue
+            output.append(" " * width if char == "\t" and TRUNCATE_CHARS else char)
+            column += width
+        self._terminal_column, self._terminal_clipped = column, clipped
+        return "".join(output)
 
 
 # Class used to generate timeout exceptions
@@ -2390,8 +2424,8 @@ def psn_client(npsso=None):
     # Applied after construction because PSNAWP signs in on the first request, so this still covers the token exchange
     try:
         client.authenticator.request_builder.session.verify = VERIFY_SSL
-    except AttributeError as diag_exc:
-        debug_print("TLS verification could not be applied to the PSNAWP session", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+    except AttributeError:
+        raise RecoveryError(make_recovery_advice("dependency.missing", "PSNAWP cannot apply VERIFY_SSL", recovery_fix_with_guide("Upgrade PSNAWP to version 3.0.3 or newer before retrying", INSTALLATION_GUIDE_URL), False)) from None
     return client
 
 
@@ -2811,6 +2845,18 @@ def format_payload(template, payload):
     return template
 
 
+# Parses legacy and current Discord templates before validating their object shape
+def render_discord_template(template, values):
+    if isinstance(template, str):
+        try:
+            template = json.loads(template)
+        except json.JSONDecodeError:
+            template = json.loads(str(format_payload(template, values)))
+    if not isinstance(template, dict):
+        raise ValueError("WEBHOOK_TEMPLATE must be a dictionary or a JSON object string")
+    return format_payload(template, values)
+
+
 # Returns a configuration error for unsafe or unsupported webhook customization
 def validate_webhook_customization(provider=None):
     selected_provider = normalized_webhook_provider(provider)
@@ -2821,8 +2867,8 @@ def validate_webhook_customization(provider=None):
             return "WEBHOOK_AVATAR_URL must be a string"
         if WEBHOOK_AVATAR_URL.strip() and not validate_webhook_url(WEBHOOK_AVATAR_URL):
             return "WEBHOOK_AVATAR_URL must contain a complete HTTPS link without embedded credentials"
-        if not isinstance(WEBHOOK_TEMPLATE, (dict, list, str)):
-            return "WEBHOOK_TEMPLATE must be a dictionary, list or string"
+        if not isinstance(WEBHOOK_TEMPLATE, (dict, str)):
+            return "WEBHOOK_TEMPLATE must be a dictionary or a JSON object string"
     if not isinstance(WEBHOOK_TRANSFORMS, (list, tuple)):
         return "WEBHOOK_TRANSFORMS must be a list or tuple"
     for index, transform in enumerate(WEBHOOK_TRANSFORMS):
@@ -2831,6 +2877,11 @@ def validate_webhook_customization(provider=None):
         # Only public str methods are reachable, so a template cannot call arbitrary attributes of the value
         if transform[1].startswith("_") or not callable(getattr("", transform[1], None)):
             return f"WEBHOOK_TRANSFORMS entry {index + 1} uses an unsupported string method"
+    if selected_provider == "discord":
+        try:
+            render_discord_template(WEBHOOK_TEMPLATE, {"title": "", "description": "", "username": "", "avatar_url": "", "image_url": "", "fields_str": "", "fields": [], "color": 0, "timestamp": "", "version": VERSION})
+        except (ValueError, TypeError):
+            return "WEBHOOK_TEMPLATE must be a dictionary or a JSON object string"
     return None
 
 
@@ -2863,9 +2914,11 @@ def build_webhook_values(title, description, notification_type):
 def build_webhook_payload(title, description, notification_type, payload_values=None):
     values = build_webhook_values(title, description, notification_type) if payload_values is None else payload_values
     try:
-        payload = format_payload(WEBHOOK_TEMPLATE, values)
+        payload = render_discord_template(WEBHOOK_TEMPLATE, values)
     except Exception as exc:
         raise ValueError("WEBHOOK_TEMPLATE could not be formatted with the supported placeholders") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("WEBHOOK_TEMPLATE must be a JSON object or a dictionary")
     if isinstance(payload, dict):
         # An empty name or avatar means "use the webhook default", which Discord expects as an absent key
         if payload.get("username") == "":
@@ -2964,21 +3017,44 @@ def print_webhook_error(message):
 
 
 # Sends one webhook request with the destination, deadline and redirect policy every delivery shares
-def post_webhook_request(**request_kwargs):
-    destination = str(WEBHOOK_URL or "").strip()
-    # Revalidated here because a SIGHUP dotenv reload can replace the destination after the delivery started
+def post_webhook_request(destination=None, **request_kwargs):
+    destination = str(WEBHOOK_URL if destination is None else destination).strip()
     if not validate_webhook_url(destination):
         raise req.exceptions.InvalidURL("WEBHOOK_URL must contain a complete HTTPS link")
     # Redirects are refused, so a moved endpoint cannot forward the alert and its authorization header elsewhere
     return WEBHOOK_SESSION.post(destination, timeout=WEBHOOK_TIMEOUT_SECONDS, verify=VERIFY_SSL, allow_redirects=False, **request_kwargs)
 
 
+_DELIVERY_SECRET_VALUES: contextvars.ContextVar[tuple] = contextvars.ContextVar("delivery_secret_values", default=())
+
+
+# Keeps in-flight credentials available to error redaction across settings reloads
+def _retain_webhook_secrets(deliver):
+    @functools.wraps(deliver)
+    # Restores the previous redaction scope after this delivery finishes
+    def retained(*args, **kwargs):
+        settings = globals().copy()
+        values = [settings.get(name) for name in SECRET_KEYS]
+        headers = settings.get("WEBHOOK_HEADERS")
+        if isinstance(headers, dict):
+            values.extend(value for name, value in headers.items() if isinstance(name, str) and name.casefold() == "authorization")
+        secrets = tuple(value for value in values if isinstance(value, str) and value and not value.startswith("your_"))
+        token = _DELIVERY_SECRET_VALUES.set(_DELIVERY_SECRET_VALUES.get() + secrets)
+        try:
+            return deliver(*args, **kwargs)
+        finally:
+            _DELIVERY_SECRET_VALUES.reset(token)
+    return retained
+
+
+@_retain_webhook_secrets
 # Sends one webhook through its own bounded retry path, which never shares the PlayStation Network retry policy
 def send_webhook(title, description, notification_type="status", force=False, sleeper=None):
     if not force and not webhook_event_enabled(notification_type):
         debug_print("Webhook delivery", outcome="skipped", type=notification_type, reason="alerts are disabled")
         return 1
-    if not validate_webhook_url():
+    destination = str(WEBHOOK_URL or "").strip()
+    if not validate_webhook_url(destination):
         print_webhook_error("WEBHOOK_URL must contain a complete HTTPS link")
         return 1
     provider = normalized_webhook_provider()
@@ -3002,17 +3078,20 @@ def send_webhook(title, description, notification_type="status", force=False, sl
         return 1
     sleep_func = time.sleep if sleeper is None else sleeper
     ntfy_title, ntfy_message = build_ntfy_webhook_message(str(webhook_values["title"]), str(webhook_values["description"])) if provider == "ntfy" else ("", "")
+    if destination != str(WEBHOOK_URL or "").strip():
+        print_recovery_error(context="webhook", detail="Webhook settings changed while preparing the delivery. Retry the notification with the current settings")
+        return 1
     last_error = None
     for attempt in range(WEBHOOK_MAX_ATTEMPTS):
         attempt_number = attempt + 1
         try:
-            debug_print("Webhook delivery", channel=provider, host=webhook_destination_host(), attempt=f"{attempt_number}/{WEBHOOK_MAX_ATTEMPTS}", timeout=f"{WEBHOOK_TIMEOUT_SECONDS}s")
+            debug_print("Webhook delivery", channel=provider, host=webhook_destination_host(destination), attempt=f"{attempt_number}/{WEBHOOK_MAX_ATTEMPTS}", timeout=f"{WEBHOOK_TIMEOUT_SECONDS}s")
             if provider == "ntfy":
-                response = post_webhook_request(data=ntfy_message.encode("utf-8"), params={"title": ntfy_title}, headers=request_headers)
+                response = post_webhook_request(destination=destination, data=ntfy_message.encode("utf-8"), params={"title": ntfy_title}, headers=request_headers)
             elif isinstance(discord_payload, str):
-                response = post_webhook_request(data=discord_payload, headers=request_headers)
+                response = post_webhook_request(destination=destination, data=discord_payload, headers=request_headers)
             else:
-                response = post_webhook_request(json=discord_payload, headers=request_headers)
+                response = post_webhook_request(destination=destination, json=discord_payload, headers=request_headers)
             # A rate limit and a server fault are the only answers worth repeating, and only once
             retryable = response.status_code == 429 or 500 <= response.status_code <= 599
             debug_print("Webhook delivery", channel=provider, attempt=f"{attempt_number}/{WEBHOOK_MAX_ATTEMPTS}", status=response.status_code, retryable=retryable)
@@ -3631,7 +3710,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
         return default
 
     def _platforms_to_try(title):
-        raw = getattr(title, "platform", None)
+        raw = getattr(title, "title_platform", None) or getattr(title, "platform", None)
         raw_val = getattr(raw, "value", raw)
         s = (str(raw_val).lower() if raw_val else "")
         if PT:
@@ -3757,29 +3836,29 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                     include_progress=True,
                     trophy_group_id="all",
                 )
+
+                got_any_for_title = False
+                for tr in it:
+                    got_any_for_title = True
+                    if not getattr(tr, "earned", False):
+                        continue
+                    dt = _earn_dt(tr)
+                    if not dt:
+                        continue
+
+                    game_name = normalize_ascii(_resolve_title_name(npcomm, plat))
+                    ttype = _trophy_type_str(tr)
+                    tname = _get(tr, "trophy_name", "trophyName", default=None)
+                    if not tname:
+                        tname = "(hidden)" if getattr(tr, "hidden", False) else "(unknown)"
+                    tname = normalize_ascii(tname)
+
+                    items.append((dt, game_name, ttype, tname))
             except Exception as diag_exc:
                 if psn_lookup_outage(diag_exc):
                     raise
                 debug_print("PSN API trophies()", npcomm=npcomm, platform=plat, outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
                 continue
-
-            got_any_for_title = False
-            for tr in it:
-                got_any_for_title = True
-                if not getattr(tr, "earned", False):
-                    continue
-                dt = _earn_dt(tr)
-                if not dt:
-                    continue
-
-                game_name = normalize_ascii(_resolve_title_name(npcomm, plat))
-                ttype = _trophy_type_str(tr)
-                tname = _get(tr, "trophy_name", "trophyName", default=None)
-                if not tname:
-                    tname = "(hidden)" if getattr(tr, "hidden", False) else "(unknown)"
-                tname = normalize_ascii(tname)
-
-                items.append((dt, game_name, ttype, tname))
 
             if got_any_for_title:
                 break  # this platform works for this title
@@ -4078,7 +4157,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
             recent_entries = []
             print(f"\n* Getting list of recently played games ...")
             debug_print("PSN API title_stats()", user=psn_user_id, limit=10, page_size=50)
-            for i, t in enumerate(psn_user.title_stats(limit=10, page_size=50), 1):
+            for t in psn_user.title_stats(limit=10, page_size=50):
                 if not t:
                     continue
                 name_raw = t.name or "(unknown)"
@@ -4091,7 +4170,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
                 total_raw = str(t.play_duration) if t.play_duration else "0:00:00"
                 # Compact duration immediately to ensure it fits in the column
                 total = _compact_duration(total_raw)
-                recent_entries.append(f"Recent #{i}:\t\t\t{name} | {cat} | last played {last_played} | total {total}")
+                recent_entries.append((name, cat, last_played, total))
 
             # Decide column widths based on terminal size
             try:
@@ -4116,19 +4195,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
                 print(colorize("section", hdr))
                 print(sep)
 
-                for i, entry in enumerate(recent_entries, 1):
-                    try:
-                        _, rest = entry.split(":", 1)
-                        parts = rest.strip().split("|")
-                        name = parts[0].strip()
-                        cat = parts[1].strip()
-                        last_played = parts[2].replace("last played", "").strip()
-                        total = _compact_duration(parts[3].replace("total", "").strip())
-                    except Exception:
-                        # If parsing ever fails, print raw line as a fallback
-                        print(entry)
-                        continue
-
+                for i, (name, cat, last_played, total) in enumerate(recent_entries, 1):
                     name_fmt = _shorten_middle(name, w_title)
                     # Coloured here rather than by a line rule: the columns are positional, with no label or
                     # separator a rule could recognize once the values are padded to width
@@ -4566,7 +4633,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             outage_outcome = outage.failed(advice)
             printed_this_check = False
             if outage_outcome == "full":
-                print_recovery_advice(advice, recovery_hints, f"retrying in {display_time(sleep_interval)}")
+                print_recovery_advice(advice, tracker=recovery_hints, retry_note=f"retrying in {display_time(sleep_interval)}")
                 failure_announced = True
             elif outage_outcome == "changed":
                 print_outage_change(psn_user_id, advice)
@@ -4930,8 +4997,25 @@ def runtime_configuration_errors():
     return errors
 
 
+# Names malformed path and color settings before diagnostics consume their values
+def configuration_shape_errors():
+    errors = []
+    for name in ('PSN_LOGFILE', 'PSN_STATUS_FILE', 'CSV_FILE', 'DOTENV_FILE'):
+        if name in globals() and not isinstance(globals()[name], (str, os.PathLike)):
+            errors.append(f"{name} must be a path string")
+    theme = globals().get("COLOR_THEME", {})
+    if not isinstance(theme, dict):
+        errors.append("COLOR_THEME must be a dictionary of style strings")
+    else:
+        errors.extend(f"COLOR_THEME[{key!r}] must be a style string" for key, value in theme.items() if not isinstance(value, str))
+    return errors
+
+
 # Reports the effective settings and the files the tool would write, without writing any of them
 def doctor_check_configuration(config_path=None, env_path=None, config_advice=None, timezone_advice=None, psn_user_id=None):
+    shape_errors = configuration_shape_errors()
+    if shape_errors:
+        return [make_doctor_check("Configuration", "FAIL", detail, advice=make_recovery_advice("config.invalid", detail, recovery_fix_with_guide("Correct the named setting in the configuration file", CONFIG_GUIDE_URL), False)) for detail in shape_errors]
     checks = []
     if config_advice is not None:
         checks.append(make_doctor_check("Configuration", "FAIL", config_advice.summary, advice=config_advice))
@@ -4956,7 +5040,7 @@ def doctor_check_configuration(config_path=None, env_path=None, config_advice=No
     else:
         checks.append(make_doctor_check("Configuration", "PASS", timezone_label, f"Time zone: {LOCAL_TIMEZONE}"))
 
-    if isinstance(PSN_ACTIVE_CHECK_INTERVAL, (int, float)) and not isinstance(PSN_ACTIVE_CHECK_INTERVAL, bool) and 0 < PSN_ACTIVE_CHECK_INTERVAL < DOCTOR_MIN_SAFE_ACTIVE_INTERVAL:
+    if finite_number(PSN_CHECK_INTERVAL) and isinstance(PSN_ACTIVE_CHECK_INTERVAL, (int, float)) and not isinstance(PSN_ACTIVE_CHECK_INTERVAL, bool) and 0 < PSN_ACTIVE_CHECK_INTERVAL < DOCTOR_MIN_SAFE_ACTIVE_INTERVAL:
         intervals = f"{display_time(PSN_CHECK_INTERVAL)} while offline, {display_time(PSN_ACTIVE_CHECK_INTERVAL)} while online"
         advice = make_recovery_advice("psn.rate_limited", "Check intervals are short enough to be rate limited", recovery_fix_with_guide(f"Raise PSN_ACTIVE_CHECK_INTERVAL to at least {DOCTOR_MIN_SAFE_ACTIVE_INTERVAL} seconds", INTERVALS_GUIDE_URL), True)
         checks.append(make_doctor_check("Configuration", "WARN", "Check intervals are short", intervals, advice))
@@ -5659,14 +5743,15 @@ def _wizard_ask_duration(question, default, input_func=None):
 
 
 # Asks one secret through a hidden prompt with debug output off, so it never reaches the screen, the shell history or the debug stream
-def _wizard_ask_secret(question, getpass_func=None):
+def _wizard_ask_secret(question, getpass_func=None, strip=True):
     global DEBUG_MODE
     hidden_prompt = getpass.getpass if getpass_func is None else getpass_func
     previous_debug_mode = DEBUG_MODE
     DEBUG_MODE = False
     try:
         # Colorized like the visible prompts, so a hidden answer does not look like a different question
-        return str(read_interactively(hidden_prompt, colorize("info", f"{question}: "))).strip()
+        value = str(read_interactively(hidden_prompt, colorize("info", f"{question}: ")))
+        return value.strip() if strip else value
     except (EOFError, KeyboardInterrupt):
         print()
         raise
@@ -5958,7 +6043,7 @@ def _wizard_collect_email_section(state, input_func=None, getpass_func=None):
         state.config_values["RECEIVER_EMAIL"] = _wizard_ask_text("Receiver email", default=_wizard_default(state.config_values.get("RECEIVER_EMAIL")), required=True, input_func=input_func)
         if _wizard_email_answer_missing(state, "RECEIVER_EMAIL"):
             return
-        password = _wizard_ask_secret("SMTP password", getpass_func=getpass_func)
+        password = _wizard_ask_secret("SMTP password", getpass_func=getpass_func, strip=False)
         if password:
             _wizard_queue_secret(state, "SMTP_PASSWORD", password, input_func=input_func)
         # The sign-in has to prove the value the next run resolves rather than the one just typed. A declined
@@ -6712,7 +6797,7 @@ def validate_npsso_code(npsso):
     try:
         return psn_client(candidate).me().online_id
     except Exception as exc:
-        raise RecoveryError(classify_recovery_error(exc, context="startup"), exc) from None
+        raise RecoveryError(classify_recovery_error(exc, context="startup", detail=sanitize_error_text(exc, (candidate,)))) from None
 
 
 # The settings a sign-in needs before a password can be checked against the mail server
@@ -6820,9 +6905,8 @@ def run_set_secret(key, flag, subject, guide_url, guidance, prompt_text, validat
         DEBUG_MODE = previous_debug_mode
 
     print(f"* Checking the entered {subject} before changing the dotenv file ...")
-    outcome = validator(entered)
-    # What is stored can differ from what was typed, so a shorthand the validator accepted is saved in full
-    stored = str(entered).strip() if normalize is None else normalize(entered)
+    stored = str(entered) if key == "SMTP_PASSWORD" else (str(entered).strip() if normalize is None else normalize(entered))
+    outcome = validator(stored)
     try:
         update_dotenv_file(destination, {key: stored})
     except Exception as exc:
@@ -6846,27 +6930,28 @@ def run_set_npsso(env_file=None, config_path=None, psn_user_id=None, interactive
 
 # Accepts a complete webhook URL, or a bare ntfy.sh topic name when ntfy is the selected provider
 def normalize_webhook_destination(value):
-    return normalize_ntfy_topic_url(value) if normalized_webhook_provider() == "ntfy" else str(value or "").strip()
+    candidate = str(value or "").strip()
+    return normalize_ntfy_topic_url(candidate) if normalized_webhook_provider() == "ntfy" or "://" not in candidate else candidate
 
 
 # Checks one entered webhook destination without contacting the service, because the only confirmation a
 # webhook service offers is a delivered notification, and setting a URL must not publish one
-def validate_webhook_destination(value):
+def validate_webhook_destination(value, provider=None):
     candidate = normalize_webhook_destination(value)
     if not candidate:
         raise RecoveryError(classify_recovery_error(context="secret.entry", detail="No webhook URL was entered, so the dotenv file was not changed"))
     if not validate_webhook_url(candidate):
         raise RecoveryError(classify_recovery_error(context="webhook", detail="WEBHOOK_URL needs a complete HTTPS link, so the dotenv file was not changed"))
     detected = detect_webhook_provider(candidate)
-    configured = normalized_webhook_provider()
-    if detected and configured and detected != configured:
-        raise RecoveryError(classify_recovery_error(context="webhook", detail=f"WEBHOOK_PROVIDER is set to {webhook_provider_display_name(configured)} but that is a {webhook_provider_display_name(detected)} URL, so the dotenv file was not changed"))
+    configured = normalized_webhook_provider(provider)
+    if provider is not None and detected and configured != detected:
+        raise RecoveryError(classify_recovery_error(context="webhook", detail="The entered URL does not match --webhook-provider. Correct the flag or enter a URL for that service"))
     return webhook_provider_display_name(detected or configured)
 
 
 # Stores one webhook destination in the dotenv file, so the private URL never has to appear on a command line
-def run_set_webhook_url(env_file=None, config_path=None, psn_user_id=None, interactive=None, input_func=None, getpass_func=None):
-    return run_set_secret("WEBHOOK_URL", "--set-webhook-url", "webhook URL", WEBHOOK_GUIDE_URL, "* Discord: Edit Channel > Integrations > Webhooks > New Webhook > Copy Webhook URL\n* ntfy: the complete topic URL, or just the topic name when it is hosted on ntfy.sh", "Enter the webhook URL (input hidden): ", validate_webhook_destination, lambda provider: f"The entered value looks like a valid {provider} destination", env_file, config_path, psn_user_id, interactive, input_func, getpass_func, normalize_webhook_destination, ("Send a test webhook:", "--send-test-webhook"))
+def run_set_webhook_url(env_file=None, config_path=None, psn_user_id=None, interactive=None, input_func=None, getpass_func=None, provider=None):
+    return run_set_secret("WEBHOOK_URL", "--set-webhook-url", "webhook URL", WEBHOOK_GUIDE_URL, "* Discord: Edit Channel > Integrations > Webhooks > New Webhook > Copy Webhook URL\n* ntfy: the complete topic URL, or just the topic name when it is hosted on ntfy.sh", "Enter the webhook URL (input hidden): ", lambda value: validate_webhook_destination(value, provider), lambda provider: f"The entered value looks like a valid {provider} destination", env_file, config_path, psn_user_id, interactive, input_func, getpass_func, normalize_webhook_destination, ("Send a test webhook:", "--send-test-webhook"))
 
 
 # Stores one SMTP password in the dotenv file after the mail server has actually accepted it
@@ -6879,6 +6964,7 @@ def run_set_smtp_password(env_file=None, config_path=None, psn_user_id=None, int
     return run_set_secret("SMTP_PASSWORD", "--set-smtp-password", "SMTP password", SMTP_GUIDE_URL, f"* The password is checked by signing in to {SMTP_HOST} as {SMTP_USER}. Nothing is sent", "Enter the SMTP password (input hidden): ", smtp_sign_in, lambda user: f"The mail server accepted the password for {user}", env_file, config_path, psn_user_id, interactive, input_func, getpass_func)
 
 
+# Resolves command-line actions and initializes the selected runtime mode
 def main():
     global CLI_CONFIG_PATH, CONFIG_DISCOVERY_DISABLED, DOTENV_FILE, PSN_STATUS_FILE, LOCAL_TIMEZONE, LOCAL_TIMEZONE_STATE, LIVENESS_REMINDER_SECONDS, PSN_NPSSO, CSV_FILE, DISABLE_LOGGING, PSN_LOGFILE, ACTIVE_INACTIVE_NOTIFICATION, GAME_CHANGE_NOTIFICATION, ERROR_NOTIFICATION, PSN_CHECK_INTERVAL, PSN_ACTIVE_CHECK_INTERVAL, SMTP_PASSWORD, TRUNCATE_CHARS, EXPORTED_SECRET_KEYS, COLORED_OUTPUT, WEBHOOK_ENABLED, stdout_bck, DEBUG_MODE
 
@@ -7374,7 +7460,7 @@ def main():
 
     if args.set_webhook_url:
         try:
-            run_set_webhook_url(env_file=env_path, config_path=cfg_path, psn_user_id=args.psn_user_id)
+            run_set_webhook_url(env_file=env_path, config_path=cfg_path, psn_user_id=args.psn_user_id, provider=args.webhook_provider)
         except Exception as exc:
             print_recovery_error(exc, context="secret.entry")
             sys.exit(1)

@@ -196,3 +196,5 @@ pipx upgrade psn_monitor
 ```
 
 Check the upgraded version with `psn_monitor --version` or the [manual equivalent](usage.md#command-format), then run `psn_monitor --doctor <psn_user_id>` before monitoring.
+
+PSNAWP 3.0.3 or newer is required for profile links and certificate-verification settings. Package installation selects a supported version automatically. For a manual installation, reinstall the dependencies from `requirements.txt`.

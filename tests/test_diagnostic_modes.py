@@ -123,6 +123,7 @@ def test_a_degraded_feature_is_reported_without_debug_mode(pm_module, monkeypatc
 
 # Verifies both outcomes of writing the status file are visible, not only the failure
 def test_debug_reports_the_status_file_on_both_branches(pm_module, psn_session, fake_clock, both_modes_on, isolated_working_directory, capsys):
+    fake_clock.now = 1767225600
     psn_session([presence_payload(status="offline", last_online="2026-01-01T00:00:00Z")])
 
     run_monitor(pm_module)

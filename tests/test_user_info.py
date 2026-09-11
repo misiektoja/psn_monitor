@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from psnawp_api import PSNAWP
 
 from conftest import presence_payload
 
@@ -103,7 +104,9 @@ def info_user(monkeypatch, pm_module):
     # Primes the module with one fake user and returns it
     def build(**kwargs):
         user = FakeInfoUser(**kwargs)
-        monkeypatch.setattr(pm_module, "PSNAWP", lambda npsso: SimpleNamespace(user=lambda online_id: user))
+        client = PSNAWP("a" * 64)
+        monkeypatch.setattr(client, "user", lambda online_id: user)
+        monkeypatch.setattr(pm_module, "PSNAWP", lambda npsso: client)
         return user
 
     return build
