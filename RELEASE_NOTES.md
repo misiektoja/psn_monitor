@@ -4,27 +4,29 @@ This is a high-level summary of the most important changes.
 
 # Changes in 1.9 (TBD)
 
-Version **1.9** adds **guided setup**, a read-only **Doctor preflight check**, **Discord and ntfy alerts** and commands for hidden credential entry. You can save the monitored account and choose the status-file location. **Coloured output**, startup summaries plus verbose and debug modes make monitoring easier to follow. Configuration files are now parsed as data, secrets are better protected and release downloads include checksums and signed attestations.
+Version **1.9** adds **guided setup**, a read-only **Doctor preflight check**, **Discord and ntfy alerts** and **private credential entry**. **Coloured output**, startup summaries and verbose/debug modes make monitoring easier to follow. It protects saved history and credentials, improves profile reports and adds verifiable downloads. The release requires **PSNAWP 3.0.3 or newer**.
 
 **Features and improvements**:
 
-- **NEW:** **Guided setup** - `--setup` wizard collects the account, intervals, credentials, notifications and output choices. Review or edit answers before saving, with confirmation before replacing settings. A first run with no arguments offers the wizard
-- **NEW:** **Doctor preflight check** - `--doctor` checks configuration, PSN sign-in, target visibility, notifications and output destinations. Problems include suggested fixes. It writes no files and sends test notifications only after confirmation
+- **NEW:** **Guided setup** - `--setup` wizard collects the account, intervals, credentials, notifications and output files. Review or edit answers before saving and confirm replacements. Reruns preserve saved settings and move retained credentials to the private dotenv file. A first run without a saved target offers setup
+- **NEW:** **Doctor preflight check** - `--doctor` checks configuration, PSN sign-in, target visibility, notifications and output destinations with suggested fixes. It writes no files and sends test notifications only after confirmation
 - **NEW:** **Discord and ntfy alerts** - Choose online/offline, game, status and error notifications independently of email. Save the destination with `--set-webhook-url` and check delivery with `--send-test-webhook`. Protected ntfy topics are supported
 - **NEW:** **Private credential entry** - `--set-npsso` validates the NPSSO code with PSN. `--set-smtp-password` checks a hidden password with the mail server without sending a message. Both ask before replacing saved values
-- **IMPROVE:** **Saved account and configurable status file** - Set `PSN_USER_ID` to start monitoring without arguments. Use `PSN_STATUS_FILE` or `--status-file` to choose where the last seen status is stored. Status updates are written atomically
-- **IMPROVE:** **Clearer output and diagnostics** - Coloured output, a concise startup summary and task-based help make settings easier to find. `--verbose` reports operational changes and `--debug` adds technical traces, with credentials redacted
-- **IMPROVE:** **Errors and recovery guidance** - Failures explain what to fix and link to the guide. Persistent outages produce periodic reminders followed by a recovery notice
-- **IMPROVE:** **Screen width and TLS settings** - `--truncate N` limits screen width while logs retain full lines. `VERIFY_SSL` controls certificate checks for every outbound connection, including email. Verification is enabled by default and disabling it produces a warning
-- **IMPROVE:** **Safer configuration replacement** - `--generate-config FILE` asks before replacement and creates a backup. Non-interactive replacement requires `--force`. Shell redirection with `>` still bypasses these protections
-- **IMPROVE:** **Documentation and verifiable downloads** - A [searchable guide](https://misiektoja.github.io/psn_monitor/) covers setup, usage and troubleshooting. Releases include checksums and signed build attestations. New security and support guidance explains where to report problems
+- **IMPROVE:** **Saved account and status file** - Set `PSN_USER_ID` to start monitoring without arguments. Use `PSN_STATUS_FILE` or `--status-file` to choose where the last seen status is stored
+- **IMPROVE:** **Clearer output and diagnostics** - Coloured output and a short startup summary show the active settings. `--verbose` adds operational updates and `--debug` adds technical traces. Secrets are redacted and logs retain the full summary. Copy the updated `grc/conf.monitor_logs` to `~/.grc/` to use the live terminal colours in saved logs
+- **IMPROVE:** **Clearer errors and recovery** - Failures include repair guidance, periodic outage reminders and recovery notices. Temporary failures trigger error alerts after five minutes, while expired NPSSO credentials alert immediately
+- **IMPROVE:** **Screen width and TLS settings** - `--truncate N` limits screen width while logs retain full lines. It works without `wcwidth`, which improves Unicode width measurements. `VERIFY_SSL` covers outbound certificate checks, including email. Verification is on by default and disabling it produces a warning
+- **IMPROVE:** **Notification output** - Subjects omit program-name prefixes. Set `DELIVERY_CONFIRMATIONS = False` to hide delivery confirmations while keeping verbose diagnostics
+- **IMPROVE:** **Documentation and verifiable downloads** - A [searchable guide](https://misiektoja.github.io/psn_monitor/) covers setup, usage and troubleshooting. Releases include checksums and signed build attestations
 
 **Bug fixes**:
 
-- **BUGFIX:** **Safer configuration loading** - Configuration files are read as settings instead of executed as Python. Plain values and references to other settings still work. Imports, function calls and calculations must be replaced with plain settings
-- **BUGFIX:** **Exported secrets work independently** - Environment secrets work without a dotenv file and take precedence at startup. `SIGHUP` still applies edited dotenv values
-- **BUGFIX:** **Safer text and error output** - PSN names cannot inject cursor movement or screen-clearing commands. Error output redacts credentials and redirected output no longer triggers terminal-clearing errors
-- **BUGFIX:** **More reliable long-running monitoring** - Rebuilding a PSN session closes the old connections. Liveness messages follow elapsed time for online and offline targets and startup uses the configured connectivity settings
+- **BUGFIX:** **Accurate profile reports** - Reports include PS4 trophies and preserve game-title columns. Failed trophy and recent-game lookups stop with recovery guidance instead of continuing incomplete requests
+- **BUGFIX:** **Protected status history** - Damaged status records are reported before replacement. Correct the file or move it aside to start fresh. Timestamps ahead of the clock are retained with corrected timing
+- **BUGFIX:** **Safer configuration loading** - Configuration files are read as settings instead of executed as Python. Plain values and references to other settings still work. Replace imports, function calls and calculations with plain settings
+- **BUGFIX:** **Safer configuration and secret updates** - `--generate-config FILE` confirms replacement and creates a backup. Non-interactive replacement requires `--force`. Shell redirection with `>` bypasses these protections. Exported secrets work without a dotenv file. Command-line credentials and nonempty startup exports retain priority after `SIGHUP`. Change those values and restart to replace them. Reloads apply changed or removed file-owned secrets
+- **BUGFIX:** **Safer email and terminal output** - Mail-server rejection messages redact credentials. Emails accepted by the mail server no longer become false failures if closing the connection fails, avoiding duplicate retries. Upstream text cannot clear or retitle the terminal
+- **BUGFIX:** **Reliable long-running monitoring** - PSN session recovery closes old connections. Invalid settings include repair guidance, configured connectivity settings apply and liveness reminders cover online and offline targets
 
 Smaller fixes and development changes are listed in the [full change history](https://github.com/misiektoja/psn_monitor/compare/v1.8.4...v1.9).
 
