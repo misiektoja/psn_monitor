@@ -1,6 +1,7 @@
 """Tests for the recovery classifier, the advice it renders and the NPSSO auth probe."""
 
 import ast
+import inspect
 import re
 import socket
 from pathlib import Path
@@ -343,8 +344,8 @@ def test_the_fix_paragraph_is_not_repeated_while_the_same_failure_persists(pm_mo
     tracker = pm_module.RecoveryHintTracker()
     outage = pm_module.classify_recovery_error(Exception("Connection reset by peer"))
 
-    pm_module.print_recovery_advice(outage, tracker)
-    pm_module.print_recovery_advice(outage, tracker)
+    pm_module.print_recovery_advice(outage, tracker=tracker)
+    pm_module.print_recovery_advice(outage, tracker=tracker)
     first, repeat = capsys.readouterr().out.rstrip("\n").split("\n* Error:")
 
     assert "To fix:" in first
@@ -357,10 +358,10 @@ def test_a_changed_or_recovered_failure_prints_the_fix_again(pm_module, capsys):
     outage = pm_module.classify_recovery_error(Exception("Connection reset by peer"))
     rejected = pm_module.classify_recovery_error(Exception("Your npsso code has expired"))
 
-    pm_module.print_recovery_advice(outage, tracker)
-    pm_module.print_recovery_advice(rejected, tracker)
+    pm_module.print_recovery_advice(outage, tracker=tracker)
+    pm_module.print_recovery_advice(rejected, tracker=tracker)
     tracker.reset()
-    pm_module.print_recovery_advice(outage, tracker)
+    pm_module.print_recovery_advice(outage, tracker=tracker)
 
     assert capsys.readouterr().out.count("To fix:") == 3
 
@@ -614,3 +615,51 @@ def test_the_guide_guard_still_inspects_the_source():
 
     assert len(inspected) > 40
     assert all(any(marker in summary for _, summary in bare) for marker in GUIDELESS_ADVICE), "an allowlisted summary stopped matching a builder"
+
+
+# One concept carried three names across this family: a renderer taking a built advice, a renderer taking the
+# failure itself, and a third pair that classified and printed under a name of its own. Pinned here so a call
+# copied from a sibling cannot quietly mean something else
+def test_the_recovery_printers_share_one_contract(pm_module):
+    advice_first = ("advice", "debug", "retry_note", "with_fix", "label")
+    error_first = ("error", "context", "debug", "detail", "retry_note", "with_fix", "label")
+
+    assert tuple(inspect.signature(pm_module.render_recovery_advice).parameters) == advice_first
+    assert tuple(inspect.signature(pm_module.render_recovery_error).parameters) == error_first + ("probe_auth",)
+    # This tool's own parameters follow the shared ones, so a call written for a sibling still means the same thing
+    assert tuple(inspect.signature(pm_module.print_recovery_advice).parameters) == advice_first + ("tracker",)
+    assert tuple(inspect.signature(pm_module.print_recovery_error).parameters) == error_first + ("tracker", "probe_auth")
+
+
+# The advice pair prints what the caller built, so a summary the classifier would never produce survives the trip
+def test_the_advice_printer_does_not_reclassify(pm_module, capsys):
+    pm_module.DEBUG_MODE = False
+    advice = pm_module.make_recovery_advice("network.timeout", "a summary no rule produces", "a fix of its own", True)
+
+    returned = pm_module.print_recovery_advice(advice)
+
+    assert capsys.readouterr().out == "* Error: a summary no rule produces\nTo fix: a fix of its own\n"
+    assert returned is advice
+
+
+# The error pair classifies what the caller hands it, which is the difference between the two front doors
+def test_the_error_printer_classifies_what_it_was_given(pm_module, capsys):
+    pm_module.DEBUG_MODE = False
+
+    returned = pm_module.print_recovery_error(Exception("Connection reset by peer"), context="runtime")
+
+    assert returned.code != "unknown"
+    assert capsys.readouterr().out.startswith(f"* Error: {returned.summary}\n")
+
+
+# Both front doors reach the same renderer, so the retry note, the label and a suppressed fix behave the same way
+def test_both_front_doors_render_the_same_line(pm_module):
+    pm_module.DEBUG_MODE = False
+    error = Exception("Connection reset by peer")
+    advice = pm_module.classify_recovery_error(error, "runtime")
+
+    through_advice = pm_module.render_recovery_advice(advice, retry_note="retrying in 5 minutes", with_fix=False, label="Warning")
+    through_error = pm_module.render_recovery_error(error, "runtime", retry_note="retrying in 5 minutes", with_fix=False, label="Warning")
+
+    assert through_advice == through_error
+    assert through_advice == f"* Warning: {advice.summary} (retrying in 5 minutes)"

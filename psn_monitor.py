@@ -928,16 +928,20 @@ def render_recovery_advice(advice, debug=None, retry_note="", with_fix=True, lab
     return "\n".join(lines)
 
 
-# Prints advice in full the first time its category appears and as one line while the same category persists
-def print_recovery_advice(advice, tracker=None, retry_note="", debug=None, label="Error"):
-    print(render_recovery_advice(advice, debug, retry_note, tracker is None or tracker.should_render(advice), label))
-
-
-# Classifies a failure, prints the advice and returns it so the caller can reuse the same wording
-def report_recovery_error(error=None, context="runtime", detail="", probe_auth=False, tracker=None, retry_note="", debug=None, label="Error"):
-    advice = classify_recovery_error(error, context, detail, probe_auth)
-    print_recovery_advice(advice, tracker, retry_note, debug, label)
+# Prints one built advice through the shared recovery block and returns it
+def print_recovery_advice(advice, debug=None, retry_note="", with_fix=True, label="Error", tracker=None):
+    print(render_recovery_advice(advice, debug, retry_note, with_fix and (tracker is None or tracker.should_render(advice)), label))
     return advice
+
+
+# Classifies one failure and renders it through the shared recovery block
+def render_recovery_error(error=None, context="runtime", debug=None, detail="", retry_note="", with_fix=True, label="Error", probe_auth=False):
+    return render_recovery_advice(classify_recovery_error(error, context, detail, probe_auth), debug, retry_note, with_fix, label)
+
+
+# Classifies one failure, prints it through the shared recovery block and returns its stable advice
+def print_recovery_error(error=None, context="runtime", debug=None, detail="", retry_note="", with_fix=True, label="Error", tracker=None, probe_auth=False):
+    return print_recovery_advice(classify_recovery_error(error, context, detail, probe_auth), debug, retry_note, with_fix, label, tracker)
 
 
 # Builds the subject line for one recovery notification
@@ -2020,7 +2024,7 @@ def check_internet(url=None, timeout=None, quiet=False):
         LAST_CONNECTIVITY_ERROR = e
         # Quiet callers render the failure themselves, which doctor needs so nothing lands on its progress line
         if not quiet:
-            report_recovery_error(e, context="connectivity", detail=f"The connectivity check to {url} failed: {e}")
+            print_recovery_error(e, context="connectivity", detail=f"The connectivity check to {url} failed: {e}")
         return False
 
 
@@ -2213,11 +2217,11 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         return 1
 
     if not subject or not isinstance(subject, str):
-        report_recovery_error(context="smtp.settings", detail="the message subject is empty")
+        print_recovery_error(context="smtp.settings", detail="the message subject is empty")
         return 1
 
     if not body and not body_html:
-        report_recovery_error(context="smtp.settings", detail="the message body is empty")
+        print_recovery_error(context="smtp.settings", detail="the message body is empty")
         return 1
 
     # Game and profile names taken from PSN reach the message, so control sequences are removed before a mail
@@ -2248,7 +2252,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         smtpObj.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, email_msg.as_string())
         smtpObj.quit()
     except Exception as e:
-        report_recovery_error(e, context="smtp", detail=f"Sending the notification to {RECEIVER_EMAIL} failed: {e}")
+        print_recovery_error(e, context="smtp", detail=f"Sending the notification to {RECEIVER_EMAIL} failed: {e}")
         return 1
     # Reported separately from the "Sending email notification" line, which only records the attempt
     verbose_print(f"Email delivered to {RECEIVER_EMAIL}: {subject}")
@@ -2565,7 +2569,7 @@ def build_webhook_headers(provider, payload):
 # Reports one webhook configuration or delivery failure through the shared recovery renderer, so it carries a
 # category and a fix line like every other failure this tool prints
 def print_webhook_error(message):
-    print_recovery_advice(classify_recovery_error(context="webhook", detail=str(message)))
+    print_recovery_error(context="webhook", detail=str(message))
 
 
 # Sends one webhook request with the destination, deadline and redirect policy every delivery shares
@@ -3365,7 +3369,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
         psn_user = psnawp.user(online_id=psn_user_id)
     except Exception as e:
         print()
-        report_recovery_error(e, context="startup", probe_auth=True)
+        print_recovery_error(e, context="startup", probe_auth=True)
         sys.exit(1)
     print_ok()
 
@@ -3382,7 +3386,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
         share = psn_user.get_shareable_profile_link()
     except Exception as e:
         print()
-        report_recovery_error(e, context="startup", detail=f"Reading the PSN profile of '{psn_user_id}' failed: {e}", probe_auth=True)
+        print_recovery_error(e, context="startup", detail=f"Reading the PSN profile of '{psn_user_id}' failed: {e}", probe_auth=True)
         sys.exit(1)
     print_ok()
 
@@ -3393,7 +3397,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
         parse_presence(psn_user_presence)
     except Exception as e:
         print()
-        report_recovery_error(e, context="startup", detail=f"Cannot get presence for user '{psn_user_id}': {e}", probe_auth=True)
+        print_recovery_error(e, context="startup", detail=f"Cannot get presence for user '{psn_user_id}': {e}", probe_auth=True)
         sys.exit(1)
     print_ok()
 
@@ -3403,7 +3407,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
 
         if not status:
             print()
-            report_recovery_error(PsnMalformedResponse(f"Cannot get status for user '{psn_user_id}': the presence payload carries no onlineStatus"), context="startup")
+            print_recovery_error(PsnMalformedResponse(f"Cannot get status for user '{psn_user_id}': the presence payload carries no onlineStatus"), context="startup")
             sys.exit(1)
 
         status = str(status).lower()
@@ -3430,7 +3434,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
             launchplatform = str(launchplatform).upper()
     except Exception as e:
         print()
-        report_recovery_error(e, context="startup", detail=f"Reading the game title info of '{psn_user_id}' failed: {e}")
+        print_recovery_error(e, context="startup", detail=f"Reading the game title info of '{psn_user_id}' failed: {e}")
         sys.exit(1)
     print_ok()
     print()
@@ -3698,7 +3702,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         if csv_file_name:
             init_csv_file(csv_file_name)
     except Exception as e:
-        report_recovery_error(e, context="file.unwritable", detail=f"Cannot prepare the CSV file '{csv_file_name}': {e}")
+        print_recovery_error(e, context="file.unwritable", detail=f"Cannot prepare the CSV file '{csv_file_name}': {e}")
 
     print("Sneaking into PlayStation like a ninja ...\n")
 
@@ -3718,7 +3722,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         psn_user = psnawp.user(online_id=psn_user_id)
     except Exception as e:
         print()
-        report_recovery_error(e, context="startup", probe_auth=True)
+        print_recovery_error(e, context="startup", probe_auth=True)
         sys.exit(1)
     print_ok()
 
@@ -3735,7 +3739,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         share = psn_user.get_shareable_profile_link()
     except Exception as e:
         print()
-        report_recovery_error(e, context="startup", detail=f"Reading the PSN profile of '{psn_user_id}' failed: {e}", probe_auth=True)
+        print_recovery_error(e, context="startup", detail=f"Reading the PSN profile of '{psn_user_id}' failed: {e}", probe_auth=True)
         sys.exit(1)
     print_ok()
 
@@ -3746,7 +3750,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         parse_presence(psn_user_presence)
     except Exception as e:
         print()
-        report_recovery_error(e, context="startup", detail=f"Cannot get presence for user '{psn_user_id}': {e}", probe_auth=True)
+        print_recovery_error(e, context="startup", detail=f"Cannot get presence for user '{psn_user_id}': {e}", probe_auth=True)
         sys.exit(1)
     print_ok()
 
@@ -3756,7 +3760,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
         if not status:
             print()
-            report_recovery_error(PsnMalformedResponse(f"Cannot get status for user '{psn_user_id}': the presence payload carries no onlineStatus"), context="startup")
+            print_recovery_error(PsnMalformedResponse(f"Cannot get status for user '{psn_user_id}': the presence payload carries no onlineStatus"), context="startup")
             sys.exit(1)
 
         status = str(status).lower()
@@ -3783,7 +3787,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             launchplatform = str(launchplatform).upper()
     except Exception as e:
         print()
-        report_recovery_error(e, context="startup", detail=f"Reading the game title info of '{psn_user_id}' failed: {e}")
+        print_recovery_error(e, context="startup", detail=f"Reading the game title info of '{psn_user_id}' failed: {e}")
         sys.exit(1)
     print_ok()
 
@@ -3807,7 +3811,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 last_status_read = json.load(f)
             debug_print("Saved status read", path=psn_last_status_file)
         except Exception as e:
-            report_recovery_error(e, context="file.unreadable", detail=f"Cannot load the last saved status from '{psn_last_status_file}': {e}")
+            print_recovery_error(e, context="file.unreadable", detail=f"Cannot load the last saved status from '{psn_last_status_file}': {e}")
         if last_status_read:
             last_status_ts = last_status_read[0]
             last_status = last_status_read[1]
@@ -3837,13 +3841,13 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             save_last_status(psn_last_status_file, status_ts_old, status)
             debug_print("Saved status written", path=psn_last_status_file, status=status)
         except Exception as e:
-            report_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{psn_last_status_file}': {e}")
+            print_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{psn_last_status_file}': {e}")
 
     try:
         if csv_file_name and (status != last_status):
             write_csv_entry(csv_file_name, now_local_naive(), status, game_name)
     except Exception as e:
-        report_recovery_error(e, context="file.unwritable", detail=f"Cannot write to the CSV file '{csv_file_name}': {e}")
+        print_recovery_error(e, context="file.unwritable", detail=f"Cannot write to the CSV file '{csv_file_name}': {e}")
 
     print(f"\nPlayStation ID:\t\t\t{psn_user_id}")
     print(f"PSN account ID:\t\t\t{accountid}")
@@ -3916,7 +3920,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             save_last_status(psn_last_status_file, status_ts_old, status)
             debug_print("Saved status written", path=psn_last_status_file, status=status)
         except Exception as e:
-            report_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{psn_last_status_file}': {e}")
+            print_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{psn_last_status_file}': {e}")
 
     if status_ts_old != status_ts_old_bck:
         if status == "offline":
@@ -4020,7 +4024,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 print("* PSN_NPSSO updated - recreated PSNAWP session")
                 print_cur_ts("Timestamp:\t\t\t")
             except Exception as e:
-                advice = report_recovery_error(e, context="monitor", detail=f"Rebuilding the PSNAWP session after the PSN_NPSSO change failed: {e}", probe_auth=True)
+                advice = print_recovery_error(e, context="monitor", detail=f"Rebuilding the PSNAWP session after the PSN_NPSSO change failed: {e}", probe_auth=True)
                 if (ERROR_NOTIFICATION and not error_email_sent) or (webhook_event_enabled("error") and not error_webhook_sent):
                     email_delivered, webhook_delivered = send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice), email_enabled=ERROR_NOTIFICATION and not error_email_sent, webhook_enabled=webhook_event_enabled("error") and not error_webhook_sent)
                     error_email_sent = error_email_sent or email_delivered
@@ -4056,7 +4060,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         except TimeoutException as e:
             if platform.system() != 'Windows':
                 signal.alarm(0)
-            report_recovery_error(e, context="monitor", detail=f"psn_user.get_presence() did not answer within {display_time(FUNCTION_TIMEOUT)}", tracker=recovery_hints, retry_note=f"retrying in {display_time(FUNCTION_TIMEOUT)}")
+            print_recovery_error(e, context="monitor", detail=f"psn_user.get_presence() did not answer within {display_time(FUNCTION_TIMEOUT)}", tracker=recovery_hints, retry_note=f"retrying in {display_time(FUNCTION_TIMEOUT)}")
             print_cur_ts("Timestamp:\t\t\t")
             debug_print("Waiting", interval=display_time(FUNCTION_TIMEOUT), reason=f"check #{check_number} timed out")
             time.sleep(FUNCTION_TIMEOUT)
@@ -4146,7 +4150,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 save_last_status(psn_last_status_file, status_ts, status)
                 debug_print("Saved status written", path=psn_last_status_file, status=status)
             except Exception as e:
-                report_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{psn_last_status_file}': {e}")
+                print_recovery_error(e, context="file.unwritable", detail=f"Cannot save the last status to '{psn_last_status_file}': {e}")
 
             print(f"PSN user {psn_user_id} changed status from {status_old} to {status}")
             print(f"User was {status_old} for {calculate_timespan(int(status_ts), int(status_ts_old))} ({get_range_of_dates_from_tss(int(status_ts_old), int(status_ts), short=True)})")
@@ -4262,7 +4266,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 if csv_file_name:
                     write_csv_entry(csv_file_name, now_local_naive(), status, game_name)
             except Exception as e:
-                report_recovery_error(e, context="file.unwritable", detail=f"Cannot write to the CSV file '{csv_file_name}': {e}")
+                print_recovery_error(e, context="file.unwritable", detail=f"Cannot write to the CSV file '{csv_file_name}': {e}")
                 print_cur_ts("Timestamp:\t\t\t")
 
         status_old = status
@@ -5800,7 +5804,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     try:
         config_path, env_path = _wizard_destinations(config_file, env_file)
     except ValueError as exc:
-        print_recovery_advice(classify_recovery_error(context="file.unwritable", detail=str(exc)))
+        print_recovery_error(context="file.unwritable", detail=str(exc))
         return 1
 
     print(colorize("header", "Setup Wizard") + "\n")
@@ -5848,7 +5852,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     try:
         config_backup, _written = write_generated_config(state.config_path, generate_config_with_current_values(state.config_values), force=True)
     except Exception as exc:
-        print_recovery_advice(classify_recovery_error(exc, context="file.unwritable", detail=f"Could not write the configuration to '{state.config_path}': {exc}"))
+        print_recovery_error(exc, context="file.unwritable", detail=f"Could not write the configuration to '{state.config_path}': {exc}")
         return 1
     secrets_written = False
     if state.secret_updates:
@@ -5856,7 +5860,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
             update_dotenv_values(state.env_path, state.secret_updates)
             secrets_written = True
         except Exception as exc:
-            print_recovery_advice(classify_recovery_error(exc, context="file.unwritable", detail=f"Could not write the secrets to '{state.env_path}': {exc}"))
+            print_recovery_error(exc, context="file.unwritable", detail=f"Could not write the secrets to '{state.env_path}': {exc}")
             return 1
 
     print("\n" + colorize("header", "Saved files") + "\n")
@@ -6222,10 +6226,10 @@ def main():
         except (ValueError, IndexError):
             pass
         except FileExistsError as exc:
-            print_recovery_advice(classify_recovery_error(context="file.exists", detail=str(exc)))
+            print_recovery_error(context="file.exists", detail=str(exc))
             sys.exit(1)
         except OSError as exc:
-            print_recovery_advice(classify_recovery_error(exc, context="file.unwritable", detail=f"The config file could not be written: {exc}"))
+            print_recovery_error(exc, context="file.unwritable", detail=f"The config file could not be written: {exc}")
             sys.exit(1)
         sys.stdout.buffer.write(config_content.encode("utf-8"))
         sys.stdout.buffer.flush()
@@ -6663,7 +6667,7 @@ def main():
         try:
             run_set_npsso(env_file=env_path, config_path=cfg_path, psn_user_id=args.psn_user_id)
         except Exception as exc:
-            print_recovery_advice(classify_recovery_error(exc, context="secret.entry"))
+            print_recovery_error(exc, context="secret.entry")
             sys.exit(1)
         sys.exit(0)
 
@@ -6671,7 +6675,7 @@ def main():
         try:
             run_set_smtp_password(env_file=env_path, config_path=cfg_path, psn_user_id=args.psn_user_id)
         except Exception as exc:
-            print_recovery_advice(classify_recovery_error(exc, context="secret.entry"))
+            print_recovery_error(exc, context="secret.entry")
             sys.exit(1)
         sys.exit(0)
 
@@ -6679,7 +6683,7 @@ def main():
         try:
             run_set_webhook_url(env_file=env_path, config_path=cfg_path, psn_user_id=args.psn_user_id)
         except Exception as exc:
-            print_recovery_advice(classify_recovery_error(exc, context="secret.entry"))
+            print_recovery_error(exc, context="secret.entry")
             sys.exit(1)
         sys.exit(0)
 
@@ -6698,7 +6702,7 @@ def main():
 
     if args.send_test_webhook:
         if not validate_webhook_url():
-            report_recovery_error(context="webhook", detail="WEBHOOK_URL must contain a complete HTTPS link")
+            print_recovery_error(context="webhook", detail="WEBHOOK_URL must contain a complete HTTPS link")
             sys.exit(1)
         print(f"* Sending test webhook notification through {webhook_provider_display_name()} to {webhook_destination_host()} ...\n")
         # Forced past the alert settings, because the point of the test is the destination, not the choices
@@ -6709,7 +6713,7 @@ def main():
         sys.exit(0)
 
     if not args.psn_user_id:
-        report_recovery_error(context="target.missing", detail="PSN_USER_ID needs to be defined")
+        print_recovery_error(context="target.missing", detail="PSN_USER_ID needs to be defined")
         sys.exit(1)
 
     if args.npsso_key:
@@ -6718,7 +6722,7 @@ def main():
         debug_print("Secret resolution", name="PSN_NPSSO", source="command line", **secret_fields(PSN_NPSSO, "PSN_NPSSO"))
 
     if not PSN_NPSSO or PSN_NPSSO == "your_psn_npsso_code":
-        report_recovery_error(context="secret.missing", detail="PSN_NPSSO (-n / --npsso_key) value is empty or incorrect")
+        print_recovery_error(context="secret.missing", detail="PSN_NPSSO (-n / --npsso_key) value is empty or incorrect")
         sys.exit(1)
 
     if args.info_mode:
@@ -6752,13 +6756,13 @@ def main():
             with open(CSV_FILE, 'a', newline='', buffering=1, encoding="utf-8") as _:
                 pass
         except Exception as e:
-            report_recovery_error(e, context="file.unwritable", detail=f"CSV file '{CSV_FILE}' cannot be opened for writing: {e}")
+            print_recovery_error(e, context="file.unwritable", detail=f"CSV file '{CSV_FILE}' cannot be opened for writing: {e}")
             sys.exit(1)
 
     try:
         ascii_log_separators_enabled()
     except ValueError as e:
-        report_recovery_error(context="config.invalid", detail=str(e))
+        print_recovery_error(context="config.invalid", detail=str(e))
         sys.exit(1)
 
     if args.disable_logging is True:

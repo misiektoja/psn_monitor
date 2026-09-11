@@ -201,3 +201,13 @@ psn_monitor <psn_user_id> --env-file none
 A secret exported in the environment wins over the same key in the dotenv file, and exported secrets work with no dotenv file at all. `--verbose` and `--doctor` each name every loaded secret and the source it came from, so a forgotten `export` shadowing your file is visible rather than guessed at.
 
 As a fallback, you can also store secrets in the configuration file or source code.
+
+`--debug` prints the same answer one secret per line, never the value:
+
+```text
+[DEBUG 12:00:00] Secret resolution: name=PSN_NPSSO, source=environment, value=set, chars=64
+[DEBUG 12:00:00] Secret resolution: name=SMTP_PASSWORD, source=dotenv file, value=set
+[DEBUG 12:00:00] Secret resolution: name=WEBHOOK_URL, source=nowhere, value=not set
+```
+
+Every supported secret gets a row, so one still holding its `your_...` placeholder reads `value=not set` rather than going unmentioned. A length appears only for the secrets whose length the provider issues, never for a password you chose.
