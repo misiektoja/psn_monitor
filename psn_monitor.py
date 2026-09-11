@@ -4902,7 +4902,7 @@ def startup_notification_state():
 # Returns the webhook alert rollup, which reads Off whenever the channel itself is switched off
 def startup_webhook_notification_state():
     enabled = webhook_notification_categories() if WEBHOOK_ENABLED else []
-    return f"On ({', '.join(enabled)}) through {webhook_provider_display_name()}" if enabled else "Off"
+    return "On (" + ", ".join(enabled) + ")" if enabled else "Off"
 
 
 # Hides the middle of an address's local part, so a log can be shared while the reader can still spot a typo

@@ -168,14 +168,13 @@ def test_the_notification_row_reports_when_everything_is_off(pm_module, monkeypa
     assert pm_module.startup_notification_state() == "Off"
 
 
-# Verifies the webhook rollup names what is switched on and which service would receive it
-def test_the_webhook_row_names_the_alerts_and_the_service(pm_module, monkeypatch):
+# Verifies the webhook rollup names what is switched on rather than only whether the channel is on
+def test_the_webhook_row_names_the_alerts(pm_module, monkeypatch):
     monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
-    monkeypatch.setattr(pm_module, "WEBHOOK_PROVIDER", "ntfy")
     monkeypatch.setattr(pm_module, "WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_ERROR_NOTIFICATION", True)
 
-    assert pm_module.startup_webhook_notification_state() == "On (status changes, errors) through ntfy"
+    assert pm_module.startup_webhook_notification_state() == "On (status changes, errors)"
 
 
 # Verifies the rollup reports the resolved state, so selected alerts with the channel off still read Off
@@ -194,7 +193,7 @@ def test_each_channel_has_its_own_row(summary_rows):
 
 # Verifies a long webhook rollup wraps under its own label instead of running past the column
 def test_a_long_webhook_rollup_wraps_under_its_label(pm_module):
-    row = pm_module.StartupSummaryRow("Notifications (webhook)", "On (" + ", ".join(["a long alert name"] * 8) + ") through Discord", concise=True)
+    row = pm_module.StartupSummaryRow("Notifications (webhook)", "On (" + ", ".join(["a long alert name"] * 8) + ")", concise=True)
 
     lines = pm_module.format_startup_summary_row(row).splitlines()
 

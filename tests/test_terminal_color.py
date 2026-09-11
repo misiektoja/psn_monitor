@@ -111,9 +111,9 @@ def test_the_notification_summary_row_colours_its_state(colored):
 
 # Verifies the webhook rollup gets the same treatment, so one channel is not styled differently from the other
 def test_the_webhook_summary_row_colours_its_state(colored):
-    row = monitor._colorize_line("* Notifications (webhook):      On (status changes) through Discord")
+    row = monitor._colorize_line("* Notifications (webhook):      On (status changes)")
 
-    assert row == f"* Notifications (webhook):      {colored['boolean_true']}On{monitor.ANSI_RESET} (status changes) through Discord"
+    assert row == f"* Notifications (webhook):      {colored['boolean_true']}On{monitor.ANSI_RESET} (status changes)"
 
 
 # Verifies the two delivery channels are told apart at a glance rather than sharing one colour
