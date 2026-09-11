@@ -728,6 +728,20 @@ def test_the_test_messages_use_the_shared_wording(pm_module, monkeypatch, sent_e
     assert (sent_webhooks[0]["title"], sent_webhooks[0]["description"]) == ("psn_monitor: test webhook", "This test notification was sent by --send-test-webhook. Your webhook settings work.")
 
 
+@pytest.mark.parametrize("flag, announcement", [("--send-test-email", "Sending test email notification"), ("--send-test-webhook", "Sending test webhook notification")])
+# Verifies a delivery test checks the settings before it announces an attempt it cannot make
+def test_a_delivery_test_checks_the_settings_before_it_announces(pm_module, monkeypatch, capsys, flag, announcement):
+    monkeypatch.setattr(pm_module, "SMTP_HOST", "not a host")
+    monkeypatch.setattr(pm_module, "WEBHOOK_URL", "")
+
+    assert run_main(pm_module, monkeypatch, [USER_ID, flag]) == 1
+
+    output = capsys.readouterr().out
+    assert announcement not in output
+    assert "* Error: " in output
+    assert "To fix: " in output
+
+
 # Verifies --setup runs before the connectivity probe, since it writes files and needs no network
 def test_setup_runs_before_the_connectivity_probe(pm_module, monkeypatch, isolated_working_directory):
     def refuse_probe(*args, **kwargs):

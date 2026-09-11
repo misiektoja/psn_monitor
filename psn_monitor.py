@@ -6680,6 +6680,11 @@ def main():
         sys.exit(0)
 
     if args.send_test_email:
+        # Checked before the attempt is announced, so a mail server that was never usable is not reported as a failed send
+        settings_advice = validate_smtp_settings()
+        if settings_advice is not None:
+            print_recovery_advice(settings_advice)
+            sys.exit(1)
         print("* Sending test email notification ...\n")
         if send_email("psn_monitor: test email", "This test email was sent by --send-test-email. Your SMTP settings work.", "", SMTP_SSL, smtp_timeout=5) == 0:
             print("* Email sent successfully !")
@@ -6688,6 +6693,9 @@ def main():
         sys.exit(0)
 
     if args.send_test_webhook:
+        if not validate_webhook_url():
+            report_recovery_error(context="webhook", detail="WEBHOOK_URL must contain a complete HTTPS link")
+            sys.exit(1)
         print(f"* Sending test webhook notification through {webhook_provider_display_name()} to {webhook_destination_host()} ...\n")
         # Forced past the alert settings, because the point of the test is the destination, not the choices
         if send_webhook("psn_monitor: test webhook", "This test notification was sent by --send-test-webhook. Your webhook settings work.", "status", force=True) == 0:
