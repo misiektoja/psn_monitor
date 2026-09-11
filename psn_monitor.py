@@ -414,6 +414,44 @@ FUNCTION_TIMEOUT = 15
 LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if LIVENESS_CHECK_INTERVAL > 0 else 0
 # How long a failure the tool can retry away must last before it is alerted, a failure it cannot is alerted at once
 ERROR_ALERT_AFTER_SECONDS = 300  # 5 minutes
+# How long a channel that could not deliver an error alert waits before the next attempt, doubled on every further failure up to the cap
+ERROR_ALERT_RETRY_SECONDS = 300  # 5 minutes
+ERROR_ALERT_RETRY_MAX_SECONDS = 3600  # 1 hour
+
+
+# Tracks the error alert per channel: what was delivered, and how long a channel that failed waits before the next attempt
+class ErrorAlertState:
+    # Starts with nothing delivered and no channel on hold
+    def __init__(self) -> None:
+        self.email_sent = False
+        self.webhook_sent = False
+        self.email_failures = 0
+        self.webhook_failures = 0
+        self.email_retry_at = 0
+        self.webhook_retry_at = 0
+
+    # Forgets the delivered alert and any hold, so the next failure earns each channel a new one
+    def reset(self) -> None:
+        self.__init__()
+
+    # Tells whether a channel still owes the alert and its wait after a failed attempt, if any, has passed
+    def pending(self, channel: str, enabled, now: int) -> bool:
+        return bool(enabled) and not getattr(self, f"{channel}_sent") and now >= getattr(self, f"{channel}_retry_at")
+
+    # Records one attempt, holding a channel that failed for a growing wait so a broken server is not dialled on every check
+    def record(self, channel: str, attempted: bool, delivered: bool, now: int) -> None:
+        if not attempted:
+            return
+        if delivered:
+            setattr(self, f"{channel}_sent", True)
+            setattr(self, f"{channel}_failures", 0)
+            setattr(self, f"{channel}_retry_at", 0)
+            return
+        failures = getattr(self, f"{channel}_failures") + 1
+        delay = min(ERROR_ALERT_RETRY_SECONDS * 2 ** (failures - 1), ERROR_ALERT_RETRY_MAX_SECONDS)
+        setattr(self, f"{channel}_failures", failures)
+        setattr(self, f"{channel}_retry_at", now + delay)
+        print(f"* The {channel} alert is on hold for {display_time(delay)} after {failures} {'attempt' if failures == 1 else 'attempts'}, then tried again")
 
 stdout_bck = None
 csvfieldnames = ['Date', 'Status', 'Game name']
@@ -4142,8 +4180,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     print_cur_ts("\nTimestamp:\t\t\t")
 
     alive_since = int(time.time())
-    error_email_sent = False
-    error_webhook_sent = False
+    error_alert = ErrorAlertState()
 
     m_subject = m_body = ""
     error_streak = 0
@@ -4234,15 +4271,17 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 print_cur_ts("Timestamp:\t\t\t")
             except Exception as e:
                 advice = print_recovery_error(e, context="monitor", detail=f"Rebuilding the PSNAWP session after the PSN_NPSSO change failed: {e}", probe_auth=True)
-                if (ERROR_NOTIFICATION and not error_email_sent) or (webhook_event_enabled("error") and not error_webhook_sent):
-                    email_delivered, webhook_delivered = send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice), email_enabled=ERROR_NOTIFICATION and not error_email_sent, webhook_enabled=webhook_event_enabled("error") and not error_webhook_sent)
-                    error_email_sent = error_email_sent or email_delivered
-                    error_webhook_sent = error_webhook_sent or webhook_delivered
+                now = int(time.time())
+                error_email_pending = error_alert.pending("email", ERROR_NOTIFICATION, now)
+                error_webhook_pending = error_alert.pending("webhook", webhook_event_enabled("error"), now)
+                if error_email_pending or error_webhook_pending:
+                    email_delivered, webhook_delivered = send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice), email_enabled=error_email_pending, webhook_enabled=error_webhook_pending)
+                    error_alert.record("email", error_email_pending, email_delivered, now)
+                    error_alert.record("webhook", error_webhook_pending, webhook_delivered, now)
                 print_cur_ts("Timestamp:\t\t\t")
             last_npsso_seen = PSN_NPSSO
             # allow notifications again after token rotation
-            error_email_sent = False
-            error_webhook_sent = False
+            error_alert.reset()
             error_streak = 0
             failure_announced = False
             rebuild_announced = False
@@ -4286,8 +4325,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             # Local file descriptor exhaustion cannot be recovered inside this process
             if kind == "exhausted":
                 print_recovery_advice(advice)
-                if (ERROR_NOTIFICATION and not error_email_sent) or (webhook_event_enabled("error") and not error_webhook_sent):
-                    send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice), email_enabled=ERROR_NOTIFICATION and not error_email_sent, webhook_enabled=webhook_event_enabled("error") and not error_webhook_sent)
+                if (ERROR_NOTIFICATION and not error_alert.email_sent) or (webhook_event_enabled("error") and not error_alert.webhook_sent):
+                    send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice), email_enabled=ERROR_NOTIFICATION and not error_alert.email_sent, webhook_enabled=webhook_event_enabled("error") and not error_alert.webhook_sent)
                 print_cur_ts("Timestamp:\t\t\t")
                 sys.exit(2)
 
@@ -4319,10 +4358,13 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 rebuild_announced = True
                 printed_this_check = True
 
-            if alert_due and ((ERROR_NOTIFICATION and not error_email_sent) or (webhook_event_enabled("error") and not error_webhook_sent)):
-                email_delivered, webhook_delivered = send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice, error_streak), email_enabled=ERROR_NOTIFICATION and not error_email_sent, webhook_enabled=webhook_event_enabled("error") and not error_webhook_sent)
-                error_email_sent = error_email_sent or email_delivered
-                error_webhook_sent = error_webhook_sent or webhook_delivered
+            now = int(time.time())
+            error_email_pending = alert_due and error_alert.pending("email", ERROR_NOTIFICATION, now)
+            error_webhook_pending = alert_due and error_alert.pending("webhook", webhook_event_enabled("error"), now)
+            if error_email_pending or error_webhook_pending:
+                email_delivered, webhook_delivered = send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice, error_streak), email_enabled=error_email_pending, webhook_enabled=error_webhook_pending)
+                error_alert.record("email", error_email_pending, email_delivered, now)
+                error_alert.record("webhook", error_webhook_pending, webhook_delivered, now)
                 failure_announced = failure_announced or email_delivered or webhook_delivered
                 printed_this_check = True
 
@@ -4343,8 +4385,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                     print_outage_recovery(psn_user_id, outage_lasted)
                     alive_since = int(time.time())
             recovery_hints.reset()
-            error_email_sent = False
-            error_webhook_sent = False
+            error_alert.reset()
             error_streak = 0
             failure_announced = False
             rebuild_announced = False

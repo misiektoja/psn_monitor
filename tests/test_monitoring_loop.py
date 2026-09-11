@@ -621,25 +621,28 @@ def test_an_error_alerts_both_channels_once(pm_module, psn_session, fake_clock, 
     assert [alert["type"] for alert in sent_webhooks] == ["error"]
 
 
-# Verifies the channel that failed is retried on the next check while the one that succeeded is not resent
-def test_only_the_failed_channel_is_retried(pm_module, psn_session, fake_clock, monkeypatch, sent_webhooks):
+# Verifies the channel that failed is retried once its hold has passed while the one that succeeded is not resent
+def test_only_the_failed_channel_is_retried(pm_module, psn_session, fake_clock, monkeypatch, sent_webhooks, capsys):
     monkeypatch.setattr(pm_module, "ERROR_NOTIFICATION", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_ERROR_NOTIFICATION", True)
     attempts = []
-    monkeypatch.setattr(pm_module, "send_email", lambda *args, **kwargs: attempts.append("email") or 1)
+    monkeypatch.setattr(pm_module, "send_email", lambda *args, **kwargs: attempts.append(fake_clock.now) or 1)
     psn_session([
         presence_payload(status="offline"),
-        psnawp_exceptions.PSNAWPAuthenticationError("Your npsso code has expired"),
-        psnawp_exceptions.PSNAWPAuthenticationError("Your npsso code has expired"),
-        psnawp_exceptions.PSNAWPAuthenticationError("Your npsso code has expired"),
+        *[psnawp_exceptions.PSNAWPAuthenticationError("Your npsso code has expired")] * 8,
     ])
 
     run_monitor(pm_module)
 
-    # The webhook was delivered on the first failure, so only the email that failed is attempted again
+    # The webhook was delivered on the first failure, so only the email that failed is attempted again, and
+    # each attempt waits five minutes, then twice the previous wait
     assert len(sent_webhooks) == 1
-    assert len(attempts) == 3
+    assert len(attempts) >= 2
+    assert attempts[1] - attempts[0] >= 300
+    output = capsys.readouterr().out
+    assert "* The email alert is on hold for 5 minutes after 1 attempt, then tried again" in output
+    assert "* The email alert is on hold for 10 minutes after 2 attempts, then tried again" in output
 
 
 # Verifies an internet outage that classifies as a timeout on one check and as unreachable on the next is one
