@@ -4280,7 +4280,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             alive_since = int(time.time())
 
         sleep_interval = get_sleep_interval()
-        debug_print("Completed check", check=f"#{check_number}", user=psn_user_id, status=status or "unknown", game=game_name or None, next=display_time(sleep_interval))
+        debug_print("Completed check", check=f"#{check_number}", user=psn_user_id, outcome="OK", status=status or "unknown", game=game_name or None, next=display_time(sleep_interval))
         time.sleep(sleep_interval)
 
 

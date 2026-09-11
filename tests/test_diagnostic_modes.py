@@ -156,8 +156,10 @@ def test_debug_reports_each_sleep_with_its_interval_and_reason(pm_module, psn_se
     output = capsys.readouterr().out
     assert "Waiting: interval=3 minutes, reason=before the first check, status=offline" in output
     assert "Waiting: interval=15 seconds, reason=transient failure, streak=1" in output
-    assert f"Completed check: check=#2, user={USER_ID}" in output
+    assert f"Completed check: check=#2, user={USER_ID}, outcome=OK" in output
     assert "next=3 minutes" in output
+    # The failing check reports its own result, so the two ends of a check are told apart in one grep
+    assert "Check: check=#1, recovery_code=network.unavailable, policy=transient, outcome=failed" in output
 
 
 # Verifies recovering from a run of failures is reported, since nothing else marks the end of a streak
