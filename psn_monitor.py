@@ -1027,7 +1027,7 @@ def print_recovery_error(error=None, context="runtime", debug=None, detail="", r
 
 # Builds the subject line for one recovery notification
 def recovery_email_subject(advice, psn_user_id):
-    return f"psn_monitor: {advice.summary} (user: {psn_user_id})"
+    return f"{advice.summary} (PSN user: {psn_user_id})"
 
 
 # Builds the body for one recovery notification, repeating the fix the operator sees on screen
@@ -2673,8 +2673,22 @@ def validate_smtp_settings():
     return classify_recovery_error(context="smtp.settings", detail=problem[0]) if problem is not None else None
 
 
+# Closes an SMTP session without changing the result of an accepted or failed message
+def smtp_quit_quietly(smtp_object):
+    if smtp_object is None:
+        return
+    try:
+        smtp_object.quit()
+    except Exception as quit_error:
+        debug_print("SMTP quit", outcome="failed", error=f"{type(quit_error).__name__}: {quit_error}")
+        try:
+            smtp_object.close()
+        except Exception as close_error:
+            debug_print("SMTP close", outcome="failed", error=f"{type(close_error).__name__}: {close_error}")
+
+
 # Sends email notification
-def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
+def send_email(subject, body, body_html, use_ssl, smtp_timeout=15, report_delivery=True):
     settings_advice = validate_smtp_settings()
     if settings_advice is not None:
         print_recovery_advice(settings_advice)
@@ -2694,6 +2708,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
     body = plain_text(body)
 
     debug_print("SMTP delivery", host=SMTP_HOST, port=SMTP_PORT, starttls=bool(use_ssl), timeout=f"{smtp_timeout}s", user=SMTP_USER)
+    smtpObj = None
     try:
         if use_ssl:
             ssl_context = smtp_ssl_context()
@@ -2714,12 +2729,14 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
             email_msg.attach(MIMEText(body_html, 'html', _charset='utf-8'))
 
         smtpObj.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, email_msg.as_string())
-        smtpObj.quit()
     except Exception as e:
         print_recovery_error(e, context="smtp", detail=f"Sending the notification to {RECEIVER_EMAIL} failed: {e}")
         return 1
+    finally:
+        smtp_quit_quietly(smtpObj)
     # Reported separately from the "Sending email notification" line, which only records the attempt
-    verbose_delivery_print(f"Email delivered to {RECEIVER_EMAIL}: '{subject}'")
+    if report_delivery:
+        verbose_delivery_print(f"Email sent to {RECEIVER_EMAIL}")
     debug_print("SMTP delivery", recipient=RECEIVER_EMAIL, outcome="OK")
     return 0
 
@@ -3107,7 +3124,7 @@ def _retain_webhook_secrets(deliver):
 
 @_retain_webhook_secrets
 # Sends one webhook through its own bounded retry path, which never shares the PlayStation Network retry policy
-def send_webhook(title, description, notification_type="status", force=False, sleeper=None):
+def send_webhook(title, description, notification_type="status", force=False, sleeper=None, report_delivery=True):
     if not force and not webhook_event_enabled(notification_type):
         debug_print("Webhook delivery", outcome="skipped", type=notification_type, reason="alerts are disabled")
         return 1
@@ -3152,7 +3169,8 @@ def send_webhook(title, description, notification_type="status", force=False, sl
             retryable = response.status_code == 429 or 500 <= response.status_code <= 599
             debug_print("Webhook delivery", channel=provider, attempt=f"{attempt_number}/{WEBHOOK_MAX_ATTEMPTS}", status=response.status_code, retryable=retryable)
             if 200 <= response.status_code <= 299:
-                verbose_delivery_print(f"Webhook delivered through {webhook_provider_display_name(provider)}: '{webhook_values['title']}'")
+                if report_delivery:
+                    verbose_delivery_print(f"Webhook sent through {webhook_provider_display_name(provider)}")
                 return 0
             last_error = f"HTTP {response.status_code}: {sanitize_error_text(getattr(response, 'text', ''))[:200]}"
             if not retryable or attempt_number == WEBHOOK_MAX_ATTEMPTS:
@@ -5536,7 +5554,7 @@ def offer_doctor_delivery_tests(report):
     offered = []
     if report.email_ready:
         if ask_yes_no("Send one test email now? This will deliver a real message"):
-            delivered = send_email("psn_monitor: doctor test email", "This test email was sent after approval in --doctor. Your SMTP delivery settings work.", "", SMTP_SSL, smtp_timeout=5) == 0
+            delivered = send_email("PSN Monitor doctor test email", "This test email was sent after approval in --doctor. Your SMTP delivery settings work.", "", SMTP_SSL, smtp_timeout=5, report_delivery=False) == 0
             if delivered:
                 check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "PASS", "Doctor test email delivered", "One real test email was sent after confirmation")
             else:
@@ -5551,7 +5569,7 @@ def offer_doctor_delivery_tests(report):
     if report.webhook_ready:
         provider = webhook_provider_display_name()
         if ask_yes_no(f"Send one test webhook through {provider} now? This will publish a real notification"):
-            delivered = send_webhook("psn_monitor: doctor test webhook", "This test notification was sent after approval in --doctor. Your webhook delivery settings work.", "status", force=True) == 0
+            delivered = send_webhook("PSN Monitor doctor test webhook", "This test notification was sent after approval in --doctor. Your webhook delivery settings work.", "status", force=True, report_delivery=False) == 0
             if delivered:
                 check = make_doctor_check(DOCTOR_DELIVERY_SECTION, "PASS", f"Doctor test webhook through {provider} delivered", "One real test webhook was sent after confirmation")
             else:
@@ -7679,7 +7697,7 @@ def main():
             print_recovery_advice(settings_advice)
             sys.exit(1)
         print("* Sending test email notification ...\n")
-        if send_email("psn_monitor: test email", "This test email was sent by --send-test-email. Your SMTP settings work.", "", SMTP_SSL, smtp_timeout=5) == 0:
+        if send_email("PSN Monitor test email", "This test email was sent by --send-test-email. Your SMTP settings work.", "", SMTP_SSL, smtp_timeout=5, report_delivery=False) == 0:
             print("* Email sent successfully !")
         else:
             sys.exit(1)
@@ -7691,7 +7709,7 @@ def main():
             sys.exit(1)
         print(f"* Sending test webhook notification through {webhook_provider_display_name()} to {webhook_destination_host()} ...\n")
         # Forced past the alert settings, because the point of the test is the destination, not the choices
-        if send_webhook("psn_monitor: test webhook", "This test notification was sent by --send-test-webhook. Your webhook settings work.", "status", force=True) == 0:
+        if send_webhook("PSN Monitor test webhook", "This test notification was sent by --send-test-webhook. Your webhook settings work.", "status", force=True, report_delivery=False) == 0:
             print("* Webhook sent successfully !")
         else:
             sys.exit(1)

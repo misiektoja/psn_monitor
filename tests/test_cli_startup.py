@@ -339,7 +339,7 @@ def test_test_email_reports_success(pm_module, monkeypatch, sent_emails, capsys)
     assert run_main(pm_module, monkeypatch, ["--send-test-email"]) == 0
 
     assert len(sent_emails) == 1
-    assert sent_emails[0]["subject"] == "psn_monitor: test email"
+    assert sent_emails[0]["subject"] == "PSN Monitor test email"
     assert "Email sent successfully" in capsys.readouterr().out
 
 
@@ -758,8 +758,8 @@ def test_the_test_messages_use_the_shared_wording(pm_module, monkeypatch, sent_e
     assert run_main(pm_module, monkeypatch, [USER_ID, "--send-test-email"]) == 0
     assert run_main(pm_module, monkeypatch, [USER_ID, "--send-test-webhook"]) == 0
 
-    assert (sent_emails[0]["subject"], sent_emails[0]["body"]) == ("psn_monitor: test email", "This test email was sent by --send-test-email. Your SMTP settings work.")
-    assert (sent_webhooks[0]["title"], sent_webhooks[0]["description"]) == ("psn_monitor: test webhook", "This test notification was sent by --send-test-webhook. Your webhook settings work.")
+    assert (sent_emails[0]["subject"], sent_emails[0]["body"]) == ("PSN Monitor test email", "This test email was sent by --send-test-email. Your SMTP settings work.")
+    assert (sent_webhooks[0]["title"], sent_webhooks[0]["description"]) == ("PSN Monitor test webhook", "This test notification was sent by --send-test-webhook. Your webhook settings work.")
 
 
 @pytest.mark.parametrize("flag, announcement", [("--send-test-email", "Sending test email notification"), ("--send-test-webhook", "Sending test webhook notification")])

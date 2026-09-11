@@ -174,7 +174,7 @@ def test_delivery_confirmations_can_be_turned_off(pm_module, monkeypatch, discor
 
     assert pm_module.send_webhook("PSN user is now online", "body text", "status") == 0
 
-    assert "Webhook delivered" not in capsys.readouterr().out
+    assert "Webhook sent through" not in capsys.readouterr().out
 
 
 # Verifies the Discord payload carries the alert, disables mentions and sends the colour as a number

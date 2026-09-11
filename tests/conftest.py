@@ -212,7 +212,7 @@ def sent_emails(monkeypatch):
     delivered = []
 
     # Records one notification and reports success
-    def fake_send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
+    def fake_send_email(subject, body, body_html, use_ssl, smtp_timeout=15, report_delivery=True):
         delivered.append({"subject": subject, "body": body, "body_html": body_html, "use_ssl": use_ssl})
         return 0
 
@@ -226,7 +226,7 @@ def sent_webhooks(monkeypatch):
     delivered = []
 
     # Records one alert and reports success
-    def fake_send_webhook(title, description, notification_type="status", force=False, sleeper=None):
+    def fake_send_webhook(title, description, notification_type="status", force=False, sleeper=None, report_delivery=True):
         delivered.append({"title": title, "description": description, "type": notification_type, "force": force})
         return 0
 
