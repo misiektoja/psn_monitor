@@ -628,16 +628,11 @@ def quote_command_argument(argument):
     return subprocess.list2cmdline([text]) if platform.system() == "Windows" else shlex.quote(text)
 
 
-# Renders command arguments quoted for the shell of the host operating system
-def render_command(arguments):
-    return " ".join(quote_command_argument(argument) for argument in arguments)
-
-
-# Returns the bare command that starts this tool on the detected install, without arguments
-def tool_command_prefix(method=None):
+# Returns the command that starts this tool on the detected install, as the argument parts before any option
+def install_command_prefix(method=None):
     if (method or detect_install_method()) == "manual":
-        return render_command([("python" if platform.system() == "Windows" else "python3"), Path(__file__).name])
-    return "psn_monitor"
+        return [("python" if platform.system() == "Windows" else "python3"), Path(__file__).name]
+    return ["psn_monitor"]
 
 
 # True when a command writes the dotenv file itself, so it refuses an --env-file that switches dotenv loading off
@@ -667,9 +662,10 @@ def active_path_arguments(arguments=()):
 
 
 # Returns a copy-pasteable command line for this tool, carrying the config and dotenv paths this run was given
-def tool_command(*arguments, method=None, include_paths=True):
-    parts = [*arguments, *(active_path_arguments(arguments) if include_paths else ())]
-    return " ".join([tool_command_prefix(method), *[render_command([part]) for part in parts]])
+def render_command(arguments=None, include_paths=True, *, method=None):
+    selected = [str(argument) for argument in (arguments or ())]
+    parts = [*install_command_prefix(method), *selected, *(active_path_arguments(selected) if include_paths else ())]
+    return " ".join(quote_command_argument(part) for part in parts)
 
 
 # Stable recovery categories. Every code here is produced somewhere in this file, and nothing else is accepted
@@ -753,7 +749,7 @@ def secret_replacement_declined_advice(subject, flag, guide_url, plural=False):
 
 # Returns the command that installs one optional library into the interpreter running this tool
 def pip_install_command(requirement):
-    return render_command([sys.executable or "python3", "-m", "pip", "install", requirement])
+    return " ".join(quote_command_argument(part) for part in (sys.executable or "python3", "-m", "pip", "install", requirement))
 
 
 # Returns advice for an optional library that is missing, naming the exact install command for this interpreter
@@ -766,7 +762,7 @@ def missing_dependency_advice(package, effect, alternative=""):
 
 # Returns install-aware guidance for replacing the NPSSO code, which differs once monitoring has started
 def npsso_recovery_fix(monitoring=False):
-    command = tool_command("<psn_user_id>", "-n", "<npsso_code>")
+    command = render_command(["<psn_user_id>", "-n", "<npsso_code>"])
     if monitoring:
         return f"Generate a fresh NPSSO code, put it in PSN_NPSSO in your dotenv file then send SIGHUP to this process. To restart instead, run: {command}"
     return f"Generate a fresh NPSSO code, then put it in PSN_NPSSO in your dotenv file or pass it directly: {command}"
@@ -805,16 +801,16 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         return make_recovery_advice("resource.exhausted", "This process ran out of file descriptors, which is a local limit and not a PlayStation Network problem", recovery_fix_with_guide(f"Raise the file descriptor limit, for example with 'ulimit -n 4096', or set LimitNOFILE= if you run under systemd, then restart the tool.{npsso_note}", DIAGNOSTICS_GUIDE_URL), False, safe_detail)
 
     if context == "config.missing":
-        return make_recovery_advice("config.missing", safe_detail or "The configuration file was not found", recovery_fix_with_guide(f"Check the --config-file path, or create one with: {tool_command('--generate-config', 'psn_monitor.conf', include_paths=False)}", CONFIG_GUIDE_URL), False, safe_detail)
+        return make_recovery_advice("config.missing", safe_detail or "The configuration file was not found", recovery_fix_with_guide(f"Check the --config-file path, or create one with: {render_command(['--generate-config', 'psn_monitor.conf'], include_paths=False)}", CONFIG_GUIDE_URL), False, safe_detail)
 
     if context == "config.invalid":
-        return make_recovery_advice("config.invalid", safe_detail or "The configuration file could not be loaded", recovery_fix_with_guide(f"Config files are read as data. Only documented SETTING = value lines with plain literal values are accepted. Correct the reported line, or write a fresh template to a different path with: {tool_command('--generate-config', '<new-file>', include_paths=False)}", CONFIG_GUIDE_URL), False, safe_detail)
+        return make_recovery_advice("config.invalid", safe_detail or "The configuration file could not be loaded", recovery_fix_with_guide(f"Config files are read as data. Only documented SETTING = value lines with plain literal values are accepted. Correct the reported line, or write a fresh template to a different path with: {render_command(['--generate-config', '<new-file>'], include_paths=False)}", CONFIG_GUIDE_URL), False, safe_detail)
 
     if context == "secret.missing":
         return make_recovery_advice("secret.missing", safe_detail or "A required credential is missing", recovery_fix_with_guide(npsso_recovery_fix(), SECRETS_GUIDE_URL), False, safe_detail)
 
     if context == "target.missing":
-        return make_recovery_advice("target.missing", safe_detail or "No PlayStation ID was provided", recovery_fix_with_guide(f"Pass the account to watch: {tool_command('<psn_user_id>')}. Use the {PSN_TARGET_FORMS}", QUICK_START_GUIDE_URL), False, safe_detail)
+        return make_recovery_advice("target.missing", safe_detail or "No PlayStation ID was provided", recovery_fix_with_guide(f"Pass the account to watch: {render_command(['<psn_user_id>'])}. Use the {PSN_TARGET_FORMS}", QUICK_START_GUIDE_URL), False, safe_detail)
 
     if context == "secret.entry":
         return make_recovery_advice("secret.entry", safe_detail or "The value was not entered, so nothing was written", recovery_fix_with_guide("Run the command again from an interactive terminal and enter the value when prompted", SECRETS_GUIDE_URL), False, safe_detail)
@@ -823,18 +819,18 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         return make_recovery_advice("file.exists", safe_detail or "The destination file already exists", recovery_fix_with_guide("Re-run with --force to replace it after a timestamped backup, or write to a different path", CONFIG_GUIDE_URL), False, safe_detail)
 
     if context == "smtp.settings":
-        return make_recovery_advice("smtp.invalid", f"The SMTP settings are incorrect: {safe_detail}" if safe_detail else "The SMTP settings are incorrect", recovery_fix_with_guide(f"Check SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SENDER_EMAIL and RECEIVER_EMAIL then run: {tool_command('--send-test-email')}", SMTP_GUIDE_URL), False, safe_detail)
+        return make_recovery_advice("smtp.invalid", f"The SMTP settings are incorrect: {safe_detail}" if safe_detail else "The SMTP settings are incorrect", recovery_fix_with_guide(f"Check SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SENDER_EMAIL and RECEIVER_EMAIL then run: {render_command(['--send-test-email'])}", SMTP_GUIDE_URL), False, safe_detail)
 
     if context == "webhook":
         if "429" in message or "rate limit" in message:
-            return make_recovery_advice("webhook.rate_limited", "The webhook service is rate limiting deliveries", recovery_fix_with_guide(f"Enable fewer webhook alert types, or wait until the service accepts deliveries again, then run: {tool_command('--send-test-webhook')}", WEBHOOK_GUIDE_URL), True, safe_detail)
+            return make_recovery_advice("webhook.rate_limited", "The webhook service is rate limiting deliveries", recovery_fix_with_guide(f"Enable fewer webhook alert types, or wait until the service accepts deliveries again, then run: {render_command(['--send-test-webhook'])}", WEBHOOK_GUIDE_URL), True, safe_detail)
         # Every configuration problem this tool reports names the setting that has to change, which the
         # text of a rejection from Discord or ntfy never does
         if "webhook_" in message or "ntfy_access_token" in message:
-            return make_recovery_advice("webhook.invalid", safe_detail or "The webhook settings cannot be used", recovery_fix_with_guide(f"Correct the reported setting, then run: {tool_command('--send-test-webhook')}", WEBHOOK_GUIDE_URL), False, safe_detail)
+            return make_recovery_advice("webhook.invalid", safe_detail or "The webhook settings cannot be used", recovery_fix_with_guide(f"Correct the reported setting, then run: {render_command(['--send-test-webhook'])}", WEBHOOK_GUIDE_URL), False, safe_detail)
         if any(term in message for term in ("could not be reached", "connection", "timed out", "timeout")):
             return make_recovery_advice("webhook.connection", "The webhook service could not be reached", recovery_fix_with_guide("Check your internet connection, DNS and firewall, then try again", WEBHOOK_GUIDE_URL), True, safe_detail)
-        return make_recovery_advice("webhook.rejected", safe_detail or "The webhook service refused the delivery", recovery_fix_with_guide(f"Confirm the webhook still exists and that the saved URL is current, then run: {tool_command('--send-test-webhook')}", WEBHOOK_GUIDE_URL), False, safe_detail)
+        return make_recovery_advice("webhook.rejected", safe_detail or "The webhook service refused the delivery", recovery_fix_with_guide(f"Confirm the webhook still exists and that the saved URL is current, then run: {render_command(['--send-test-webhook'])}", WEBHOOK_GUIDE_URL), False, safe_detail)
 
     if context == "file.unreadable":
         return make_recovery_advice("file.unreadable", safe_detail or "A file the tool needs could not be read", recovery_fix_with_guide("Check that the path exists and that this user can read it, then retry", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
@@ -859,9 +855,9 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
     if context.startswith("smtp"):
         for current in iter_exc_chain(error):
             if isinstance(current, smtplib.SMTPAuthenticationError):
-                return make_recovery_advice("smtp.authentication", "The SMTP server rejected the login", recovery_fix_with_guide(f"Check SMTP_USER and SMTP_PASSWORD. Providers such as Gmail need an app password rather than the account password. Then run: {tool_command('--send-test-email')}", SMTP_GUIDE_URL), False, safe_detail)
+                return make_recovery_advice("smtp.authentication", "The SMTP server rejected the login", recovery_fix_with_guide(f"Check SMTP_USER and SMTP_PASSWORD. Providers such as Gmail need an app password rather than the account password. Then run: {render_command(['--send-test-email'])}", SMTP_GUIDE_URL), False, safe_detail)
             if isinstance(current, smtplib.SMTPException) or isinstance(current, types["timeout"]) or isinstance(current, types["unavailable"]) or isinstance(current, (ssl.SSLError, OSError)):
-                return make_recovery_advice("smtp.connection", "The SMTP server could not be reached", recovery_fix_with_guide(f"Check SMTP_HOST, SMTP_PORT and SMTP_SSL, and that the port is not blocked. Then run: {tool_command('--send-test-email')}", SMTP_GUIDE_URL), True, safe_detail)
+                return make_recovery_advice("smtp.connection", "The SMTP server could not be reached", recovery_fix_with_guide(f"Check SMTP_HOST, SMTP_PORT and SMTP_SSL, and that the port is not blocked. Then run: {render_command(['--send-test-email'])}", SMTP_GUIDE_URL), True, safe_detail)
 
     for current in iter_exc_chain(error):
         if isinstance(current, PsnMalformedResponse):
@@ -4953,7 +4949,7 @@ def print_doctor_next_steps(psn_user_id=None, saved_target=None, doctor_exit=0):
     print("\n" + colorize("header", "Next steps") + "\n")
     label = "After Doctor passes, start monitoring:" if doctor_exit else "Start monitoring:"
     monitor_target = command_targets(psn_user_id, saved_target)[1]
-    print_labelled_command(label, tool_command(*([monitor_target] if monitor_target else [])))
+    print_labelled_command(label, render_command([*([monitor_target] if monitor_target else [])]))
     # No trailing blank line: the command printer already left one and the report must not end on two
     print(f"Guide: {QUICK_START_GUIDE_URL}")
 
@@ -5907,9 +5903,9 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     target_arguments = [] if state.persist_target or not state.target else [state.target]
     paths = ["--config-file", str(state.config_path)] + env_arguments
     print("\n" + colorize("header", "Next steps") + "\n")
-    print_labelled_command("Check setup again:", tool_command("--doctor", *target_arguments, *paths))
+    print_labelled_command("Check setup again:", render_command(["--doctor", *target_arguments, *paths]))
     start_label = "After Doctor passes, start monitoring:" if doctor_exit not in (None, 0) else "Start monitoring:"
-    print_labelled_command(start_label, tool_command(*target_arguments, *paths))
+    print_labelled_command(start_label, render_command([*target_arguments, *paths]))
     print(f"Guide: {QUICK_START_GUIDE_URL}\n")
 
     try:
@@ -5942,7 +5938,7 @@ def render_help_examples(groups, guide_url):
 
 # Returns the --help epilog, listing the commands worth knowing rather than every command there is
 def help_examples():
-    prefix = tool_command_prefix()
+    prefix = render_command(include_paths=False)
     groups = (
         ("Getting started", (
             ("Guided setup, recommended for the first run", f"{prefix} --setup"),
@@ -5966,7 +5962,7 @@ def help_examples():
 # Prints the commands a newcomer needs next, instead of an argparse usage error nobody can act on
 def print_welcome_screen(input_func=None, interactive=None, config_file=None, env_file=None):
     terminal_is_interactive = sys.stdin.isatty() if interactive is None else bool(interactive)
-    prefix = tool_command_prefix()
+    prefix = render_command(include_paths=False)
     print(f"For <psn_user_id>, use the {PSN_TARGET_FORMS}.\n")
     print_labelled_command("Quickest start (already configured):", f"{prefix} <psn_user_id>")
     # The suffix names the prompt printed below, so it only appears when that prompt does
@@ -6133,9 +6129,9 @@ def print_secret_next_steps(env_path, config_path=None, psn_user_id=None, test_s
     doctor_target, monitor_target = command_targets(psn_user_id, config_file_target(config_path or find_config_file()))
     print()
     if test_step:
-        print_labelled_command(test_step[0], tool_command(test_step[1], *paths))
-    print_labelled_command("Check setup again:", tool_command("--doctor", *((doctor_target,) if doctor_target else ()), *paths))
-    print_labelled_command("Once the checks pass, start monitoring:", tool_command(*((monitor_target,) if monitor_target else ()), *paths))
+        print_labelled_command(test_step[0], render_command([test_step[1], *paths]))
+    print_labelled_command("Check setup again:", render_command(["--doctor", *((doctor_target,) if doctor_target else ()), *paths]))
+    print_labelled_command("Once the checks pass, start monitoring:", render_command([*((monitor_target,) if monitor_target else ()), *paths]))
 
 
 # Collects one secret through a hidden prompt, checks it with the given validator and writes it only then
