@@ -5702,7 +5702,13 @@ def _wizard_collect_email_section(state, input_func=None, getpass_func=None):
         password = _wizard_ask_secret("SMTP password", getpass_func=getpass_func)
         if password:
             _wizard_queue_secret(state, "SMTP_PASSWORD", password, input_func=input_func)
-        outcome = _wizard_smtp_sign_in_accepted({name: state.config_values[name] for name in WIZARD_SMTP_CONFIG_KEYS}, password, input_func=input_func)
+        # The sign-in has to prove the value the next run resolves rather than the one just typed. A declined
+        # replacement and an exported variable both leave setup reporting success for a password nothing will use
+        effective_password, supplied_by_export = effective_secret_after_setup("SMTP_PASSWORD", state.env_path, state.secret_updates)
+        if supplied_by_export and password:
+            print("  SMTP_PASSWORD is exported in this environment and an export wins at startup, so the next run uses that value rather than the one just entered.")
+            print("  The check below signs in with the exported value. Unset it to use the one saved here.")
+        outcome = _wizard_smtp_sign_in_accepted({name: state.config_values[name] for name in WIZARD_SMTP_CONFIG_KEYS}, effective_password, input_func=input_func)
         if outcome is None:
             _wizard_disable_email(state)
             return
@@ -5775,6 +5781,34 @@ def _wizard_email_answer_missing(state, key):
     print("  Email notifications stay off until every mail server setting is answered.")
     _wizard_disable_email(state)
     return True
+
+
+# Returns the secret stored in the dotenv file, or None when the file has no assignment for it
+def _wizard_saved_secret_value(key, env_path):
+    value = None
+    path = Path(env_path)
+    if path.is_file():
+        try:
+            from dotenv import dotenv_values
+            value = dotenv_values(str(path), interpolate=False).get(key)
+        except Exception:
+            value = None
+    return value if isinstance(value, str) else None
+
+
+# Returns the secret the next run would resolve and whether an exported variable is what supplies it. Startup loads
+# the dotenv file without overriding the environment, so an export wins over a saved value and over a new one
+def effective_secret_after_setup(key, env_path, secret_updates):
+    exported = os.environ.get(key)
+    if exported:
+        return exported, True
+    if key in secret_updates:
+        return str(secret_updates[key] or ""), False
+    saved = _wizard_saved_secret_value(key, env_path)
+    if saved:
+        return saved, False
+    # Nothing private holds it, so the configuration file is what a restart would read
+    return str(globals().get(key) or ""), False
 
 
 # Reports whether a usable secret is already saved, without reading its value into the transcript
@@ -6480,6 +6514,11 @@ def run_set_secret(key, flag, subject, guide_url, guidance, prompt_text, validat
 
     print(f"* {describe_success(outcome)}")
     print(f"* Updated '{destination}', readable only by you")
+    # Startup loads the dotenv file without overriding the environment, so a saved replacement that an export
+    # shadows would never be read, and the run would keep failing with the value that was just proven good
+    if os.environ.get(key):
+        print(f"* {key} is exported in this environment and an export wins at startup, so the next run uses that value rather than the one just saved")
+        print(colorize("info", f"To fix: Unset the exported {key} to use the saved one"))
     print_secret_next_steps(destination, config_path, psn_user_id, test_step)
     return str(destination)
 
