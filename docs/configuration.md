@@ -70,7 +70,7 @@ You can get the list of all time zones supported by pytz like this:
 python3 -c "import pytz; print('\n'.join(pytz.all_timezones))"
 ```
 
-Path settings are validated before startup opens files. An invalid value names the setting to correct. Command-line path overrides still take precedence.
+Path settings are validated before startup opens files. A monitoring run stops and names the setting to correct. `--doctor`, `--setup` and the `--set-...` commands report the same setting and continue on the built-in value, so it can still be repaired. Command-line path overrides still take precedence.
 
 ## SMTP Settings
 
@@ -92,7 +92,7 @@ psn_monitor --send-test-email
 
 Hidden URL entry recognizes Discord and ntfy URLs. A bare topic name is saved as an ntfy.sh URL. Self-hosted ntfy destinations require `WEBHOOK_PROVIDER = "ntfy"`.
 
-A delivery keeps its original destination and credentials for every retry. Provider errors also redact Bearer and Basic credentials echoed without their Authorization scheme. Reloaded settings apply to the next delivery. Discord templates must produce a JSON object. Dictionary templates and JSON strings are supported, including strings with escaped format braces. Mentions remain disabled in every template.
+A delivery keeps its original destination and credentials for every retry. Provider errors also redact Bearer and Basic credentials echoed without their Authorization scheme. Reloaded settings apply to the next delivery. Discord templates must produce a JSON object. Dictionary templates and JSON strings are supported, including strings with escaped format braces. A placeholder the alert cannot fill, such as `{title[0]}` or `{0}`, is reported with the template text that failed. Mentions remain disabled in every template.
 
 Alerts can also be delivered to a **Discord** channel or an **ntfy** topic. The webhook channel is configured and switched on separately from email, so you can send game changes to Discord while email stays off, or use both.
 
