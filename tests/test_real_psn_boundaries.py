@@ -73,24 +73,23 @@ def test_monitoring_auth_failure_uses_quiet_recovery(tmp_path, monkeypatch, caps
 
 
 # Preserves future-dated history and explains recovery instead of computing an impossible age
-def test_future_status_stops_monitoring_without_overwriting_history(tmp_path, monkeypatch, capsys):
+def test_future_status_keeps_monitoring_and_restarts_its_timing(tmp_path, monkeypatch, capsys):
     path = tmp_path / "psn_ReviewUser_last_status.json"
     record = [253402214400, "offline", {"owner_note": "keep"}]
     path.write_text(json.dumps(record))
     peer = PsnHTTPPeer("state-future")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(monitor, "PSNAWP", PSNAWP)
-    monkeypatch.setattr(monitor, "PSN_NPSSO", "a" * 64)
-    monkeypatch.setattr(monitor, "LOCAL_TIMEZONE", "UTC")
+    for name, value in {"PSNAWP": PSNAWP, "PSN_NPSSO": "a" * 64, "LOCAL_TIMEZONE": "UTC", "PSN_CHECK_INTERVAL": 0.001, "PSN_ACTIVE_CHECK_INTERVAL": 0.001, "ERROR_NOTIFICATION": False}.items():
+        monkeypatch.setattr(monitor, name, value)
     monkeypatch.setattr(HTTPAdapter, "send", lambda adapter, request, **kwargs: peer.send(adapter, request, **kwargs))
     try:
-        with pytest.raises(SystemExit) as raised:
+        # Monitoring continues past the saved history and stops only where the scenario runs out of responses
+        with pytest.raises(EndScenario):
             monitor.psn_monitor_user("ReviewUser", "")
     finally:
         if hasattr(signal, "alarm"):
             signal.alarm(0)
-    assert raised.value.code == 1
-    assert json.loads(path.read_text()) == record
     output = capsys.readouterr().out
-    assert "To fix:" in output
+    assert "dated ahead of this machine's clock" in output
+    assert "Keeping the saved status OFFLINE" in output
     assert "7973" not in output

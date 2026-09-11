@@ -464,6 +464,9 @@ CLI_CONFIG_PATH = None
 # Set when --config-file none switches discovery off, so no later lookup can find a file the run rejected
 CONFIG_DISCOVERY_DISABLED = False
 
+# The settings a configuration file actually assigned, so a built-in default is never mistaken for a choice
+CONFIGURED_SETTING_NAMES = set()
+
 # to solve the issue: 'SyntaxError: f-string expression part cannot include a backslash'
 nl_ch = "\n"
 
@@ -1362,7 +1365,12 @@ def apply_webhook_cli_overrides(args, parser):
         detected = detect_webhook_provider(WEBHOOK_URL)
         if detected and detected != normalized_webhook_provider():
             WEBHOOK_PROVIDER = detected
-            print(f"* Warning: Configured webhook provider did not match the URL. Using {webhook_provider_display_name(detected)}.")
+            # The built-in default is not a choice anyone made, so detection there is the documented behaviour
+            # rather than a mismatch. Only a provider the configuration actually sets is worth warning about
+            if "WEBHOOK_PROVIDER" in CONFIGURED_SETTING_NAMES:
+                print(f"* Warning: Configured webhook provider did not match the URL. Using {webhook_provider_display_name(detected)}.")
+            else:
+                verbose_print(f"Webhook provider detected from the URL: {webhook_provider_display_name(detected)}")
 
 
 # Matches every ANSI escape sequence, used to keep colour codes out of files
@@ -1461,15 +1469,25 @@ def apply_runtime_cli_overrides(args):
         globals()["ERROR_NOTIFICATION"] = False
 
 
+# How far ahead of this machine's clock a saved timestamp may be before the tool stops timing against it
+STATE_FUTURE_TOLERANCE_SECONDS = 300
+
+
 # Rejects timestamps that cannot safely reach date conversion
 def valid_state_timestamp(value):
-    if not finite_number(value) or value < 0 or value > time.time() + 300:
+    if not finite_number(value) or value < 0:
         return False
     try:
         datetime.fromtimestamp(value)
     except (ValueError, OverflowError, OSError):
         return False
     return True
+
+
+# Reports whether a saved timestamp is far enough ahead of this machine's clock to be untrustworthy. The tool
+# wrote the file itself, so a clock moved backwards is the usual cause and is not a reason to refuse to run
+def state_timestamp_ahead(value):
+    return finite_number(value) and value > time.time() + STATE_FUTURE_TOLERANCE_SECONDS
 
 
 # Reads saved history without adopting malformed values
@@ -1481,8 +1499,18 @@ def read_status_record(path):
     if not isinstance(record[1], str) or not record[1].strip():
         raise ValueError("the saved status must be nonempty text")
     if not valid_state_timestamp(record[0]):
-        raise ValueError("the saved timestamp must be finite, nonnegative, representable and no more than five minutes in the future")
+        raise ValueError("the saved timestamp must be finite, nonnegative and representable")
     return record
+
+
+# Replaces a saved timestamp this machine's clock cannot support, so only the timing restarts and the saved
+# status itself is kept. A file this tool wrote must not be able to stop the next run over a corrected clock
+def reconcile_status_record(record, path):
+    if not record or not state_timestamp_ahead(record[0]):
+        return record
+    print(f"* Warning: The saved status in '{path}' is dated ahead of this machine's clock.")
+    print(f"  Keeping the saved status {str(record[1]).upper()} and timing it from now. Check the system clock if this repeats.")
+    return [int(time.time()), *record[1:]]
 
 
 # Accepts finite numeric values without overflowing on unusually large integers
@@ -2340,6 +2368,9 @@ class Logger(object):
 
     # Limits the terminal line across separate writes while leaving the log complete
     def _truncate_terminal(self, message):
+        # The limit is fixed once at startup, so with truncation off there is no column to keep track of
+        if not TRUNCATE_CHARS:
+            return message
         try:
             from wcwidth import wcwidth
         except ImportError:
@@ -2428,7 +2459,11 @@ def psn_client(npsso=None):
     try:
         client.authenticator.request_builder.session.verify = VERIFY_SSL
     except AttributeError:
-        raise RecoveryError(make_recovery_advice("dependency.missing", "PSNAWP cannot apply VERIFY_SSL", recovery_fix_with_guide("Upgrade PSNAWP to version 3.0.3 or newer before retrying", INSTALLATION_GUIDE_URL), False)) from None
+        # Certificate verification is already on in requests, so only a request to switch it off is lost here.
+        # Refusing whenever the attribute moves would turn any later PSNAWP refactor into a startup failure
+        if VERIFY_SSL is not True:
+            raise RecoveryError(make_recovery_advice("dependency.missing", "The installed PSNAWP cannot apply VERIFY_SSL", recovery_fix_with_guide("Upgrade PSNAWP to version 3.0.3 or newer, or set VERIFY_SSL = True to use the default certificate checks", INSTALLATION_GUIDE_URL), False)) from None
+        debug_print("TLS verification could not be applied to the PSNAWP session", outcome="skipped", reason="the installed PSNAWP has no configurable session and certificate checks are already on")
     return client
 
 
@@ -3111,8 +3146,6 @@ def send_webhook(title, description, notification_type="status", force=False, sl
             debug_print("Webhook delivery", channel=provider, host=webhook_destination_host(destination), attempt=f"{attempt_number}/{WEBHOOK_MAX_ATTEMPTS}", timeout=f"{WEBHOOK_TIMEOUT_SECONDS}s")
             if provider == "ntfy":
                 response = post_webhook_request(destination=destination, data=ntfy_message.encode("utf-8"), params={"title": ntfy_title}, headers=request_headers)
-            elif isinstance(discord_payload, str):
-                response = post_webhook_request(destination=destination, data=discord_payload, headers=request_headers)
             else:
                 response = post_webhook_request(destination=destination, json=discord_payload, headers=request_headers)
             # A rate limit and a server fault are the only answers worth repeating, and only once
@@ -3426,9 +3459,16 @@ def dotenv_reload_source(key):
 # Resolves dotenv references while keeping explicitly marked private values literal
 def resolve_dotenv_values(content, override=False, interpolate=True):
     from io import StringIO
-    from dotenv.main import with_warn_for_invalid_lines
-    from dotenv.parser import parse_stream
-    from dotenv.variables import parse_variables
+    try:
+        from dotenv.main import with_warn_for_invalid_lines
+        from dotenv.parser import parse_stream
+        from dotenv.variables import parse_variables
+    # A python-dotenv without these internals still reads the file, only without the literal marker. Writing a
+    # value that needs the marker then fails its own read-back check rather than saving something unreadable
+    except ImportError:
+        from dotenv.main import DotEnv
+        debug_print("Dotenv literal markers are unavailable in the installed python-dotenv", outcome="skipped")
+        return DotEnv(dotenv_path=None, stream=StringIO(content), override=override, interpolate=interpolate).dict()
     values = {}
     for binding in with_warn_for_invalid_lines(parse_stream(StringIO(content))):
         if binding.key is None:
@@ -3685,6 +3725,9 @@ def load_config_file(config_path, namespace=None, report_errors=True, advice_out
         # Parsed as data rather than executed, so a config file picked up from the working directory cannot run code
         parsed_values = parse_config_content(content, str(config_path), retired_settings)
         selected_namespace.update(parsed_values)
+        # Only a load that reaches the module settings records a choice, not a copy read for the wizard or a report
+        if selected_namespace is globals():
+            CONFIGURED_SETTING_NAMES.update(parsed_values)
         debug_print("Configuration applied", path=config_path, settings=len(parsed_values), names=", ".join(sorted(parsed_values)) or "none")
         if retired_settings and report_errors:
             print(f"* Note: {describe_retired_settings(retired_settings, chr(39) + str(config_path) + chr(39))}")
@@ -3883,6 +3926,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                 )
 
                 got_any_for_title = False
+                earned_for_title = []
                 for tr in it:
                     got_any_for_title = True
                     if not getattr(tr, "earned", False):
@@ -3898,12 +3942,16 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                         tname = "(hidden)" if getattr(tr, "hidden", False) else "(unknown)"
                     tname = normalize_ascii(tname)
 
-                    items.append((dt, game_name, ttype, tname))
+                    earned_for_title.append((dt, game_name, ttype, tname))
             except Exception as diag_exc:
                 if psn_lookup_outage(diag_exc):
                     raise
                 debug_print("PSN API trophies()", npcomm=npcomm, platform=plat, outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
                 continue
+
+            # Kept until the platform finished, so a failure part way through cannot leave half a title's
+            # trophies behind for the other platform to read and list a second time
+            items.extend(earned_for_title)
 
             if got_any_for_title:
                 break  # this platform works for this title
@@ -4034,7 +4082,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
 
     if os.path.isfile(psn_last_status_file):
         try:
-            last_status_read = read_status_record(psn_last_status_file)
+            last_status_read = reconcile_status_record(read_status_record(psn_last_status_file), psn_last_status_file)
             debug_print("Saved status read", path=psn_last_status_file)
             if last_status_read:
                 last_status_ts = last_status_read[0]
@@ -4119,7 +4167,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
     elif status != "offline":
         if os.path.isfile(psn_last_status_file):
             try:
-                last_status_read = read_status_record(psn_last_status_file)
+                last_status_read = reconcile_status_record(read_status_record(psn_last_status_file), psn_last_status_file)
                 if last_status_read and last_status_read[1] == status:
                     print(f"* User is {str(status).upper()} for:\t\t{calculate_timespan(now_local(), int(last_status_read[0]), show_seconds=False)}")
             except Exception as diag_exc:
@@ -4392,7 +4440,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
     if os.path.isfile(psn_last_status_file):
         try:
-            last_status_read = read_status_record(psn_last_status_file)
+            last_status_read = reconcile_status_record(read_status_record(psn_last_status_file), psn_last_status_file)
             debug_print("Saved status read", path=psn_last_status_file)
         except Exception as e:
             print_recovery_error(e, context="file.unreadable", detail=f"Cannot load the saved status from '{psn_last_status_file}': {e}. Correct the file or move it aside to start a new history")
@@ -6989,6 +7037,11 @@ def print_secret_next_steps(env_path, config_path=None, psn_user_id=None, test_s
     print_labelled_command("Once the checks pass, start monitoring:", render_command([*((monitor_target,) if monitor_target else ()), *paths]))
 
 
+# Returns one entered secret unchanged, for the values whose surrounding whitespace is significant
+def keep_entered_value(value):
+    return str(value)
+
+
 # Collects one secret through a hidden prompt, checks it with the given validator and writes it only then
 def run_set_secret(key, flag, subject, guide_url, guidance, prompt_text, validator, describe_success, env_file=None, config_path=None, psn_user_id=None, interactive=None, input_func=None, getpass_func=None, normalize=None, test_step=None):
     global DEBUG_MODE
@@ -7022,7 +7075,9 @@ def run_set_secret(key, flag, subject, guide_url, guidance, prompt_text, validat
         DEBUG_MODE = previous_debug_mode
 
     print(f"* Checking the entered {subject} before changing the dotenv file ...")
-    stored = str(entered) if key == "SMTP_PASSWORD" else (str(entered).strip() if normalize is None else normalize(entered))
+    # What is stored can differ from what was typed, so a shorthand the validator accepted is saved in full.
+    # The value checked with the service is the value written, never a second reading of the raw input
+    stored = str(entered).strip() if normalize is None else normalize(entered)
     outcome = validator(stored)
     try:
         update_dotenv_file(destination, {key: stored})
@@ -7078,7 +7133,8 @@ def run_set_smtp_password(env_file=None, config_path=None, psn_user_id=None, int
     if missing:
         names = join_setting_names(missing, "and")
         raise RecoveryError(make_recovery_advice("smtp.invalid", f"The mail server settings are incomplete, {names} {'is' if len(missing) == 1 else 'are'} not set", recovery_fix_with_guide(f"Set {names} in the config file, or run --setup, then run --set-smtp-password again", SMTP_GUIDE_URL), False))
-    return run_set_secret("SMTP_PASSWORD", "--set-smtp-password", "SMTP password", SMTP_GUIDE_URL, f"* The password is checked by signing in to {SMTP_HOST} as {SMTP_USER}. Nothing is sent", "Enter the SMTP password (input hidden): ", smtp_sign_in, lambda user: f"The mail server accepted the password for {user}", env_file, config_path, psn_user_id, interactive, input_func, getpass_func)
+    # Kept exactly as typed, because surrounding whitespace can be part of a password the mail server accepts
+    return run_set_secret("SMTP_PASSWORD", "--set-smtp-password", "SMTP password", SMTP_GUIDE_URL, f"* The password is checked by signing in to {SMTP_HOST} as {SMTP_USER}. Nothing is sent", "Enter the SMTP password (input hidden): ", smtp_sign_in, lambda user: f"The mail server accepted the password for {user}", env_file, config_path, psn_user_id, interactive, input_func, getpass_func, keep_entered_value)
 
 
 # Resolves command-line actions and initializes the selected runtime mode

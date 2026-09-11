@@ -686,11 +686,33 @@ def test_the_webhook_error_alert_can_be_switched_off(pm_module, monkeypatch, mon
 # Verifies a recognised URL corrects a provider the settings got wrong, and says so once
 def test_a_recognised_url_corrects_the_configured_provider(pm_module, monkeypatch, monitor_calls, capsys):
     monkeypatch.setattr(pm_module, "WEBHOOK_PROVIDER", "ntfy")
+    monkeypatch.setattr(pm_module, "CONFIGURED_SETTING_NAMES", {"WEBHOOK_PROVIDER"})
 
     assert run_main(pm_module, monkeypatch, [USER_ID, "--webhook-url", WEBHOOK_URL]) == 0
 
     assert pm_module.WEBHOOK_PROVIDER == "discord"
     assert "Configured webhook provider did not match the URL" in capsys.readouterr().out
+
+
+# Verifies the documented ntfy setup is not reported as a mismatch, because the provider is still the default
+def test_the_default_provider_follows_the_url_without_a_warning(pm_module, monkeypatch, monitor_calls, capsys):
+    monkeypatch.setattr(pm_module, "WEBHOOK_PROVIDER", "discord")
+    monkeypatch.setattr(pm_module, "CONFIGURED_SETTING_NAMES", set())
+
+    assert run_main(pm_module, monkeypatch, [USER_ID, "--webhook-url", "https://ntfy.sh/private-topic"]) == 0
+
+    assert pm_module.WEBHOOK_PROVIDER == "ntfy"
+    assert "did not match the URL" not in capsys.readouterr().out
+
+
+# Verifies the same detection is still reported to anyone who asked for the operational detail
+def test_verbose_mode_reports_the_detected_provider(pm_module, monkeypatch, monitor_calls, capsys):
+    monkeypatch.setattr(pm_module, "WEBHOOK_PROVIDER", "discord")
+    monkeypatch.setattr(pm_module, "CONFIGURED_SETTING_NAMES", set())
+
+    assert run_main(pm_module, monkeypatch, [USER_ID, "--webhook-url", "https://ntfy.sh/private-topic", "--verbose"]) == 0
+
+    assert "Webhook provider detected from the URL: ntfy" in capsys.readouterr().out
 
 
 # Verifies an explicitly chosen provider is left alone, even when the URL points somewhere else

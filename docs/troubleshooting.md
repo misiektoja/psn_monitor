@@ -83,8 +83,8 @@ Timing values must be finite and within the documented range. Normal startup che
 
 If a saved status file has an invalid structure, monitoring stops before replacing it. Correct the named file or move it aside to start a fresh baseline. Keep a copy if you need the old history. Older valid records and extra trailing metadata remain accepted.
 
+A saved status dated more than five minutes ahead of the machine clock is a separate case, because the tool wrote that file itself and a clock moved backwards is the usual reason. Monitoring warns, keeps the saved status and times it from the moment it starts, so the run continues. Check the system clock if the warning repeats.
+
 Info lookups stop after a rate limit, authentication failure or service outage instead of continuing to other trophy or recent-game requests. Correct the reported problem or wait before running the command again.
 
 Malformed path settings and color-theme values are reported by Doctor with the setting name. Invalid color values are ignored while rendering help so you can still find the configuration commands.
-
-Saved status timestamps more than five minutes in the future are invalid. Check the system clock then correct the named history file or move it aside to start fresh. Monitoring preserves the invalid file instead of replacing it.

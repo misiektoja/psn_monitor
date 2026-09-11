@@ -94,6 +94,8 @@ psn_monitor --send-test-email
 
 Hidden URL entry recognizes Discord and ntfy URLs. A bare topic name is saved as an ntfy.sh URL. Self-hosted ntfy destinations require `WEBHOOK_PROVIDER = "ntfy"`.
 
+The service is detected from the URL at startup. While `WEBHOOK_PROVIDER` is left at its default, that detection is silent and `--verbose` reports it. A warning appears only when your configuration file sets `WEBHOOK_PROVIDER` to a service the URL disagrees with.
+
 A delivery keeps its original destination and credentials for every retry. Provider errors also redact Bearer and Basic credentials echoed without their Authorization scheme. Reloaded settings apply to the next delivery. Discord templates must produce a JSON object. Dictionary templates and JSON strings are supported, including strings with escaped format braces. A placeholder the alert cannot fill, such as `{title[0]}` or `{0}`, is reported with the template text that failed. Mentions remain disabled in every template.
 
 Alerts can also be delivered to a **Discord** channel or an **ntfy** topic. The webhook channel is configured and switched on separately from email, so you can send game changes to Discord while email stays off, or use both.

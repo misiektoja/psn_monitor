@@ -304,3 +304,37 @@ def test_rejected_npsso_stops_the_report(pm_module, monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "did not accept the NPSSO code" in output
     assert "Generate a fresh NPSSO code" in output
+
+
+# Verifies a platform iterator that fails after yielding cannot leave half a title for the fallback to repeat
+def test_a_failed_platform_iterator_does_not_duplicate_trophies(pm_module, capsys):
+    import datetime
+    from types import SimpleNamespace
+
+    earned_at = datetime.datetime(2026, 9, 13, 10, 0, 0, tzinfo=datetime.timezone.utc)
+
+    # Builds one earned trophy in the shape the report reads
+    def trophy(name):
+        return SimpleNamespace(earned=True, earned_date_time=earned_at, trophy_name=name, trophy_type="BRONZE", hidden=False)
+
+    # Yields one trophy then fails, the way a paged lookup fails after its first page
+    def failing_pages():
+        yield trophy("Shared Trophy")
+        raise RuntimeError("HTTP 400 while fetching the next trophy page")
+
+    # Serves the same title on the fallback platform, which the first failure makes the report try
+    def working_pages():
+        yield trophy("Shared Trophy")
+        yield trophy("Second Trophy")
+
+    title = SimpleNamespace(np_communication_id="NPWR00001_00", title_platform="PS5", trophy_title_name="Synthetic Game")
+    user = SimpleNamespace(
+        trophy_titles=lambda limit=None: [title],
+        trophies=lambda np_communication_id=None, platform=None, **kwargs: failing_pages() if "PS5" in str(platform).upper() else working_pages(),
+    )
+
+    pm_module.print_last_earned_trophies(user, max_items=10, title_limit=5)
+
+    output = capsys.readouterr().out
+    assert output.count("Shared Trophy") == 1
+    assert "Second Trophy" in output

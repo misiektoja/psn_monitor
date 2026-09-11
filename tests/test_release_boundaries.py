@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import time
 
 from smtplib import SMTP as RealSMTP
 
@@ -198,7 +199,7 @@ def test_private_destination_rejects_an_explicit_provider_mismatch(tmp_path, mon
 
 
 # Rejects impossible history while accepting legacy records with trailing metadata
-@pytest.mark.parametrize("timestamp", ["yesterday", -1, {"seconds": 1}, 253402214400])
+@pytest.mark.parametrize("timestamp", ["yesterday", -1, {"seconds": 1}])
 def test_status_reader_preserves_invalid_timestamps(tmp_path, timestamp):
     path = tmp_path / "status.json"
     path.write_text(json.dumps([timestamp, "offline"]))
@@ -206,6 +207,34 @@ def test_status_reader_preserves_invalid_timestamps(tmp_path, timestamp):
     with pytest.raises(ValueError, match="timestamp"):
         monitor.read_status_record(str(path))
     assert path.read_bytes() == original
+
+
+# Reads a record this tool wrote whose timestamp the clock cannot support, rather than refusing the whole file
+def test_status_reader_accepts_a_timestamp_the_clock_cannot_support(tmp_path):
+    path = tmp_path / "status.json"
+    record = [253402214400, "offline"]
+    path.write_text(json.dumps(record))
+    assert monitor.read_status_record(str(path)) == record
+    assert monitor.state_timestamp_ahead(253402214400) is True
+    assert monitor.state_timestamp_ahead(time.time()) is False
+
+
+# Restarts the timing of a record dated ahead of the clock while keeping the saved status and its extra fields
+def test_reconcile_keeps_the_saved_status_and_restarts_its_timing(capsys):
+    record = [253402214400, "offline", {"owner_note": "keep"}]
+    reconciled = monitor.reconcile_status_record(record, "status.json")
+    output = capsys.readouterr().out
+    assert reconciled[1:] == record[1:]
+    assert abs(reconciled[0] - time.time()) < 5
+    assert "dated ahead of this machine's clock" in output
+    assert "OFFLINE" in output
+
+
+# Leaves an ordinary record untouched and silent, so only a clock problem produces the warning
+def test_reconcile_leaves_a_current_record_alone(capsys):
+    record = [1600000000, "offline"]
+    assert monitor.reconcile_status_record(record, "status.json") == record
+    assert capsys.readouterr().out == ""
 
 
 # Retains valid hand-edited trailing fields from older status files
@@ -263,3 +292,31 @@ def test_a_short_retained_secret_never_replaces_ordinary_words(monkeypatch):
         return monitor.sanitize_error_text(text)
 
     assert during_delivery() == text
+
+
+# Reads a dotenv file through the public reader when the installed python-dotenv lacks the parser internals
+def test_dotenv_values_fall_back_to_the_public_reader(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    # Hides only the private parser modules, the way a later python-dotenv release could
+    def blocked(name, *args, **kwargs):
+        if name in ("dotenv.parser", "dotenv.variables"):
+            raise ImportError(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", blocked)
+
+    assert monitor.resolve_dotenv_values('SMTP_PASSWORD="plain-value"\n') == {"SMTP_PASSWORD": "plain-value"}
+
+
+# Verifies a configuration read for the wizard or a report is not mistaken for the settings this run uses
+def test_only_a_load_into_the_module_records_a_configured_setting(tmp_path, monkeypatch):
+    path = tmp_path / "scoped.conf"
+    path.write_text('WEBHOOK_PROVIDER = "ntfy"\n')
+    monkeypatch.setattr(monitor, "CONFIGURED_SETTING_NAMES", set())
+
+    monitor.load_config_file(str(path), namespace={}, report_errors=False)
+
+    assert "WEBHOOK_PROVIDER" not in monitor.CONFIGURED_SETTING_NAMES

@@ -100,7 +100,7 @@ The tool saves the timestamp and last status after every change, so the last sta
 psn_monitor <psn_user_id> --status-file ~/psn/last_status.json
 ```
 
-The status file is written through a temporary file in the same directory, so an interrupted run cannot leave a half-written file behind.
+The status file is written through a temporary file in the same directory, so an interrupted run cannot leave a half-written file behind. A saved timestamp more than five minutes ahead of the machine clock is not used as history: the run warns, keeps the saved status and starts timing it again.
 
 ## Startup Summary
 
