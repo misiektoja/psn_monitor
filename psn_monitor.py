@@ -453,6 +453,7 @@ class ErrorAlertState:
         setattr(self, f"{channel}_retry_at", now + delay)
         print(f"* The {channel} alert is on hold for {display_time(delay)} after {failures} {'attempt' if failures == 1 else 'attempts'}, then tried again")
 
+
 stdout_bck = None
 csvfieldnames = ['Date', 'Status', 'Game name']
 
