@@ -2720,6 +2720,8 @@ def validate_webhook_url(url=None):
         return False
     try:
         parsed = urlsplit(selected_url.strip())
+        if parsed.port is not None and not 1 <= parsed.port <= 65535:
+            return False
     except ValueError:
         return False
     return parsed.scheme.casefold() == "https" and bool(parsed.hostname) and not parsed.username and not parsed.password and bool(parsed.path.strip("/"))
@@ -3043,7 +3045,12 @@ def _retain_webhook_secrets(deliver):
         values = [settings.get(name) for name in SECRET_KEYS]
         headers = settings.get("WEBHOOK_HEADERS")
         if isinstance(headers, dict):
-            values.extend(value for name, value in headers.items() if isinstance(name, str) and name.casefold() == "authorization")
+            for name, value in headers.items():
+                if isinstance(name, str) and name.casefold() == "authorization" and isinstance(value, str):
+                    values.append(value)
+                    parts = value.split(None, 1)
+                    if len(parts) == 2 and parts[0].casefold() in ("bearer", "basic"):
+                        values.append(parts[1])
         # The same minimum length every other redaction path applies, so a short secret cannot blank out ordinary words
         secrets = tuple(value for value in values if isinstance(value, str) and len(value) >= MIN_REDACTABLE_SECRET_LENGTH and not value.startswith("your_"))
         token = _DELIVERY_SECRET_VALUES.set(_DELIVERY_SECRET_VALUES.get() + secrets)
@@ -3407,10 +3414,32 @@ def dotenv_reload_source(key):
     return DOTENV_RELOAD_STATE.get("base_sources", {}).get(key, "environment" if key in DOTENV_RELOAD_STATE.get("exported", ()) else SECRET_SOURCE_ORDER[0])
 
 
+# Resolves dotenv references while keeping explicitly marked private values literal
+def resolve_dotenv_values(content, override=False, interpolate=True):
+    from io import StringIO
+    from dotenv.main import with_warn_for_invalid_lines
+    from dotenv.parser import parse_stream
+    from dotenv.variables import parse_variables
+    values = {}
+    for binding in with_warn_for_invalid_lines(parse_stream(StringIO(content))):
+        if binding.key is None:
+            continue
+        value = binding.value
+        literal = binding.key in SECRET_KEYS and binding.original.string.rstrip().endswith("# monitor:literal")
+        if value is not None and interpolate and not literal:
+            environment = dict(os.environ)
+            if override:
+                environment.update(values)
+            else:
+                environment = dict(values, **environment)
+            value = "".join(atom.resolve(environment) for atom in parse_variables(value))
+        values[binding.key] = value
+    return values
+
+
 # Loads dotenv values and reconciles removed file-owned secrets without changing startup precedence
 def load_managed_dotenv(path, override=False, interpolate=True, protected_keys=()):
     from io import StringIO
-    from dotenv.main import DotEnv
     from dotenv.parser import parse_stream
     if not override and not Path(path).is_file():
         return False
@@ -3419,7 +3448,7 @@ def load_managed_dotenv(path, override=False, interpolate=True, protected_keys=(
         malformed = next((binding for binding in parse_stream(StringIO(content)) if binding.error), None)
         if malformed is not None:
             raise ValueError(f"Dotenv syntax error near line {malformed.original.line}. Correct the assignment and reload again")
-    values = DotEnv(dotenv_path=None, stream=StringIO(content), override=override, interpolate=interpolate).dict()
+    values = resolve_dotenv_values(content, override=override, interpolate=interpolate)
     if not override or not DOTENV_RELOAD_STATE:
         DOTENV_RELOAD_STATE.clear()
         DOTENV_RELOAD_STATE.update(base={key: os.environ.get(key, globals().get(key, "")) for key in SECRET_KEYS}, exported=set(os.environ).intersection(SECRET_KEYS), managed=set())
@@ -5004,13 +5033,28 @@ def runtime_configuration_errors():
     return errors
 
 
+# Validates effective path settings before startup expands or opens them
+def prepare_configured_paths(args):
+    overrides = {'DOTENV_FILE': 'env_file', 'CSV_FILE': 'csv_file', 'PSN_STATUS_FILE': 'status_file'}
+    settings = globals().copy()
+    for name, argument in overrides.items():
+        value = getattr(args, argument, None)
+        if value:
+            settings[name] = value
+    errors = configuration_shape_errors(settings)
+    if errors:
+        print_recovery_advice(make_recovery_advice("config.invalid", "Invalid settings: " + ". ".join(errors), recovery_fix_with_guide("Correct the named settings in the configuration file or command line", CONFIG_GUIDE_URL), False))
+        raise SystemExit(1)
+
+
 # Names malformed path and color settings before diagnostics consume their values
-def configuration_shape_errors():
+def configuration_shape_errors(settings=None):
+    settings = globals() if settings is None else settings
     errors = []
     for name in ('PSN_LOGFILE', 'PSN_STATUS_FILE', 'CSV_FILE', 'DOTENV_FILE'):
-        if name in globals() and not isinstance(globals()[name], (str, os.PathLike)):
+        if name in settings and not isinstance(settings[name], (str, os.PathLike)):
             errors.append(f"{name} must be a path string")
-    theme = globals().get("COLOR_THEME", {})
+    theme = settings.get("COLOR_THEME", {})
     if not isinstance(theme, dict):
         errors.append("COLOR_THEME must be a dictionary of style strings")
     else:
@@ -6136,10 +6180,9 @@ def _wizard_email_answer_missing(state, key):
 
 # Reads saved secrets with the same interpolation rules as normal startup
 def _wizard_private_values(env_path):
-    from dotenv.main import DotEnv
     if not env_path or not Path(env_path).exists():
         return {}
-    return DotEnv(str(env_path), interpolate=True, override=False).dict()
+    return resolve_dotenv_values(Path(env_path).read_text(encoding="utf-8"), override=False)
 
 
 # Keeps actual exports separate from values copied into the environment by dotenv
@@ -6714,7 +6757,8 @@ def match_dotenv_assignment(line, key):
 def render_dotenv_assignment(key, value, prefix=""):
     # A line break inside a value would split the assignment, so it is escaped rather than written through
     escaped = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\r", "\\r").replace("\n", "\\n")
-    return f'{prefix}{key}="{escaped}"'
+    suffix = ' # monitor:literal' if '${' in str(value) else ''
+    return f'{prefix}{key}="{escaped}"{suffix}'
 
 
 # Reports whether one dotenv file already assigns the requested key
@@ -6775,7 +6819,7 @@ def update_dotenv_file(destination, updates):
         if key not in replaced and value:
             content += f"{render_dotenv_assignment(key, value)}\n"
     # Checked before it replaces the file, so a rewrite can never publish a secret the next run cannot read back
-    rewritten = {binding.key: binding.value for binding in _dotenv_bindings(content) if binding.key is not None}
+    rewritten = resolve_dotenv_values(content, override=True)
     if any(rewritten.get(key, "") != value for key, value in updates.items()):
         raise ValueError(f"Updating '{{target}}' would not store the requested values")
     # Written through a temporary file, so an interrupted write cannot leave the file without its secrets.
@@ -7359,6 +7403,8 @@ def main():
     # Evaluated after the config file is read, so a saved PSN ID starts monitoring instead of being welcomed
     if len(sys.argv) == 1 and not args.psn_user_id:
         sys.exit(print_welcome_screen(config_file=args.config_file, env_file=args.env_file))
+
+    prepare_configured_paths(args)
 
     if args.env_file:
         DOTENV_FILE = os.path.expanduser(args.env_file)

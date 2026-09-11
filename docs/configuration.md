@@ -70,9 +70,13 @@ You can get the list of all time zones supported by pytz like this:
 python3 -c "import pytz; print('\n'.join(pytz.all_timezones))"
 ```
 
+Path settings are validated before startup opens files. An invalid value names the setting to correct. Command-line path overrides still take precedence.
+
 ## SMTP Settings
 
 Private password entry preserves leading and trailing spaces. The exact value checked with the mail server is saved.
+
+Private entry preserves literal `${...}` text in saved passwords and other secrets. Assignments that need this protection carry a `# monitor:literal` comment. Keep that comment when editing the value. Unmarked assignments retain their existing interpolation behavior. The marker is read by this monitor. Other dotenv readers or shells may still interpolate the value.
 
 If you want to use email notifications functionality, configure SMTP settings in the `psn_monitor.conf` file: `SMTP_HOST`, `SMTP_PORT`, `SMTP_SSL`, `SMTP_USER`, `SENDER_EMAIL` and `RECEIVER_EMAIL`.
 
@@ -88,7 +92,7 @@ psn_monitor --send-test-email
 
 Hidden URL entry recognizes Discord and ntfy URLs. A bare topic name is saved as an ntfy.sh URL. Self-hosted ntfy destinations require `WEBHOOK_PROVIDER = "ntfy"`.
 
-A delivery keeps its original destination and credentials for every retry. Reloaded settings apply to the next delivery. Discord templates must produce a JSON object. Dictionary templates and JSON strings are supported, including strings with escaped format braces. Mentions remain disabled in every template.
+A delivery keeps its original destination and credentials for every retry. Provider errors also redact Bearer and Basic credentials echoed without their Authorization scheme. Reloaded settings apply to the next delivery. Discord templates must produce a JSON object. Dictionary templates and JSON strings are supported, including strings with escaped format braces. Mentions remain disabled in every template.
 
 Alerts can also be delivered to a **Discord** channel or an **ntfy** topic. The webhook channel is configured and switched on separately from email, so you can send game changes to Discord while email stays off, or use both.
 
