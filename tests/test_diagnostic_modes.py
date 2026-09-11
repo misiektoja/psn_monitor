@@ -337,3 +337,48 @@ def test_a_redirected_stdout_is_never_cleared(pm_module, monkeypatch):
     pm_module.clear_screen(True)
 
     assert commands == []
+
+
+# A secret no layer supplied takes no row, so the trace lists what is configured rather than what is not
+def test_the_trace_omits_every_secret_no_layer_supplied(pm_module, monkeypatch, monitor_calls, capsys):
+    run_main(pm_module, monkeypatch, ["--debug", "-n", "aVeryLongNpssoValue1234567890", USER_ID])
+
+    output = capsys.readouterr().out
+    assert "Secret resolution: name=PSN_NPSSO, source=command line" in output
+    assert "name=NTFY_ACCESS_TOKEN" not in output
+    assert "source=nowhere" not in output
+    assert "No private settings were resolved" not in output
+
+
+# A run where no layer supplied anything says so once, rather than printing a row per unset key
+def test_a_run_with_no_secrets_says_so_once(pm_module, monkeypatch, monitor_calls, capsys):
+    monkeypatch.setattr(pm_module, "SECRET_SOURCES", {})
+    for name in pm_module.SECRET_KEYS:
+        monkeypatch.setattr(pm_module, name, "", raising=False)
+        monkeypatch.delenv(name, raising=False)
+
+    run_main(pm_module, monkeypatch, ["--debug", "--config-file", "none", "--env-file", "none", USER_ID])
+
+    output = capsys.readouterr().out
+    assert output.count("No private settings were resolved from config, dotenv, environment or the command line") == 1
+    assert "Secret resolution: " not in output
+
+
+# The trace runs after the last layer, so one secret cannot be reported twice with opposite answers
+def test_the_trace_reports_a_command_line_secret_exactly_once(pm_module, monkeypatch, monitor_calls, capsys):
+    run_main(pm_module, monkeypatch, ["--debug", "-n", "aVeryLongNpssoValue1234567890", USER_ID])
+
+    traces = [line for line in capsys.readouterr().out.splitlines() if "Secret resolution: name=PSN_NPSSO" in line]
+    assert len(traces) == 1
+
+
+# A placeholder is not a value, so it earns neither a source nor a row, which is what the doctor already reports
+def test_a_placeholder_earns_no_source(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "SECRET_SOURCES", {})
+    monkeypatch.setattr(pm_module, "PSN_NPSSO", "your_psn_npsso_code", raising=False)
+
+    pm_module.record_secret_source("PSN_NPSSO", "dotenv file")
+
+    assert pm_module.SECRET_SOURCES == {}
+    with pytest.raises(ValueError, match="Unsupported secret source"):
+        pm_module.record_secret_source("PSN_NPSSO", "a layer that does not exist", "a real value")

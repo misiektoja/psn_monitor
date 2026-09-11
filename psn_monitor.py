@@ -387,6 +387,9 @@ SECRET_KEYS = ("PSN_NPSSO", "SMTP_PASSWORD", "WEBHOOK_URL", "NTFY_ACCESS_TOKEN")
 # The winning source cannot be reconstructed afterwards, because the same key may sit in several places
 SECRET_SOURCES = {}
 
+# The closed set of layers a secret can come from, so a typo raises instead of inventing a source
+SECRET_SOURCE_ORDER = ("configuration file", "dotenv file", "environment", "command line")
+
 # Secret keys that were already exported when the tool started, so a dotenv file cannot be credited for them
 EXPORTED_SECRET_KEYS = frozenset()
 
@@ -1131,6 +1134,17 @@ def secret_fingerprint(value, key=None):
 def secret_fields(value, key=None): return {"value": "set" if secret_is_set(value) else "not set", "chars": len(str(value).strip()) if key in FIXED_LENGTH_SECRET_KEYS and secret_is_set(value) else None}
 
 
+# Records where one secret resolved from, so a later layer replaces the earlier answer instead of adding to it
+def record_secret_source(name, source, value=None):
+    if source not in SECRET_SOURCE_ORDER:
+        raise ValueError(f"Unsupported secret source: {source}")
+    # A placeholder is not a value, so it earns neither a source nor a row
+    if not secret_is_set(globals().get(name) if value is None else value):
+        SECRET_SOURCES.pop(name, None)
+        return
+    SECRET_SOURCES[name] = source
+
+
 # Renders one diagnostic line as an operation followed by comma-separated key=value fields, dropping unset ones
 def format_diagnostic_line(operation, fields):
     rendered = ", ".join(f"{key}={value}" for key, value in fields.items() if value is not None)
@@ -1183,7 +1197,7 @@ def apply_environment_secrets():
         value = os.getenv(secret)
         if value is not None:
             globals()[secret] = value
-            SECRET_SOURCES[secret] = "environment" if secret in EXPORTED_SECRET_KEYS else "dotenv file"
+            record_secret_source(secret, "environment" if secret in EXPORTED_SECRET_KEYS else "dotenv file")
 
 
 # Resolves LOCAL_TIMEZONE and the state doctor reports it with, returning advice when no zone could be determined
@@ -1224,7 +1238,7 @@ def apply_webhook_cli_overrides(args, parser):
             parser.error("--webhook-url needs a complete HTTPS link without embedded credentials")
         WEBHOOK_URL = str(args.webhook_url).strip()
         WEBHOOK_ENABLED = True
-        SECRET_SOURCES["WEBHOOK_URL"] = "command line"
+        record_secret_source("WEBHOOK_URL", "command line", WEBHOOK_URL)
     if args.webhook_enabled is not None:
         WEBHOOK_ENABLED = args.webhook_enabled
     # Naming one alert also switches the channel on, so a single flag is enough to try it out
@@ -2955,7 +2969,7 @@ def reload_secrets_signal_handler(sig, frame):
             val = os.getenv(secret)
             if val is not None and val != old_val:
                 globals()[secret] = val
-                SECRET_SOURCES[secret] = "dotenv file"
+                record_secret_source(secret, "dotenv file")
                 if secret == "WEBHOOK_URL":
                     webhook_url_changed = True
                 debug_print("Secret reload", name=secret, path=env_path, **secret_fields(val, secret))
@@ -5768,7 +5782,7 @@ def _wizard_apply_saved_values(state, env_path=None):
     for key, value in state.secret_updates.items():
         if key not in EXPORTED_SECRET_KEYS and not secret_is_set(globals().get(key)):
             globals()[key] = value
-            SECRET_SOURCES[key] = "dotenv file"
+            record_secret_source(key, "dotenv file")
     return resolve_local_timezone()
 
 
@@ -6611,7 +6625,7 @@ def main():
     SECRET_SOURCES.clear()
     for secret in SECRET_KEYS:
         if secret_is_set(globals().get(secret)):
-            SECRET_SOURCES[secret] = "configuration file"
+            record_secret_source(secret, "configuration file")
 
     if DOTENV_FILE and DOTENV_FILE.lower() == 'none':
         env_path = None
@@ -6644,9 +6658,6 @@ def main():
 
     apply_webhook_cli_overrides(args, parser)
 
-    for secret in SECRET_KEYS:
-        debug_print("Secret resolution", name=secret, source=SECRET_SOURCES.get(secret, "nowhere"), **secret_fields(globals().get(secret), secret))
-
     timezone_advice = resolve_local_timezone()
 
     if timezone_advice is not None:
@@ -6655,6 +6666,18 @@ def main():
             sys.exit(1)
         # The report still stamps timestamps, so it falls back rather than stopping before the diagnosis
         LOCAL_TIMEZONE = "UTC"
+
+    # The command-line credential has to be in effect before the report checks it and before the trace reports it
+    if args.npsso_key:
+        PSN_NPSSO = args.npsso_key
+        record_secret_source("PSN_NPSSO", "command line", PSN_NPSSO)
+
+    # Traced here rather than at each layer, so the line reports the value that survived every later override
+    resolved_secrets = {secret: SECRET_SOURCES[secret] for secret in SECRET_KEYS if secret in SECRET_SOURCES}
+    for secret, source in resolved_secrets.items():
+        debug_print("Secret resolution", name=secret, source=source, **secret_fields(globals().get(secret), secret))
+    if not resolved_secrets:
+        debug_print("No private settings were resolved from config, dotenv, environment or the command line")
 
     if doctor_mode:
         doctor_exit = run_doctor(args.psn_user_id, cfg_path, env_path, config_advice, timezone_advice)
@@ -6720,11 +6743,6 @@ def main():
     if not args.psn_user_id:
         print_recovery_error(context="target.missing", detail="PSN_USER_ID needs to be defined")
         sys.exit(1)
-
-    if args.npsso_key:
-        PSN_NPSSO = args.npsso_key
-        SECRET_SOURCES["PSN_NPSSO"] = "command line"
-        debug_print("Secret resolution", name="PSN_NPSSO", source="command line", **secret_fields(PSN_NPSSO, "PSN_NPSSO"))
 
     if not PSN_NPSSO or PSN_NPSSO == "your_psn_npsso_code":
         print_recovery_error(context="secret.missing", detail="PSN_NPSSO (-n / --npsso_key) value is empty or incorrect")
