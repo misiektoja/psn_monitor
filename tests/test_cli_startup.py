@@ -141,6 +141,18 @@ def test_exported_secret_overrides_the_dotenv_file(pm_module, monkeypatch, monit
     assert pm_module.PSN_NPSSO == "npsso-from-the-environment"
 
 
+# Verifies an empty export is treated as absent, so a shell-profile leftover does not blank the dotenv value
+def test_an_empty_export_does_not_shadow_the_dotenv_file(pm_module, monkeypatch, monitor_calls, isolated_working_directory):
+    pytest.importorskip("dotenv")
+    env_file = isolated_working_directory / "secrets.env"
+    env_file.write_text("PSN_NPSSO=npsso-from-dotenv\n", encoding="utf-8")
+    monkeypatch.setenv("PSN_NPSSO", "")
+
+    assert run_main(pm_module, monkeypatch, ["--env-file", str(env_file), USER_ID]) == 0
+
+    assert pm_module.PSN_NPSSO == "npsso-from-dotenv"
+
+
 # Verifies an exported secret applies with no dotenv file at all, since it is a documented alternative to one
 def test_exported_secret_applies_without_any_dotenv_file(pm_module, monkeypatch, monitor_calls, isolated_working_directory):
     monkeypatch.setattr(pm_module, "PSN_NPSSO", "your_psn_npsso_code")

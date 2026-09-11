@@ -382,6 +382,23 @@ def test_the_outage_reminder_follows_the_clock_not_the_check_count(pm_module, fa
     assert outcomes.count("degraded") == 1
 
 
+# Verifies a category change mid-outage keeps the outage start, so the alert delay and the reminder still elapse
+def test_an_outage_that_changes_category_keeps_its_start(pm_module, fake_clock):
+    reporter = pm_module.OutageReporter()
+    first = pm_module.classify_recovery_error(requests.exceptions.ConnectionError("connection reset by peer"), context="monitor")
+    second = pm_module.classify_recovery_error(OSError(24, "Too many open files"))
+    assert first.code != second.code
+    started = int(fake_clock.time())
+
+    assert reporter.failed(first, 900) == "full"
+    for index in range(60):
+        fake_clock.advance(15)
+        reporter.failed(second if index % 2 else first, 900)
+
+    assert reporter.since == started
+    assert reporter.recovered() == 900
+
+
 # Verifies a long outage announces the session rebuild once rather than on every cooldown
 def test_the_session_rebuild_is_announced_once_per_outage(pm_module, psn_session, fake_clock, monkeypatch, capsys):
     monkeypatch.setattr(pm_module, "LIVENESS_REMINDER_SECONDS", 43200)

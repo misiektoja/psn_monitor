@@ -146,6 +146,13 @@ def test_other_os_errors_are_not_treated_as_exhaustion(pm_module):
     assert pm_module.is_too_many_open_files(OSError(2, "No such file or directory")) is False
 
 
+# Verifies the descriptor limit is matched as a whole errno, so errno 240 or 241 in a message is not mistaken for it
+def test_a_neighbouring_errno_is_not_a_file_descriptor_limit(pm_module):
+    assert pm_module.is_too_many_open_files(RuntimeError("[Errno 24] Too many open files")) is True
+    assert pm_module.is_too_many_open_files(RuntimeError("[Errno 240] something else")) is False
+    assert pm_module.is_too_many_open_files(RuntimeError("[Errno 241] something else")) is False
+
+
 # Verifies descriptor exhaustion outranks an auth message, because retrying auth cannot fix a local limit
 def test_exhaustion_outranks_an_auth_message(pm_module):
     root = OSError(24, "Too many open files")
