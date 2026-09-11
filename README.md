@@ -12,9 +12,12 @@
 
 Powerful tool for real-time monitoring of **Sony PlayStation (PSN) players' activities**.
 
+<p align="center">
+   <img src="https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/assets/psn_monitor.png" alt="psn_monitor_screenshot" width="90%"/>
+</p>
+
 **Full documentation: [misiektoja.github.io/psn_monitor](https://misiektoja.github.io/psn_monitor/)**
 
-<a id="-quick-install"></a>
 <a id="-quick-install-run"></a>
 ### 🚀 Quick Install & Run
 
@@ -35,10 +38,6 @@ psn_monitor --setup
 The wizard asks for the target, authentication, polling intervals and optional notifications. Review the settings before saving them. See [Setup & First Run](https://misiektoja.github.io/psn_monitor/setup-and-first-run/) for the service-specific steps.
 
 For the manual single-file method, dependencies and upgrade commands, see [Installation](https://misiektoja.github.io/psn_monitor/installation/).
-
-<p align="center">
-   <img src="https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/assets/psn_monitor.png" alt="psn_monitor_screenshot" width="90%"/>
-</p>
 
 ## Features
 
@@ -66,7 +65,6 @@ For the manual single-file method, dependencies and upgrade commands, see [Insta
 * **Flexible settings**: Use config files, dotenv files, environment variables and command-line options.
 * **Terminal and runtime controls**: Customize colours and adjust the running monitor through supported signals.
 
-<a id="common-commands"></a>
 ## Common Commands
 
 Use [Quick Install & Run](#-quick-install-run) for first-time setup. These examples use the PyPI command. See [Command Format by Installation Method](https://misiektoja.github.io/psn_monitor/usage/#command-format) for manual-script equivalents.
