@@ -691,10 +691,10 @@ def quote_command_argument(argument):
 
 # Returns the command that starts this tool on the detected install, as the argument parts before any option
 def install_command_prefix(method=None):
-    executable = sys.executable
+    executable = "python" if platform.system() == "Windows" else "python3"
     if (method or detect_install_method()) == "manual":
-        return [executable, str(Path(__file__).resolve())]
-    return [executable, "-m", "psn_monitor"]
+        return [executable, "psn_monitor.py"]
+    return ["psn_monitor"]
 
 
 # True when a command writes the dotenv file itself, so it refuses an --env-file that switches dotenv loading off
@@ -809,12 +809,12 @@ def secret_replacement_declined_advice(subject, flag, guide_url, plural=False):
     return make_recovery_advice("secret.entry", f"The saved {subject} {kept} and the dotenv file was not changed", recovery_fix_with_guide(f"Run {flag} again and answer y to replace the saved value", guide_url), False)
 
 
-# Returns the command that installs one optional library into the interpreter running this tool
+# Returns a compact dependency installation hint for the active platform
 def pip_install_command(requirement):
-    return " ".join(quote_command_argument(part) for part in (sys.executable or "python3", "-m", "pip", "install", requirement))
+    return " ".join(quote_command_argument(part) for part in (("python" if platform.system() == "Windows" else "python3"), "-m", "pip", "install", requirement))
 
 
-# Returns advice for an optional library that is missing, naming the exact install command for this interpreter
+# Returns advice for a missing optional library with a compact installation hint
 def missing_dependency_advice(package, effect, alternative=""):
     fix = f"Install it with: {pip_install_command(package)}"
     if alternative:

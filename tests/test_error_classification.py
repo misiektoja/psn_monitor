@@ -315,9 +315,9 @@ def test_the_install_method_is_detected_from_the_entry_point(pm_module, monkeypa
 
 # Verifies a printed command matches the install, so a downloaded script is never told to run a console script
 def test_printed_commands_match_the_install(pm_module):
-    assert pm_module.install_command_prefix(method="pip") == [pm_module.sys.executable, "-m", "psn_monitor"]
-    assert pm_module.install_command_prefix(method="manual")[-1] == str(Path(pm_module.__file__).resolve())
-    assert pm_module.install_command_prefix(method="manual")[0] == pm_module.sys.executable
+    assert pm_module.install_command_prefix(method="pip") == ["psn_monitor"]
+    assert pm_module.install_command_prefix(method="manual")[-1] == "psn_monitor.py"
+    assert pm_module.install_command_prefix(method="manual")[0] == "python3"
     assert pm_module.render_command(["--generate-config", "psn_monitor.conf"], method="pip") == runtime_command("psn_monitor --generate-config psn_monitor.conf")
 
 
