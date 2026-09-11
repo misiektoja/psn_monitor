@@ -210,3 +210,5 @@ As a fallback, you can also store secrets in the configuration file or source co
 ```
 
 A secret no layer supplied is left out. A secret still holding its `your_...` placeholder counts as unset and is left out too. A run where nothing resolved says so in one line instead. A length appears only for the secrets whose length the provider issues, never for a password you chose.
+
+When a `--set-*` command or the setup wizard replaces a secret, it rewrites that one assignment in place and leaves every other line alone. A line you wrote as `export NAME=...` keeps its `export`, so a dotenv file you also source in a shell still exports it. A value you clear has its line removed rather than left empty.
