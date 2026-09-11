@@ -74,7 +74,7 @@ python3 -c "import pytz; print('\n'.join(pytz.all_timezones))"
 
 If you want to use email notifications functionality, configure SMTP settings in the `psn_monitor.conf` file: `SMTP_HOST`, `SMTP_PORT`, `SMTP_SSL`, `SMTP_USER`, `SENDER_EMAIL` and `RECEIVER_EMAIL`.
 
-Store the password with `psn_monitor --set-smtp-password`, which signs in to your mail server to check it before writing anything and keeps it out of your shell history. It reports incomplete mail settings before asking for the password, naming the ones still to set.
+Store the password with `psn_monitor --set-smtp-password`, which signs in to your mail server to check it before writing anything and keeps it out of your shell history. It reports incomplete mail settings before asking for the password, naming the ones still to set. An exported `SMTP_PASSWORD` wins over the saved one at startup, so the command says so after saving rather than leaving you with a value the next run will not read.
 
 Verify your SMTP settings with the `--send-test-email` flag, which sends a real test message:
 
