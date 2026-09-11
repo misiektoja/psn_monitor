@@ -29,25 +29,25 @@ For the manual single-file method, dependencies and upgrade commands, see [Insta
 
 ## Features
 
-### Activity Tracking
+### 🔍 Activity Tracking
 
 * **Gaming activity**: Detect online and offline status, game starts, finishes and changes.
 * **Session statistics**: Measure time in each state, time per game and games played.
 * **Session continuity**: Preserve statistics through short offline interruptions.
 
-### Profile Insights
+### 📊 Profile Insights
 
 * **Profile details**: View PSN IDs, status, platform, PS+ membership, bio, languages and friendship details.
 * **Recent games**: See recently played titles, last played dates and total playtime.
 * **Optional trophies**: Include a trophy summary and recently earned trophies.
 
-### Notifications and History
+### 🔔 Notifications and History
 
 * **Event alerts**: Configure email, Discord and ntfy notifications independently.
 * **CSV history**: Save reported activity with timestamps.
 * **Saved status**: Resume monitoring with state retained across restarts.
 
-### Setup and Configuration
+### ⚙️ Setup and Configuration
 
 * **Guided setup**: Configure a target, credentials and alerts with `--setup`, then check them with `--doctor`.
 * **Flexible settings**: Use config files, dotenv files, environment variables and command-line options.
