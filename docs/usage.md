@@ -205,6 +205,8 @@ As Windows supports a limited number of signals, this functionality is available
 
 Terminal output is coloured by default. Colour switches itself off when the output is not an interactive terminal, when `TERM` is unset or `dumb`, when `NO_COLOR` is set and when the output is piped or redirected, so a log file or a piped run never contains escape sequences.
 
+The `--help` screen is coloured too. Group headings, option names, the values those options take, the example commands and the comments above them each get their own colour, so the screen can be scanned instead of read.
+
 Turn it off for one run:
 
 ```sh
@@ -258,6 +260,14 @@ COLOR_THEME = {
 | `boolean_true` | `green` | `True`, `Enabled`, `On` and `[PASS]` rows |
 | `boolean_false` | `red` | `False`, `Disabled` and `Off` |
 | `link` | `blue underline` | URLs |
+| `help_heading` | `bright_cyan bold` | The `--help` group headings and example task names |
+| `help_usage` | `bright_white bold` | The `usage:` label |
+| `help_option` | `bright_green` | Option names such as `--doctor` |
+| `help_metavar` | `yellow` | The value each option takes, such as a path or a number of seconds |
+| `help_placeholder` | `bright_magenta` | Values to replace in the help examples |
+| `help_command` | `bright_white` | The commands in the help examples |
+| `help_comment` | `bright_black` | The `#` comment above each help example |
+| `help_default` | `bright_black` | The `(default: ...)` notes |
 
 ## Coloring Log Output with GRC
 
