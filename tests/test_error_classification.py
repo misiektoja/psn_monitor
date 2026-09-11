@@ -252,6 +252,7 @@ CLASSIFIER_EXEMPTIONS = {
     "Cannot clear the screen contents": "a cosmetic notice with nothing for the operator to recover from",
     "Rebuilt the PSNAWP session after": "reports the recovery action taken, printed under the classified advice",
     "Setup needs a writable dotenv file": "an answer hint inside the question that re-asks, where the next prompt is the recovery",
+    "Monitoring failure changed for": "a one-line note on a classified outage that already had its full report",
 }
 
 # Words that mark a printed line as a report of something going wrong

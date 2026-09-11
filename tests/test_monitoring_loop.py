@@ -354,32 +354,38 @@ def test_longer_network_outage_recreates_the_session(pm_module, psn_session, fak
     assert "could not be reached (retrying in" in output
 
 
-# Verifies a lasting outage reports itself once and then only on the liveness cadence
-def test_a_lasting_outage_rides_the_liveness_cadence(pm_module, psn_session, fake_clock, monkeypatch, capsys):
-    monkeypatch.setattr(pm_module, "LIVENESS_REMINDER_SECONDS", 2 * pm_module.FUNCTION_TIMEOUT)
+# Verifies a lasting outage reports itself once and then only on the hourly reminder, which keeps its own clock
+# and counts every failed check, including the ones the retry policy held back before the report
+def test_a_lasting_outage_is_carried_by_the_hourly_reminder(pm_module, psn_session, fake_clock, monkeypatch, capsys):
+    monkeypatch.setattr(pm_module, "LIVENESS_REMINDER_SECONDS", 0)
+    monkeypatch.setattr(pm_module, "OUTAGE_REMINDER_SECONDS", 2 * pm_module.FUNCTION_TIMEOUT)
     outage = [requests.exceptions.ConnectionError("connection reset by peer")] * 8
     psn_session([presence_payload(status="offline"), *outage])
 
     run_monitor(pm_module)
 
     output = capsys.readouterr().out
+    assert output.count("* Error:") == 1
     assert output.count("To fix: ") == 1
-    assert f"* Monitoring degraded for {USER_ID}. " in output
-    assert "could not be reached since " in output
+    # The third failing check is the report, so the fifth and the seventh are the reminders
+    assert output.count(f"* Monitoring degraded for {USER_ID}. PlayStation Network could not be reached since ") == 2
+    assert ", 5 failed checks\n" in output and ", 7 failed checks\n" in output
+    assert output.count("Liveness check, timestamp:") == 2
 
 
 # Verifies the reminder follows the clock, so a run that retries faster than it polls does not remind more often
-def test_the_outage_reminder_follows_the_clock_not_the_check_count(pm_module, fake_clock):
+def test_the_outage_reminder_follows_the_clock_not_the_check_count(pm_module, fake_clock, monkeypatch):
+    monkeypatch.setattr(pm_module, "OUTAGE_REMINDER_SECONDS", 900)
     reporter = pm_module.OutageReporter()
     advice = pm_module.classify_recovery_error(requests.exceptions.ConnectionError("connection reset by peer"), context="monitor")
 
-    assert reporter.failed(advice, 900) == "full"
+    assert reporter.failed(advice) == "full"
     outcomes = []
     for _ in range(60):
         fake_clock.advance(15)
-        outcomes.append(reporter.failed(advice, 900))
+        outcomes.append(reporter.failed(advice))
 
-    assert outcomes.count("degraded") == 1
+    assert outcomes.count("reminder") == 1
 
 
 # Verifies a category change mid-outage keeps the outage start, so the alert delay and the reminder still elapse
@@ -390,10 +396,10 @@ def test_an_outage_that_changes_category_keeps_its_start(pm_module, fake_clock):
     assert first.code != second.code
     started = int(fake_clock.time())
 
-    assert reporter.failed(first, 900) == "full"
+    assert reporter.failed(first) == "full"
     for index in range(60):
         fake_clock.advance(15)
-        reporter.failed(second if index % 2 else first, 900)
+        reporter.failed(second if index % 2 else first)
 
     assert reporter.since == started
     assert reporter.recovered() == 900
@@ -634,3 +640,50 @@ def test_only_the_failed_channel_is_retried(pm_module, psn_session, fake_clock, 
     # The webhook was delivered on the first failure, so only the email that failed is attempted again
     assert len(sent_webhooks) == 1
     assert len(attempts) == 3
+
+
+# Verifies an internet outage that classifies as a timeout on one check and as unreachable on the next is one
+# outage, so it is reported once rather than on every change
+def test_an_internet_outage_that_flaps_is_one_outage(pm_module, psn_session, fake_clock, capsys):
+    flapping = [requests.exceptions.ConnectionError("connection reset by peer"), requests.exceptions.ReadTimeout("read timed out")] * 6
+    psn_session([presence_payload(status="offline"), *flapping])
+
+    run_monitor(pm_module)
+
+    output = capsys.readouterr().out
+    assert output.count("* Error:") == 1
+    assert output.count("To fix: ") == 1
+    assert "Monitoring failure changed" not in output
+
+
+# Verifies a reported outage that starts failing differently is still one outage, so the change is one line
+# rather than a second report
+def test_a_second_failure_category_is_noted_in_one_line(pm_module, psn_session, fake_clock, capsys):
+    outage = [requests.exceptions.ConnectionError("connection reset by peer")] * 4 + [RuntimeError("something odd happened")] * 2
+    psn_session([presence_payload(status="offline"), *outage])
+
+    run_monitor(pm_module)
+
+    lines = capsys.readouterr().out.splitlines()
+    reports = [line for line in lines if line.startswith("* Error:")]
+    changes = [number for number, line in enumerate(lines) if line.startswith(f"* Monitoring failure changed for {USER_ID}. ")]
+    assert len(reports) == 1 and "could not be reached" in reports[0]
+    assert len(changes) == 1 and lines[changes[0]].endswith("Something unexpected went wrong")
+    assert lines[changes[0] + 1].startswith("Timestamp:")
+    assert "\n".join(lines).count("To fix: ") == 1
+
+
+# Verifies the reporter treats every network code as one outage and any other retryable change as a one-line note
+def test_the_outage_reporter_merges_network_codes_and_notes_other_changes(pm_module, fake_clock):
+    reporter = pm_module.OutageReporter()
+    unreachable = pm_module.classify_recovery_error(requests.exceptions.ConnectionError("connection reset by peer"), context="monitor")
+    timeout = pm_module.classify_recovery_error(requests.exceptions.ReadTimeout("read timed out"), context="monitor")
+    unknown = pm_module.classify_recovery_error(RuntimeError("something odd happened"), context="monitor")
+    assert (pm_module.outage_family(timeout.code), pm_module.outage_family(unreachable.code)) == ("network", "network")
+
+    assert reporter.failed(unreachable) == "full"
+    assert reporter.failed(timeout) == ""
+    assert reporter.failed(unreachable) == ""
+    assert reporter.failed(unknown) == "changed"
+    assert reporter.failed(unknown) == ""
+    assert reporter.since == int(fake_clock.time())
