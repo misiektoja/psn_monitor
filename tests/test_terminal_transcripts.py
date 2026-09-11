@@ -165,7 +165,7 @@ WIZARD_SCRIPT = [
     ("Configure email notifications?", b"n"),
     ("Set up webhook alerts (Discord, ntfy etc.)?", b"n"),
     ("Write the normal per-target log file?", b"y"),
-    ("Optional CSV output path", b""),
+    ("Write a CSV file of the changes?", b"n"),
     ("Optional status file path", b""),
     ("Choose [1-3]:", b"1"),
     ("Run doctor now?", b"n"),

@@ -830,11 +830,21 @@ def test_the_saved_timezone_is_resolved_before_doctor_reads_it(monkeypatch):
 def test_the_csv_answer_gains_a_csv_extension_when_it_has_none(tmp_path):
     state = monitor.WizardSetupState(tmp_path / "psn_monitor.conf", tmp_path / ".env", dict(vars(monitor)))
 
-    monitor._wizard_collect_output_section(state, input_func=ScriptedTerminal("y", str(tmp_path / "activity"), "").answer)
+    monitor._wizard_collect_output_section(state, input_func=ScriptedTerminal("y", "y", str(tmp_path / "activity"), "").answer)
     assert state.config_values["CSV_FILE"] == str(tmp_path / "activity.csv")
 
-    monitor._wizard_collect_output_section(state, input_func=ScriptedTerminal("y", str(tmp_path / "activity.txt"), "").answer)
+    monitor._wizard_collect_output_section(state, input_func=ScriptedTerminal("y", "y", str(tmp_path / "activity.txt"), "").answer)
     assert state.config_values["CSV_FILE"] == str(tmp_path / "activity.txt")
+
+
+# Verifies declining CSV output clears a saved path, which the path prompt alone could never do
+def test_declining_csv_output_clears_a_saved_path(tmp_path):
+    state = monitor.WizardSetupState(tmp_path / "psn_monitor.conf", tmp_path / ".env", dict(vars(monitor)))
+    state.config_values["CSV_FILE"] = "saved.csv"
+
+    monitor._wizard_collect_output_section(state, input_func=ScriptedTerminal("y", "n", "").answer)
+
+    assert state.config_values["CSV_FILE"] == ""
 
 
 # Verifies the status file question names the working directory, since the default is relative to where the tool runs
@@ -1114,3 +1124,20 @@ def test_the_effective_secret_follows_the_startup_precedence(tmp_path, monkeypat
     assert monitor.effective_secret_after_setup("SMTP_PASSWORD", env_path, {"SMTP_PASSWORD": "accepted"}) == ("exported", True)
     monkeypatch.delenv("SMTP_PASSWORD", raising=False)
     assert monitor.effective_secret_after_setup("SMTP_PASSWORD", tmp_path / "absent.env", {}) == ("from-config-file", False)
+
+
+# Verifies an explicit colour theme survives a config rebuild, since the template ships the setting commented out
+def test_a_rebuilt_config_keeps_an_explicit_color_theme():
+    values = dict(monitor._config_template_defaults())
+    values["COLOR_THEME"] = {"header": "bright_red"}
+
+    rendered = monitor.generate_config_with_current_values(values)
+
+    assert monitor.parse_config_content(rendered, "<generated>")["COLOR_THEME"] == {"header": "bright_red"}
+
+
+# Verifies the shipped default stays commented out, so a rebuild does not pin a theme the user never chose
+def test_a_rebuilt_config_leaves_the_default_theme_commented():
+    rendered = monitor.generate_config_with_current_values(dict(monitor._config_template_defaults()))
+
+    assert "\nCOLOR_THEME = {" not in rendered

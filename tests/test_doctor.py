@@ -1210,3 +1210,22 @@ def test_invalid_boolean_settings_are_reported_in_one_row(pm_module, monkeypatch
 # The shipped defaults are all real booleans, so a run with nothing overridden never sees the on/off row
 def test_the_shipped_defaults_pass_the_boolean_check(pm_module):
     assert pm_module.runtime_boolean_errors() == []
+
+
+# Verifies doctor reports the output destinations the run was given, since it exits before monitoring applies them
+def test_doctor_reports_the_output_overrides_the_run_was_given(pm_module, monkeypatch, tmp_path):
+    csv_path = tmp_path / "chosen.csv"
+    seen = {}
+    monkeypatch.setattr(pm_module, "CSV_FILE", "")
+    monkeypatch.setattr(pm_module, "DISABLE_LOGGING", False)
+
+    def capture(*args, **keywords):
+        seen["csv"] = pm_module.CSV_FILE
+        seen["logging_disabled"] = pm_module.DISABLE_LOGGING
+        return 0
+
+    monkeypatch.setattr(pm_module, "run_doctor", capture)
+
+    assert run_main(pm_module, monkeypatch, ["--doctor", "--config-file", "none", "--env-file", "none", "-b", str(csv_path), "-d"]) == 0
+    assert seen["csv"] == str(csv_path)
+    assert seen["logging_disabled"] is True

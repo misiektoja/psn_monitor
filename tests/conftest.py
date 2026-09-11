@@ -145,6 +145,8 @@ def pm_module():
 @pytest.fixture(autouse=True)
 def deterministic_globals(monkeypatch):
     monkeypatch.setattr(pm, "LOCAL_TIMEZONE", "UTC", raising=False)
+    # Startup writes this one, so a test that runs main() with discovery off would otherwise carry it into the next
+    monkeypatch.setattr(pm, "CONFIG_DISCOVERY_DISABLED", pm.CONFIG_DISCOVERY_DISABLED, raising=False)
     monkeypatch.setattr(pm, "ASCII_LOG_SEPARATORS", "Auto", raising=False)
     monkeypatch.setattr(pm, "HORIZONTAL_LINE", 20, raising=False)
     monkeypatch.setattr(pm, "ACTIVE_INACTIVE_NOTIFICATION", False, raising=False)

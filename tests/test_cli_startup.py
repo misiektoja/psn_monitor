@@ -763,3 +763,27 @@ def test_setup_runs_before_the_connectivity_probe(pm_module, monkeypatch, isolat
     monkeypatch.setattr(pm_module, "run_setup_wizard", lambda **kwargs: 0)
 
     assert run_main(pm_module, monkeypatch, ["--setup", "--config-file", "custom.conf"]) == 0
+
+
+# Verifies a run started with discovery off names the sentinel rather than a config file it deliberately ignored
+def test_a_printed_command_keeps_discovery_off(pm_module, monkeypatch, tmp_path):
+    (tmp_path / "psn_monitor_test_only.conf").write_text("DISABLE_LOGGING = True\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(pm_module, "CONFIG_DISCOVERY_DISABLED", True)
+    monkeypatch.setattr(pm_module, "CLI_CONFIG_PATH", None)
+
+    assert pm_module.find_config_file() is not None
+    assert pm_module.resolved_command_config(None) == "none"
+    assert pm_module.resolved_command_config("none") == "none"
+
+
+# Verifies discovery left on still names the file a printed command should carry
+def test_a_printed_command_names_the_discovered_config(pm_module, monkeypatch, tmp_path):
+    config_path = tmp_path / "psn_monitor_test_only.conf"
+    config_path.write_text("DISABLE_LOGGING = True\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(pm_module, "CONFIG_DISCOVERY_DISABLED", False)
+    monkeypatch.setattr(pm_module, "CLI_CONFIG_PATH", None)
+
+    assert str(pm_module.resolved_command_config(None)) == str(config_path)
+    assert pm_module.resolved_command_config("/given/path.conf") == "/given/path.conf"

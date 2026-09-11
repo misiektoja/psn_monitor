@@ -13,7 +13,7 @@ It writes no files, and it exits `1` if any check failed so you can run it from 
 The report opens with the detected install method, then six sections, each row marked `[PASS]`, `[WARN]`, `[FAIL]` or `[SKIP]` and colour-coded by status when colour output is on:
 
 * **Environment**: the Python version against the supported minimum, the required libraries, and the optional ones with what stops working without each
-* **Configuration**: the configuration and dotenv files in use, which secrets are loaded and where each came from, the local time zone including whether an `Auto` setting can be detected, whether TLS verification is on, whether the timing and count settings hold usable values and the files the tool would write
+* **Configuration**: the configuration and dotenv files in use, which secrets are loaded and where each came from, the local time zone including whether an `Auto` setting can be detected, whether TLS verification is on, whether the timing and count settings hold usable values and the files the tool would write, including the ones `-b` and `-d` asked for on the command line
 * **Authentication**: whether PlayStation Network accepts your npsso code, and which account it signed in as
 * **Connectivity**: that the connectivity endpoint answers, using the configured URL, timeout and TLS setting
 * **Target**: whether the monitored PlayStation ID exists and shares its presence with your account
@@ -35,7 +35,7 @@ To fix: Generate a fresh NPSSO code, then put it in PSN_NPSSO in your dotenv fil
 Guide: https://misiektoja.github.io/psn_monitor/setup-and-first-run/#psn-npsso-code
 ```
 
-Every failure is sorted into a category, so an expired npsso code, a hidden profile, a rate limit, an unreachable network and a local file descriptor limit each get their own instructions instead of one generic message. Problems the tool survives, such as a missing optional library, are reported as `* Warning:` and it keeps running.
+Every failure is sorted into a category, so an expired npsso code, a hidden profile, a rate limit, an unreachable network and a local file descriptor limit each get their own instructions instead of one generic message. A request that stops answering and is cut short by the watchdog counts as a failing check like any other, so it shares the outage report, the session rebuild and the error alert rather than only printing a line each time. Problems the tool survives, such as a missing optional library, are reported as `* Warning:` and it keeps running.
 
 Commands in the fix text match how you installed the tool: `psn_monitor ...` for a PyPI install and `python3 psn_monitor.py ...` for a downloaded script. It also carries the `--config-file` or `--env-file` you started with, so it can be pasted as it is.
 

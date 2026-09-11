@@ -377,6 +377,8 @@ DISABLE_LOGGING = False
 ASCII_LOG_SEPARATORS = "Auto"
 TRUNCATE_CHARS = 0
 HORIZONTAL_LINE = 0
+# Counts the reports printed so far, so a check can tell whether it said anything before the banner claims it was quiet
+REPORTS_PRINTED = 0
 CLEAR_SCREEN = False
 
 # True once monitoring has printed its header, so a verbose notice after that closes its own block
@@ -2982,6 +2984,8 @@ def get_cur_ts(ts_str=""):
 
 # Prints the current date/time in human readable format with separator; eg. Sun 21 Apr 2024, 15:08:45
 def print_cur_ts(ts_str=""):
+    global REPORTS_PRINTED
+    REPORTS_PRINTED += 1
     print(get_cur_ts(str(ts_str)))
     print("─" * HORIZONTAL_LINE)
 
@@ -3274,9 +3278,12 @@ def early_config_file_argument(arguments=None):
 # to the real config load. The screen clear and the startup banner both run before argparse, so colour has to
 # be resolved here or a configured COLORED_OUTPUT would only take effect after the first output was written
 def apply_early_output_config():
-    global CLEAR_SCREEN, COLORED_OUTPUT
+    global CLEAR_SCREEN, COLORED_OUTPUT, COLOR_THEME
     try:
         cli_path = early_config_file_argument()
+        if cli_path is not None and cli_path.casefold() == "none":
+            # Config discovery is disabled for this run, so there is nothing to peek at
+            return
         config_path = find_config_file(os.path.expanduser(cli_path) if cli_path else None)
         if not config_path:
             return
@@ -3289,6 +3296,10 @@ def apply_early_output_config():
         CLEAR_SCREEN = values["CLEAR_SCREEN"]
     if isinstance(values.get("COLORED_OUTPUT"), bool):
         COLORED_OUTPUT = values["COLORED_OUTPUT"]
+    # --help is printed and exited from inside argparse, long before the config load, so the help_* overrides
+    # have to be here or they could never colour the one screen they name. Unusable styles are dropped downstream
+    if isinstance(values.get("COLOR_THEME"), dict):
+        COLOR_THEME = values["COLOR_THEME"]
 
 
 # Settings an older version wrote that this version no longer defines, ignored instead of rejected
@@ -4271,6 +4282,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     # Main loop
     while True:
         check_number += 1
+        reports_before_check = REPORTS_PRINTED
         # If PSN_NPSSO changed (e.g. .env updated + SIGHUP), recreate the PSNAWP session immediately.
         if PSN_NPSSO != last_npsso_seen:
             verbose_notice(f"PSN_NPSSO changed ({secret_fingerprint(PSN_NPSSO, 'PSN_NPSSO')}), recreating the PSNAWP session")
@@ -4320,20 +4332,14 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 raise PsnMalformedResponse('onlineStatus is empty')
             else:
                 status = str(status).lower()
-        except TimeoutException as e:
-            if platform.system() != 'Windows':
-                signal.alarm(0)
-            print_recovery_error(e, context="monitor", detail=f"psn_user.get_presence() did not answer within {display_time(FUNCTION_TIMEOUT)}", tracker=recovery_hints, retry_note=f"retrying in {display_time(FUNCTION_TIMEOUT)}")
-            print_cur_ts("Timestamp:\t\t\t")
-            debug_print("Waiting", interval=display_time(FUNCTION_TIMEOUT), reason=f"check #{check_number} timed out")
-            time.sleep(FUNCTION_TIMEOUT)
-            continue
-
         except Exception as e:
             if platform.system() != 'Windows':
                 signal.alarm(0)
 
-            advice = classify_recovery_error(e, context="monitor", probe_auth=True)
+            # A halted request is one more failing check, so it shares the outage clock, the session rebuild and the
+            # alert the other failures use rather than only printing a line every time it happens
+            halted_detail = f"psn_user.get_presence() did not answer within {display_time(FUNCTION_TIMEOUT)}" if isinstance(e, TimeoutException) else ""
+            advice = classify_recovery_error(e, context="monitor", detail=halted_detail, probe_auth=True)
             kind = recovery_poll_kind(advice)
             debug_print("Check", check=f"#{check_number}", recovery_code=advice.code, policy=kind, outcome="failed", error=f"{type(e).__name__}: {e}")
 
@@ -4398,7 +4404,6 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 # A streak nobody was told about needs no recovery line, since nothing reported it as broken
                 if failure_announced and outage_lasted is not None:
                     print_outage_recovery(psn_user_id, outage_lasted)
-                    alive_since = int(time.time())
             recovery_hints.reset()
             error_alert.reset()
             error_streak = 0
@@ -4544,7 +4549,10 @@ def psn_monitor_user(psn_user_id, csv_file_name):
         status_old = status
         game_name_old = game_name
 
-        if LIVENESS_REMINDER_SECONDS and int(time.time()) - alive_since >= LIVENESS_REMINDER_SECONDS:
+        # The banner speaks for a quiet check, so anything this one reported restarts the clock instead of being contradicted by it
+        if REPORTS_PRINTED != reports_before_check:
+            alive_since = int(time.time())
+        elif LIVENESS_REMINDER_SECONDS and int(time.time()) - alive_since >= LIVENESS_REMINDER_SECONDS:
             print_liveness_banner(f"Monitoring healthy for {psn_user_id}. The user is {status or 'unknown'} with no activity change since the last check")
             alive_since = int(time.time())
 
@@ -5235,6 +5243,15 @@ def config_file_target(config_path):
     return str(namespace.get("PSN_USER_ID") or "")
 
 
+# Returns the config a printed command should name, so a run started with discovery off cannot point the reader
+# at a file it deliberately ignored
+def resolved_command_config(config_path=None):
+    # A path the caller was given is what the command names, so a stale discovery flag cannot override it
+    if config_path is not None:
+        return "none" if str(config_path).casefold() == "none" else config_path
+    return "none" if CONFIG_DISCOVERY_DISABLED else find_config_file()
+
+
 # Returns the targets for the printed doctor and monitoring commands, dropping one the effective config already supplies
 def command_targets(explicit_target=None, saved_target=None, placeholder="<psn_user_id>"):
     saved = str(saved_target or "")
@@ -5463,6 +5480,18 @@ def render_config_value(value):
     return repr(value)
 
 
+# Renders an explicit assignment for a setting the template ships commented out, so overrides the user wrote
+# survive a rewrite instead of being replaced by the commented default
+def _rendered_commented_setting(variable, values):
+    value = values.get(variable)
+    if not isinstance(value, dict) or not value:
+        return []
+    lines = ["", f"{variable} = {{"]
+    lines.extend(f"    {render_config_value(str(name))}: {render_config_value(str(setting))}," for name, setting in value.items())
+    lines.append("}")
+    return lines
+
+
 # Renders one configuration file from the built-in template with the chosen values substituted in
 def generate_config_with_current_values(config_values):
     tree = ast.parse(CONFIG_BLOCK, "<built-in-config>", "exec")
@@ -5478,6 +5507,8 @@ def generate_config_with_current_values(config_values):
     lines = CONFIG_BLOCK.strip("\n").split("\n")
     # The template keeps its own leading blank line, so template line numbers are one ahead of this list
     offset = 1 if CONFIG_BLOCK.startswith("\n") else 0
+    commented_pattern = re.compile(r"^#\s*([A-Z][A-Z0-9_]*)\s*=\s*\{$")
+    commented_block = ""
     skip_until = 0
     output = []
     for number, line in enumerate(lines, 1):
@@ -5487,6 +5518,13 @@ def generate_config_with_current_values(config_values):
         replaced = next((name for name, (start, _end, _value) in replacements.items() if start == template_line), None)
         if replaced is None:
             output.append(line)
+            stripped = line.strip()
+            commented_match = commented_pattern.match(stripped)
+            if commented_match and commented_match.group(1) in COMMENTED_CONFIG_SETTINGS:
+                commented_block = commented_match.group(1)
+            elif commented_block and stripped == "# }":
+                output.extend(_rendered_commented_setting(commented_block, config_values))
+                commented_block = ""
             continue
         start, end, rendered = replacements[replaced]
         output.append(f"{replaced} = {rendered}")
@@ -5950,7 +5988,12 @@ def _wizard_normalize_status_path(answer):
 # Collects the files monitoring would write
 def _wizard_collect_output_section(state, input_func=None):
     state.config_values["DISABLE_LOGGING"] = not _wizard_ask_yes_no("Write the normal per-target log file?", default=not bool(state.config_values.get("DISABLE_LOGGING")), input_func=input_func)
-    state.config_values["CSV_FILE"] = _wizard_normalize_csv_path(_wizard_ask_text("Optional CSV output path (blank disables it)", default=str(state.config_values.get("CSV_FILE") or ""), input_func=input_func))
+    saved_csv = str(state.config_values.get("CSV_FILE") or "")
+    # Asked as its own question, since Enter on the path prompt takes the shown default and so could never clear a saved one
+    if _wizard_ask_yes_no("Write a CSV file of the changes?", default=bool(saved_csv), input_func=input_func):
+        state.config_values["CSV_FILE"] = _wizard_normalize_csv_path(_wizard_ask_text("CSV output path", default=saved_csv, required=True, input_func=input_func))
+    else:
+        state.config_values["CSV_FILE"] = ""
     state.config_values["PSN_STATUS_FILE"] = _wizard_normalize_status_path(_wizard_ask_text("Optional status file path (blank uses the default name in the working directory)", default=str(state.config_values.get("PSN_STATUS_FILE") or ""), input_func=input_func))
 
 
@@ -6478,10 +6521,10 @@ def smtp_sign_in(password, timeout=15):
 # Prints the commands to run next, with the file paths this run was given so they can be pasted as they are
 def print_secret_next_steps(env_path, config_path=None, psn_user_id=None, test_step=None):
     paths = []
-    if config_path:
-        paths.extend(("--config-file", str(config_path)))
+    if config_path or CONFIG_DISCOVERY_DISABLED:
+        paths.extend(("--config-file", str(resolved_command_config(config_path))))
     paths.extend(("--env-file", str(env_path)))
-    doctor_target, monitor_target = command_targets(psn_user_id, config_file_target(config_path or find_config_file()))
+    doctor_target, monitor_target = command_targets(psn_user_id, config_file_target(resolved_command_config(config_path)))
     print()
     if test_step:
         print_labelled_command(test_step[0], render_command([test_step[1], *paths]))
@@ -7041,6 +7084,12 @@ def main():
         debug_print("No private settings were resolved from config, dotenv, environment or the command line")
 
     if doctor_mode:
+        # Doctor exits before monitoring applies these, so they are resolved here too and the output rows
+        # describe the run that was actually asked for. Nothing is written, only reported
+        if args.csv_file:
+            CSV_FILE = os.path.expanduser(args.csv_file)
+        if args.disable_logging is True:
+            DISABLE_LOGGING = True
         doctor_exit = run_doctor(args.psn_user_id, cfg_path, env_path, config_advice, timezone_advice)
         # A target the config file already carries is left out, so the command stays as short as the wizard's
         print_doctor_next_steps(args.psn_user_id, PSN_USER_ID, doctor_exit)

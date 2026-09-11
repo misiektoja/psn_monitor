@@ -354,6 +354,23 @@ def test_longer_network_outage_recreates_the_session(pm_module, psn_session, fak
     assert "could not be reached (retrying in" in output
 
 
+# Verifies a request the watchdog halted is treated as a failing check, since it used to print its own line and
+# leave the outage clock, the session rebuild and the error alert untouched however long it kept happening
+def test_a_halted_request_joins_the_outage(pm_module, psn_session, fake_clock, monkeypatch, sent_emails, capsys):
+    monkeypatch.setattr(pm_module, "ERROR_NOTIFICATION", True)
+    monkeypatch.setattr(pm_module, "ERROR_ALERT_AFTER_SECONDS", 0)
+    halted = [pm_module.TimeoutException() for _ in range(4)]
+    psn_session([presence_payload(status="offline"), *halted, presence_payload(status="offline"), presence_payload(status="offline")])
+
+    run_monitor(pm_module)
+
+    output = capsys.readouterr().out
+    assert f"psn_user.get_presence() did not answer within {pm_module.display_time(pm_module.FUNCTION_TIMEOUT)}" in output
+    assert "Rebuilt the PSNAWP session after 3 failed checks in a row" in output
+    assert "Monitoring recovered for" in output
+    assert len(sent_emails) == 1
+
+
 # Verifies a lasting outage reports itself once and then only on the hourly reminder, which keeps its own clock
 # and counts every failed check, including the ones the retry policy held back before the report
 def test_a_lasting_outage_is_carried_by_the_hourly_reminder(pm_module, psn_session, fake_clock, monkeypatch, capsys):
@@ -516,6 +533,20 @@ def test_the_liveness_banner_follows_the_clock_not_the_check_count(pm_module, ps
     run_monitor(pm_module)
 
     assert capsys.readouterr().out.count("Monitoring healthy for") == 1
+
+
+# Verifies a check that reported the end of an outage restarts the quiet clock, since the banner speaks for a
+# check that said nothing and would otherwise contradict the recovery line above it
+def test_a_check_that_reported_a_recovery_does_not_claim_it_was_quiet(pm_module, psn_session, fake_clock, monkeypatch, capsys):
+    monkeypatch.setattr(pm_module, "LIVENESS_REMINDER_SECONDS", 2 * pm_module.PSN_CHECK_INTERVAL)
+    outage = [requests.exceptions.ConnectionError("connection reset by peer")] * 4
+    psn_session([presence_payload(status="offline"), *outage, presence_payload(status="offline"), presence_payload(status="offline")])
+
+    run_monitor(pm_module)
+
+    output = capsys.readouterr().out
+    assert "Monitoring recovered for" in output, "the check under test reported no recovery"
+    assert "Monitoring healthy for" not in output
 
 
 # Verifies an online user still reports the liveness line, since nothing changed there either
