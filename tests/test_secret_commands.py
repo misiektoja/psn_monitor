@@ -64,7 +64,7 @@ def test_an_existing_assignment_is_replaced_in_place(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text('PSN_NPSSO="old-code"\nSMTP_PASSWORD="unrelated"\n', encoding="utf-8")
 
-    monitor.update_dotenv_value(env_file, "PSN_NPSSO", "new-code")
+    monitor.update_dotenv_file(env_file, {"PSN_NPSSO": "new-code"})
 
     lines = env_file.read_text(encoding="utf-8").splitlines()
     assert lines == ['PSN_NPSSO="new-code"', 'SMTP_PASSWORD="unrelated"']
@@ -75,7 +75,7 @@ def test_an_exported_assignment_keeps_its_prefix(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text('export PSN_NPSSO="old-code"\n', encoding="utf-8")
 
-    monitor.update_dotenv_value(env_file, "PSN_NPSSO", "new-code")
+    monitor.update_dotenv_file(env_file, {"PSN_NPSSO": "new-code"})
 
     content = env_file.read_text(encoding="utf-8")
     assert content == 'export PSN_NPSSO="new-code"\n'
@@ -87,7 +87,7 @@ def test_unrelated_lines_survive_the_rotation(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text('# keep me\n# PSN_NPSSO="commented out"\nSMTP_PASSWORD="unrelated"\n', encoding="utf-8")
 
-    monitor.update_dotenv_value(env_file, "PSN_NPSSO", "new-code")
+    monitor.update_dotenv_file(env_file, {"PSN_NPSSO": "new-code"})
 
     lines = env_file.read_text(encoding="utf-8").splitlines()
     assert lines == ["# keep me", '# PSN_NPSSO="commented out"', 'SMTP_PASSWORD="unrelated"', 'PSN_NPSSO="new-code"']
@@ -97,7 +97,7 @@ def test_unrelated_lines_survive_the_rotation(tmp_path):
 def test_a_value_with_quotes_is_escaped(tmp_path):
     env_file = tmp_path / ".env"
 
-    monitor.update_dotenv_value(env_file, "SMTP_PASSWORD", 'pa"ss\\word')
+    monitor.update_dotenv_file(env_file, {"SMTP_PASSWORD": 'pa"ss\\word'})
 
     assert env_file.read_text(encoding="utf-8") == 'SMTP_PASSWORD="pa\\"ss\\\\word"\n'
     dotenv = pytest.importorskip("dotenv")
@@ -108,7 +108,7 @@ def test_a_value_with_quotes_is_escaped(tmp_path):
 def test_a_written_dotenv_file_is_private(tmp_path):
     env_file = tmp_path / ".env"
 
-    monitor.update_dotenv_value(env_file, "PSN_NPSSO", "new-code")
+    monitor.update_dotenv_file(env_file, {"PSN_NPSSO": "new-code"})
 
     assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
     assert [entry.name for entry in tmp_path.iterdir()] == [".env"]
@@ -119,7 +119,7 @@ def test_a_commented_assignment_does_not_count_as_set(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text('# PSN_NPSSO="commented out"\n', encoding="utf-8")
 
-    assert monitor.dotenv_contains_key(env_file, "PSN_NPSSO") is False
+    assert monitor._dotenv_contains_key(env_file, "PSN_NPSSO") is False
 
 
 # Verifies an exported assignment does count as the key being set
@@ -127,7 +127,7 @@ def test_an_exported_assignment_counts_as_set(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text('export PSN_NPSSO="set"\n', encoding="utf-8")
 
-    assert monitor.dotenv_contains_key(env_file, "PSN_NPSSO") is True
+    assert monitor._dotenv_contains_key(env_file, "PSN_NPSSO") is True
 
 
 # Verifies a hidden entry cannot be asked for when there is no terminal to hide it from
@@ -247,7 +247,7 @@ def test_a_cleared_secret_is_removed_rather_than_emptied(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text('UNRELATED=stay\nNTFY_ACCESS_TOKEN="tk_old"\n', encoding="utf-8")
 
-    monitor.update_dotenv_value(env_file, "NTFY_ACCESS_TOKEN", "")
+    monitor.update_dotenv_file(env_file, {"NTFY_ACCESS_TOKEN": ""})
 
     assert env_file.read_text(encoding="utf-8") == "UNRELATED=stay\n"
 
@@ -257,7 +257,7 @@ def test_clearing_an_absent_secret_writes_nothing(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text("UNRELATED=stay\n", encoding="utf-8")
 
-    monitor.update_dotenv_value(env_file, "NTFY_ACCESS_TOKEN", "")
+    monitor.update_dotenv_file(env_file, {"NTFY_ACCESS_TOKEN": ""})
 
     assert env_file.read_text(encoding="utf-8") == "UNRELATED=stay\n"
 
@@ -267,7 +267,7 @@ def test_a_cleared_exported_secret_is_removed(tmp_path):
     env_file = tmp_path / ".env"
     env_file.write_text('export NTFY_ACCESS_TOKEN="tk_old"\nUNRELATED=stay\n', encoding="utf-8")
 
-    monitor.update_dotenv_value(env_file, "NTFY_ACCESS_TOKEN", "")
+    monitor.update_dotenv_file(env_file, {"NTFY_ACCESS_TOKEN": ""})
 
     assert env_file.read_text(encoding="utf-8") == "UNRELATED=stay\n"
 
@@ -492,3 +492,34 @@ def test_the_replace_question_names_the_secret_not_the_key(tmp_path, monkeypatch
     monitor.run_set_npsso(env_file=str(env_file), interactive=True, input_func=lambda prompt: prompts.append(prompt) or "y", getpass_func=lambda prompt: NPSSO)
 
     assert prompts == [f"Replace the saved NPSSO code in '{env_file.resolve()}'? [y/N]: "]
+
+
+# Verifies an assignment the owner exported keeps its export, since dropping it changes what a shell sourcing the file exports
+def test_an_exported_assignment_keeps_its_export(tmp_path):
+    destination = tmp_path / ".env"
+    destination.write_text('export SMTP_PASSWORD="old"\nOTHER=keep\n', encoding="utf-8")
+
+    monitor.update_dotenv_file(destination, {"SMTP_PASSWORD": "new"})
+
+    assert destination.read_text(encoding="utf-8") == 'export SMTP_PASSWORD="new"\nOTHER=keep\n'
+
+
+# Verifies a line break inside a value is escaped rather than written through, since a raw one would split the assignment
+def test_a_line_break_in_a_value_cannot_split_the_assignment(tmp_path):
+    destination = tmp_path / ".env"
+
+    monitor.update_dotenv_file(destination, {"SMTP_PASSWORD": "one\ntwo"})
+
+    assert destination.read_text(encoding="utf-8") == 'SMTP_PASSWORD="one\\ntwo"\n'
+
+
+# Verifies the writer refuses a key this tool does not ship, so a typo cannot put an unknown name in the private file
+def test_the_writer_refuses_a_key_this_tool_does_not_ship(tmp_path):
+    with pytest.raises(ValueError):
+        monitor.update_dotenv_file(tmp_path / ".env", {"NOT_A_SECRET": "value"})
+
+
+# Verifies the writer refuses a value that is not text, so a mistyped caller fails before the file is touched
+def test_the_writer_refuses_a_value_that_is_not_text(tmp_path):
+    with pytest.raises(TypeError):
+        monitor.update_dotenv_file(tmp_path / ".env", {"SMTP_PASSWORD": 1234})

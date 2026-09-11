@@ -5239,7 +5239,7 @@ def _wizard_choose_config_destination(config_path, input_func=None):
 def _wizard_queue_secret(state, key, value, input_func=None):
     if not value:
         return False
-    if dotenv_contains_key(state.env_path, key) and not _wizard_ask_yes_no(f"The dotenv file already contains {key}. Replace that value?", default=False, input_func=input_func):
+    if _dotenv_contains_key(state.env_path, key) and not _wizard_ask_yes_no(f"The dotenv file already contains {key}. Replace that value?", default=False, input_func=input_func):
         print(f"  Existing {key} will be retained without being displayed or rewritten.")
         return False
     state.secret_updates[key] = value
@@ -5872,7 +5872,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
     secrets_written = False
     if state.secret_updates:
         try:
-            update_dotenv_values(state.env_path, state.secret_updates)
+            update_dotenv_file(state.env_path, state.secret_updates)
             secrets_written = True
         except Exception as exc:
             print_recovery_error(exc, context="file.unwritable", detail=f"Could not write the secrets to '{state.env_path}': {exc}")
@@ -5997,12 +5997,13 @@ def match_dotenv_assignment(line, key):
 
 # Renders one quoted dotenv assignment, keeping the export prefix of the line it replaces
 def render_dotenv_assignment(key, value, prefix=""):
-    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    # A line break inside a value would split the assignment, so it is escaped rather than written through
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\r", "\\r").replace("\n", "\\n")
     return f'{prefix}{key}="{escaped}"'
 
 
 # Reports whether one dotenv file already assigns the requested key
-def dotenv_contains_key(path, key):
+def _dotenv_contains_key(path, key):
     target = Path(path).expanduser()
     if not target.is_file():
         return False
@@ -6010,13 +6011,17 @@ def dotenv_contains_key(path, key):
 
 
 # Replaces dotenv assignments in place in one pass, leaving every other line and every comment untouched
-def update_dotenv_values(path, updates):
-    target = Path(path).expanduser()
+def update_dotenv_file(destination, updates):
+    if not hasattr(updates, "items"):
+        raise TypeError("Dotenv updates must be a mapping")
+    target = Path(destination).expanduser()
     if not target.parent.is_dir():
         raise FileNotFoundError(f"The directory for '{target}' does not exist")
-    for key in updates:
+    for key, value in updates.items():
         if key not in SECRET_KEYS:
             raise ValueError(f"Refusing to write an unknown dotenv key: {key}")
+        if not isinstance(value, str):
+            raise TypeError(f"Dotenv value for {key} must be a string")
     existing = target.read_text(encoding="utf-8") if target.is_file() else ""
     lines = []
     replaced = set()
@@ -6052,9 +6057,6 @@ def update_dotenv_values(path, updates):
     return str(target)
 
 
-# Replaces one dotenv assignment, the single-secret case of the writer above
-def update_dotenv_value(path, key, value):
-    return update_dotenv_values(path, {key: value})
 
 
 # Returns the dotenv file a one-shot secret command writes to, refusing the disabled setting
@@ -6144,7 +6146,7 @@ def run_set_secret(key, flag, subject, guide_url, guidance, prompt_text, validat
         raise RecoveryError(classify_recovery_error(context="secret.entry", detail=f"{flag} needs an interactive terminal so the value stays hidden"))
 
     ask = input if input_func is None else input_func
-    if dotenv_contains_key(destination, key):
+    if _dotenv_contains_key(destination, key):
         try:
             confirmed = str(read_interactively(ask, f"Replace the saved {subject} in '{destination}'? [y/N]: ")).strip().casefold() in ("y", "yes")
         except (EOFError, KeyboardInterrupt):
@@ -6171,7 +6173,7 @@ def run_set_secret(key, flag, subject, guide_url, guidance, prompt_text, validat
     # What is stored can differ from what was typed, so a shorthand the validator accepted is saved in full
     stored = str(entered).strip() if normalize is None else normalize(entered)
     try:
-        update_dotenv_value(destination, key, stored)
+        update_dotenv_file(destination, {key: stored})
     except Exception as exc:
         raise RecoveryError(classify_recovery_error(exc, context="file.unwritable", detail=f"Cannot save {key} to '{destination}': {exc}"), exc) from None
 
