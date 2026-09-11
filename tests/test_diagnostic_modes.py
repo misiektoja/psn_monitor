@@ -201,10 +201,10 @@ def test_debug_reports_the_config_load_and_the_secret_source(pm_module, monkeypa
 
     output = capsys.readouterr().out
     assert f"Configuration applied: path={config}, settings=2, names=PSN_CHECK_INTERVAL, PSN_NPSSO" in output
-    assert "Secret resolution: name=PSN_NPSSO, source=configuration file, value=set, 17 chars" in output
+    assert "Secret resolution: name=PSN_NPSSO, source=configuration file, value=set, chars=17" in output
     # A password the user chose is reported as present only, since debug output is what bug reports carry
     assert "Secret resolution: name=SMTP_PASSWORD, source=" in output and "value=set" in output
-    assert f"value=set, {len(pm_module.SMTP_PASSWORD)} chars" not in output
+    assert f"chars={len(pm_module.SMTP_PASSWORD)}" not in output
 
 
 # Verifies a secret supplied on the command line is reported as such, without any part of its value
@@ -212,7 +212,10 @@ def test_debug_never_prints_the_credential_it_reports(pm_module, monkeypatch, mo
     run_main(pm_module, monkeypatch, ["--debug", "-n", "aVeryLongNpssoValue1234567890", USER_ID])
 
     output = capsys.readouterr().out
-    assert "Secret resolution: name=PSN_NPSSO, source=command line, value=set, 29 chars" in output
+    assert "Secret resolution: name=PSN_NPSSO, source=command line, value=set, chars=29" in output
+    # The length belongs to its own field, so a reader can split the line on ", " and get pairs
+    trace = [line for line in output.splitlines() if "Secret resolution: name=PSN_NPSSO, source=command line" in line][0].split("Secret resolution: ", 1)[1]
+    assert dict(field.split("=", 1) for field in trace.split(", ")) == {"name": "PSN_NPSSO", "source": "command line", "value": "set", "chars": "29"}
     assert "aVeryLongNpssoValue1234567890" not in output
 
 

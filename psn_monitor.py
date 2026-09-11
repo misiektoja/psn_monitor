@@ -1114,9 +1114,12 @@ FIXED_LENGTH_SECRET_KEYS = frozenset(("PSN_NPSSO",))
 # Describes a secret in diagnostic output without revealing any part of it. A password the user chose reports
 # presence only: its length is a real disclosure in output that ends up pasted into bug reports
 def secret_fingerprint(value, key=None):
-    if not secret_is_set(value):
-        return "not set"
-    return f"set, {len(value)} chars" if key in FIXED_LENGTH_SECRET_KEYS else "set"
+    fields = secret_fields(value, key)
+    return f"{fields['value']}, {fields['chars']} chars" if fields["chars"] else fields["value"]
+
+
+# Returns the diagnostic fields describing one secret, keeping the length out of the value so a line still splits on ", "
+def secret_fields(value, key=None): return {"value": "set" if secret_is_set(value) else "not set", "chars": len(str(value).strip()) if key in FIXED_LENGTH_SECRET_KEYS and secret_is_set(value) else None}
 
 
 # Renders one diagnostic line as an operation followed by comma-separated key=value fields, dropping unset ones
@@ -2946,7 +2949,7 @@ def reload_secrets_signal_handler(sig, frame):
                 SECRET_SOURCES[secret] = "dotenv file"
                 if secret == "WEBHOOK_URL":
                     webhook_url_changed = True
-                debug_print("Secret reload", name=secret, path=env_path, value=secret_fingerprint(val, secret))
+                debug_print("Secret reload", name=secret, path=env_path, **secret_fields(val, secret))
                 print(f"* Reloaded {secret} from {env_path}")
 
     # A replacement destination can belong to the other service, which the reloaded URL is the only record of
@@ -3355,7 +3358,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
 
     print(f"* Fetching details for PlayStation user '{psn_user_id}'...\n")
 
-    debug_print("PSNAWP session init", user=psn_user_id, npsso=secret_fingerprint(PSN_NPSSO, "PSN_NPSSO"))
+    debug_print("PSNAWP session init", user=psn_user_id, npsso=secret_fields(PSN_NPSSO)["value"])
     print_step("Authenticating with PSN...")
     try:
         psnawp = psn_client()
@@ -3708,7 +3711,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
     def print_ok():
         print("OK")
 
-    debug_print("PSNAWP session init", user=psn_user_id, npsso=secret_fingerprint(PSN_NPSSO, "PSN_NPSSO"))
+    debug_print("PSNAWP session init", user=psn_user_id, npsso=secret_fields(PSN_NPSSO)["value"])
     print_step("Authenticating with PSN...")
     try:
         psnawp = psn_client()
@@ -6633,7 +6636,7 @@ def main():
     apply_webhook_cli_overrides(args, parser)
 
     for secret in SECRET_KEYS:
-        debug_print("Secret resolution", name=secret, source=SECRET_SOURCES.get(secret, "nowhere"), value=secret_fingerprint(globals().get(secret), secret))
+        debug_print("Secret resolution", name=secret, source=SECRET_SOURCES.get(secret, "nowhere"), **secret_fields(globals().get(secret), secret))
 
     timezone_advice = resolve_local_timezone()
 
@@ -6712,7 +6715,7 @@ def main():
     if args.npsso_key:
         PSN_NPSSO = args.npsso_key
         SECRET_SOURCES["PSN_NPSSO"] = "command line"
-        debug_print("Secret resolution", name="PSN_NPSSO", source="command line", value=secret_fingerprint(PSN_NPSSO, "PSN_NPSSO"))
+        debug_print("Secret resolution", name="PSN_NPSSO", source="command line", **secret_fields(PSN_NPSSO, "PSN_NPSSO"))
 
     if not PSN_NPSSO or PSN_NPSSO == "your_psn_npsso_code":
         report_recovery_error(context="secret.missing", detail="PSN_NPSSO (-n / --npsso_key) value is empty or incorrect")
