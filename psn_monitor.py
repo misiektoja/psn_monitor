@@ -893,9 +893,10 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
 
     return make_recovery_advice("unknown", "Something unexpected went wrong", recovery_fix_with_guide(unknown_failure_fix(), DIAGNOSTICS_GUIDE_URL), True, safe_detail)
 
-# Returns the next step for a failure no rule recognized, since a run already printing the technical cause cannot be told to re-run for it
-def unknown_failure_fix(): return "Check the technical detail below, then open an issue with this output if the problem continues" if DEBUG_MODE else "Rerun with --debug and check the technical detail it prints. If the problem continues, open an issue with that output"
 
+# Returns the next step for a failure no rule recognized, since a run already printing the technical cause cannot be told to re-run for it
+def unknown_failure_fix():
+    return "Check the technical detail below, then open an issue with this output if the problem continues" if DEBUG_MODE else "Rerun with --debug and check the technical detail it prints. If the problem continues, open an issue with that output"
 
 
 # Classifies any failure into one stable recovery category, optionally asking PSN to explain a vague error
@@ -1084,7 +1085,6 @@ def secret_is_set(value):
     return isinstance(value, str) and bool(value.strip()) and not value.startswith("your_")
 
 
-
 # Joins setting names into the phrase a message reads out, for example "SMTP_HOST and SMTP_USER"
 def join_setting_names(names, conjunction):
     return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} {conjunction} {names[-1]}"
@@ -1127,7 +1127,8 @@ def secret_fingerprint(value, key=None):
 
 
 # Returns the diagnostic fields describing one secret, keeping the length out of the value so a line still splits on ", "
-def secret_fields(value, key=None): return {"value": "set" if secret_is_set(value) else "not set", "chars": len(str(value).strip()) if key in FIXED_LENGTH_SECRET_KEYS and secret_is_set(value) else None}
+def secret_fields(value, key=None):
+    return {"value": "set" if secret_is_set(value) else "not set", "chars": len(str(value).strip()) if key in FIXED_LENGTH_SECRET_KEYS and secret_is_set(value) else None}
 
 
 # Records where one secret resolved from, so a later layer replaces the earlier answer instead of adding to it
@@ -2018,6 +2019,7 @@ def psn_client(npsso=None):
         debug_print("TLS verification could not be applied to the PSNAWP session", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
     return client
 
+
 # The last connectivity failure, so a quiet caller can classify it instead of the check printing it
 LAST_CONNECTIVITY_ERROR = None
 
@@ -2273,7 +2275,6 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
     verbose_print(f"Email delivered to {RECEIVER_EMAIL}: {subject}")
     debug_print("SMTP delivery", recipient=RECEIVER_EMAIL, outcome="OK")
     return 0
-
 
 
 # ----------------------------------------------------------
@@ -3346,6 +3347,7 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
         items.sort(key=lambda x: x[0], reverse=True)
     except Exception as diag_exc:
         debug_print("Trophy list could not be sorted by earn date, falling back to a tolerant sort", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+
         def _ts(dt):
             try:
                 return int(dt.timestamp())
@@ -4700,7 +4702,6 @@ def build_doctor_report(psn_user_id=None, config_path=None, env_path=None, confi
     return report
 
 
-
 # Renders one doctor result marker in the colour its status calls for
 def render_doctor_marker(status):
     return colorize(DOCTOR_MARK_STYLES.get(status, "info"), f"[{status}]")
@@ -4952,8 +4953,6 @@ def print_doctor_next_steps(psn_user_id=None, saved_target=None, doctor_exit=0):
     print_labelled_command(label, render_command([*([monitor_target] if monitor_target else [])]))
     # No trailing blank line: the command printer already left one and the report must not end on two
     print(f"Guide: {QUICK_START_GUIDE_URL}")
-
-
 
 
 # A PlayStation online ID is 3 to 16 characters and never contains an at sign or a space
@@ -5921,6 +5920,7 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
         return _wizard_launch_monitor(launch_arguments)
     return 0
 
+
 # Renders the --help examples: one heading per task, then a comment and the command it describes
 def render_help_examples(groups, guide_url):
     blocks = []
@@ -5983,7 +5983,6 @@ def print_welcome_screen(input_func=None, interactive=None, config_file=None, en
             return run_setup_wizard(config_file=config_file, env_file=env_file, input_func=input_func)
     # Without a terminal there was nothing to answer, so a bare invocation stays the usage error it was
     return 0 if terminal_is_interactive else 1
-
 
 
 # Where the NPSSO code is read from, printed before the hidden prompt so nobody has to hunt for it
@@ -6055,8 +6054,6 @@ def update_dotenv_file(destination, updates):
     for key, value in updates.items():
         verbose_print(f"{'Saved' if value else 'Removed'} {key} in '{target}'")
     return str(target)
-
-
 
 
 # Returns the dotenv file a one-shot secret command writes to, refusing the disabled setting
