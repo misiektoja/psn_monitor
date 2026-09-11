@@ -69,6 +69,7 @@ and again before anything is published to PyPI.
 | `test_time_formatting.py` | Durations, timespans, timestamp formats and timezone handling |
 | `test_user_info.py` | The one-shot profile report, trophies and recently played games |
 | `test_webhook_notifications.py` | Webhook destinations, the request each provider receives, the bounded retry and the two delivery channels |
+| `test_moved_private_settings.py` | Kept credentials across dotenv destination changes and startup error handling |
 
 ## Conventions
 
