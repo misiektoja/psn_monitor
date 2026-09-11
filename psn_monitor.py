@@ -5104,16 +5104,17 @@ DISCARDED_SETTING_ERRORS = []
 
 # True when the selected command exists to correct the configuration, so a malformed setting is reported
 # there instead of stopping the one run that could repair it
-def command_reports_configuration(arguments=()):
-    return any(str(argument) in ("--doctor", "--setup") or str(argument).startswith("--set-") for argument in arguments)
+def command_reports_configuration(args=None):
+    # Read from the parsed namespace rather than the raw words, since argparse also accepts abbreviations
+    return any(getattr(args, name, False) for name in ("doctor", "setup", "set_npsso", "set_smtp_password", "set_webhook_url"))
 
 
 # Stops a monitoring run on a runtime setting it cannot use and lets the commands that repair configuration continue
-def prepare_runtime_settings(errors):
+def prepare_runtime_settings(errors, args=None):
     if not errors:
         return
     advice = make_recovery_advice("config.invalid", "Invalid settings: " + ". ".join(errors), recovery_fix_with_guide("Correct the reported settings in the configuration file or command line", CONFIG_GUIDE_URL), False)
-    if not command_reports_configuration(sys.argv[1:]):
+    if not command_reports_configuration(args):
         print_recovery_advice(advice)
         raise SystemExit(1)
     # The secret commands never read these values, so the built-in one keeps them working until the setting is corrected
@@ -5140,7 +5141,7 @@ def prepare_configured_paths(args):
     advice = make_recovery_advice("config.invalid", "Invalid settings: " + ". ".join(errors), recovery_fix_with_guide("Correct the named settings in the configuration file or command line", CONFIG_GUIDE_URL), False)
     # A monitoring run cannot continue on a value this broken, but doctor, the setup wizard and the secret
     # commands are how it gets corrected, so they fall back to the built-in values and report the setting
-    if not command_reports_configuration(sys.argv[1:]):
+    if not command_reports_configuration(args):
         print_recovery_advice(advice)
         raise SystemExit(1)
     DISCARDED_SETTING_ERRORS[:] = errors
@@ -5148,7 +5149,8 @@ def prepare_configured_paths(args):
     for name, built_in in BUILT_IN_SHAPE_SETTINGS.items():
         if name in settings and configuration_shape_errors({name: settings[name]}):
             globals()[name] = built_in
-    if "--doctor" not in sys.argv:
+    # Doctor lists the same settings as report rows, so a warning above it would only say them twice
+    if not getattr(args, "doctor", False):
         print_recovery_advice(advice, label="Warning")
         print()
 
@@ -7609,7 +7611,7 @@ def main():
     if args.setup:
         sys.exit(run_setup_wizard(initial_target=args.psn_user_id, config_file=args.config_file, env_file=args.env_file))
 
-    prepare_runtime_settings(runtime_configuration_errors() + runtime_boolean_errors())
+    prepare_runtime_settings(runtime_configuration_errors() + runtime_boolean_errors(), args)
 
     if not check_internet():
         sys.exit(1)
