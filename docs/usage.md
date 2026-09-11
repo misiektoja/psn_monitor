@@ -1,5 +1,20 @@
 # Usage
 
+<a id="command-format"></a>
+## Command Format by Installation Method
+
+Examples use the PyPI command. For a downloaded script, run commands from the directory containing `psn_monitor.py` and keep the same arguments:
+
+| Installation | Command |
+| --- | --- |
+| PyPI or pipx | `psn_monitor [OPTIONS]` |
+| Manual script on macOS or Linux | `python3 psn_monitor.py [OPTIONS]` |
+| Manual script on Windows | `python psn_monitor.py [OPTIONS]` |
+
+For example, `psn_monitor --setup` becomes `python3 psn_monitor.py --setup` on macOS or Linux. Use `python` on Windows. Replace placeholders such as `<psn_user_id>` with a PlayStation Network online ID.
+
+For first-time configuration, follow [Setup & First Run](setup-and-first-run.md). Use [Doctor Preflight](troubleshooting.md#doctor-preflight) to check a setup before monitoring.
+
 ## User Information Display Mode
 
 The tool provides a detailed user information display mode that shows comprehensive PlayStation profile insights. This mode displays information once and then exits. It does not run continuous monitoring.

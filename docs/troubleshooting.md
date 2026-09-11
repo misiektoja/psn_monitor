@@ -64,3 +64,15 @@ Debug lines are prefixed with `[DEBUG HH:MM:SS]`, then name the operation and li
 Every outbound call reports `outcome=OK` or `outcome=failed` with an `error=` field. Both modes redact every secret, including your npsso code, SMTP password, webhook URL and ntfy access token, and report a secret by name and source rather than by value. The npsso code also reports its length, because a code truncated while copying is the usual reason it stops working. Your SMTP password reports only that it is set.
 
 Both flags take effect before the configuration file is read, so they still work when the problem you are chasing is the configuration file itself. A flag you type always wins over `VERBOSE_MODE` or `DEBUG_MODE` in the configuration file. Set `DELIVERY_CONFIRMATIONS = False` to keep verbose mode without the `* Email delivered` and `* Webhook delivered` lines, which is worth doing when alerts are frequent.
+
+## Installation and Command Problems
+
+If Python or `pip` is missing, use the [Python install walkthrough](installation.md#new-to-python-install-everything).
+
+If `psn_monitor` is not found after installation, close the terminal and open it again. On Windows with Python Install Manager, run `py install --refresh` to refresh command aliases. For a pipx installation, run `pipx ensurepath` then reopen the terminal. If you downloaded the script, use the [manual command](usage.md#command-format) from its directory.
+
+If `pip` reports an externally managed environment, follow the pipx steps in [Installation](installation.md#install-psn-monitor-after-python-check). Use `pipx upgrade psn_monitor` for later upgrades.
+
+If the tool cannot import a dependency, install the dependencies with the same Python interpreter that runs the script. Use `python3 -m pip install -r requirements.txt` on macOS or Linux, or `python -m pip install -r requirements.txt` on Windows, with the requirements file matching your downloaded script.
+
+If a new terminal cannot find your saved settings, return to the directory used during setup or pass both `--config-file` and `--env-file` explicitly. Run `psn_monitor --doctor <psn_user_id>` to see which settings are loaded.

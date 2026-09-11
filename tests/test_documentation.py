@@ -273,7 +273,7 @@ def test_the_page_set_is_deliberate():
 # Verifies the installation page has one section per install method the tool can actually detect
 def test_the_documented_install_methods_match_the_code():
     path = DOCS_DIR / "installation.md"
-    install_sections = [line[3:].strip() for line in prose_lines(path) if line.startswith("## ") and "nstall" in line]
+    install_sections = [line[3:].strip() for line in prose_lines(path) if line.startswith("## ") and line[3:].startswith(("Install from ", "Manual Installation"))]
     known = {monitor.install_method_display_name("pip"), monitor.install_method_display_name("manual")}
     # Read whole, since the commands each method needs live in the fenced blocks the prose reader drops
     page = path.read_text(encoding="utf-8")

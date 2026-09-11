@@ -14,17 +14,27 @@ Powerful tool for real-time monitoring of **Sony PlayStation (PSN) players' acti
 
 **Full documentation: [misiektoja.github.io/psn_monitor](https://misiektoja.github.io/psn_monitor/)**
 
-### 🚀 Quick Install
+<a id="-quick-install"></a>
+<a id="-quick-install-run"></a>
+### 🚀 Quick Install & Run
+
+New to Python or unsure what is installed? Follow the [Python install walkthrough](https://misiektoja.github.io/psn_monitor/installation/#new-to-python-install-everything) first.
+
+Install from PyPI:
 
 ```sh
 pip install psn_monitor
 ```
 
-The guided setup asks a few questions and writes a ready-to-run configuration:
+Run the setup wizard:
 
 ```sh
 psn_monitor --setup
 ```
+
+The wizard asks for the target, authentication, polling intervals and optional notifications. Review the settings before saving them. See [Setup & First Run](https://misiektoja.github.io/psn_monitor/setup-and-first-run/) for the service-specific steps.
+
+For the manual single-file method, dependencies and upgrade commands, see [Installation](https://misiektoja.github.io/psn_monitor/installation/).
 
 <p align="center">
    <img src="https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/assets/psn_monitor.png" alt="psn_monitor_screenshot" width="90%"/>
@@ -41,11 +51,32 @@ psn_monitor --setup
 - **Coloured terminal output** with a configurable theme, switched off automatically when the output is redirected
 - **Flexible configuration** through config files, dotenv files, environment variables and command-line arguments
 
+<a id="common-commands"></a>
+## Common Commands
+
+Use [Quick Install & Run](#-quick-install-run) for first-time setup. These examples use the PyPI command. See [Command Format by Installation Method](https://misiektoja.github.io/psn_monitor/usage/#command-format) for manual-script equivalents.
+
+Replace the target placeholders with a PlayStation Network online ID. Monitoring requires the [PSN NPSSO code](https://misiektoja.github.io/psn_monitor/setup-and-first-run/#psn-npsso-code) described in the setup guide.
+
+| I want to... | Run this |
+| --- | --- |
+| Configure the target, credentials and alerts | `psn_monitor --setup` |
+| Start monitoring with saved credentials | `psn_monitor <psn_user_id>` |
+| Check setup before monitoring | `psn_monitor --doctor <psn_user_id>` |
+| Enter or replace credentials through hidden prompts | `psn_monitor --set-npsso` |
+| Use a specific configuration and secrets file | `psn_monitor --config-file psn_monitor.conf --env-file .env <psn_user_id>` |
+| Show profile details once | `psn_monitor <psn_user_id> -i` |
+| List every supported command-line option | `psn_monitor --help` |
+
+The monitored account must expose the activity described in [User Privacy Settings](https://misiektoja.github.io/psn_monitor/setup-and-first-run/#user-privacy-settings).
+
+Monitoring runs until you press `Ctrl+C`. For email, Discord and ntfy alerts, CSV output and service-specific commands, see [Usage](https://misiektoja.github.io/psn_monitor/usage/). If a run fails, start with [Doctor Preflight](https://misiektoja.github.io/psn_monitor/troubleshooting/#doctor-preflight).
+
 ## Documentation
 
 | Page | What it covers |
 | --- | --- |
-| [Installation](https://misiektoja.github.io/psn_monitor/installation/) | Requirements, installing from PyPI or by hand, upgrading |
+| [Installation](https://misiektoja.github.io/psn_monitor/installation/) | Python walkthrough, PyPI or manual installation, upgrades |
 | [Setup & First Run](https://misiektoja.github.io/psn_monitor/setup-and-first-run/) | The guided wizard, the npsso code, the privacy settings the monitored account needs |
 | [Configuration](https://misiektoja.github.io/psn_monitor/configuration/) | Config file, SMTP, webhooks, TLS verification, storing secrets, check intervals |
 | [Usage](https://misiektoja.github.io/psn_monitor/usage/) | Monitoring mode, user information mode, notifications, CSV export, signals, terminal colours |

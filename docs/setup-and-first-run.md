@@ -1,5 +1,12 @@
 # Setup & First Run
 
+## Before You Start
+
+Install the tool using [Installation](installation.md). You will need a PlayStation Network online ID and the [PSN NPSSO code](#psn-npsso-code). The wizard collects credentials through hidden prompts.
+
+Open a terminal in the directory where you want to keep the configuration and monitoring output. Later commands should use that directory or explicitly select the same `--config-file` and `--env-file` paths. Manual installations use the [command equivalents](usage.md#command-format).
+
+<a id="setup-wizard"></a>
 ## Guided Setup
 
 The quickest way to a working setup is the guided one:
@@ -72,3 +79,7 @@ The user should go to [PlayStation account management](https://www.playstation.c
 The value in **Privacy Settings → Personal Info | Messaging → Online Status and Now Playing** should be set to **Friends only** or **Anyone**.
 
 If it is set to **Friends only**, the account whose npsso code you use has to be a friend of the monitored account. `--doctor` reports whether the presence is actually visible to you.
+
+## Continue with Usage
+
+Use [Usage](usage.md) for monitoring and output options or [Configuration](configuration.md) to adjust saved settings. If setup or monitoring fails, run [Doctor Preflight](troubleshooting.md#doctor-preflight) and follow the reported recovery steps.
