@@ -63,4 +63,4 @@ Debug lines are prefixed with `[DEBUG HH:MM:SS]`, then name the operation and li
 
 Every outbound call reports `outcome=OK` or `outcome=failed` with an `error=` field. Both modes redact every secret, including your npsso code, SMTP password, webhook URL and ntfy access token, and report a secret by name and source rather than by value. The npsso code also reports its length, because a code truncated while copying is the usual reason it stops working. Your SMTP password reports only that it is set.
 
-Both flags take effect before the configuration file is read, so they still work when the problem you are chasing is the configuration file itself. A flag you type always wins over `VERBOSE_MODE` or `DEBUG_MODE` in the configuration file.
+Both flags take effect before the configuration file is read, so they still work when the problem you are chasing is the configuration file itself. A flag you type always wins over `VERBOSE_MODE` or `DEBUG_MODE` in the configuration file. Set `DELIVERY_CONFIRMATIONS = False` to keep verbose mode without the `* Email delivered` and `* Webhook delivered` lines, which is worth doing when alerts are frequent.

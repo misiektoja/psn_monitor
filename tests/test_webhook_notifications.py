@@ -166,6 +166,17 @@ def test_an_unknown_alert_type_is_never_enabled(pm_module, monkeypatch):
     assert pm_module.webhook_event_enabled("trophies") is False
 
 
+# Verifies DELIVERY_CONFIRMATIONS drops the delivery line without turning the rest of verbose mode off
+def test_delivery_confirmations_can_be_turned_off(pm_module, monkeypatch, discord_enabled, webhook_session, capsys):
+    webhook_session()
+    monkeypatch.setattr(pm_module, "VERBOSE_MODE", True)
+    monkeypatch.setattr(pm_module, "DELIVERY_CONFIRMATIONS", False)
+
+    assert pm_module.send_webhook("PSN user is now online", "body text", "status") == 0
+
+    assert "Webhook delivered" not in capsys.readouterr().out
+
+
 # Verifies the Discord payload carries the alert, disables mentions and sends the colour as a number
 def test_the_discord_payload_carries_the_alert_and_disables_mentions(pm_module, discord_enabled, webhook_session):
     session = webhook_session()

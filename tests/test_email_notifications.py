@@ -190,7 +190,17 @@ def test_the_delivery_outcome_is_reported_not_only_the_attempt(pm_module, monkey
 
     printed = capsys.readouterr().out
     assert "SMTP delivery: host=smtp.example.test, port=587, starttls=True, timeout=15s, user=monitor@example.test" in printed
-    assert "* Email delivered to alerts@example.test: psn_monitor: test" in printed
+    assert "* Email delivered to alerts@example.test: 'psn_monitor: test'" in printed
+
+
+# Verifies DELIVERY_CONFIRMATIONS drops the delivery line without turning the rest of verbose mode off
+def test_delivery_confirmations_can_be_turned_off(pm_module, monkeypatch, smtp_double, capsys):
+    monkeypatch.setattr(pm_module, "VERBOSE_MODE", True)
+    monkeypatch.setattr(pm_module, "DELIVERY_CONFIRMATIONS", False)
+
+    assert pm_module.send_email("psn_monitor: test", "body", "", True) == 0
+
+    assert "Email delivered" not in capsys.readouterr().out
 
 
 # Verifies a failed delivery is not reported as delivered

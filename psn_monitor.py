@@ -247,6 +247,10 @@ VERBOSE_MODE = False
 # Can also be enabled via the --debug flag
 DEBUG_MODE = False
 
+# Whether verbose output confirms each delivered email and webhook alert
+# Applies only when VERBOSE_MODE is enabled
+DELIVERY_CONFIRMATIONS = True
+
 # Max characters per line when printing to screen to avoid line wrapping
 # Does not affect log file output
 # Set to 999 to auto-detect terminal width
@@ -364,6 +368,7 @@ DISABLE_LOGGING = False
 ASCII_LOG_SEPARATORS = "Auto"
 VERBOSE_MODE = False
 DEBUG_MODE = False
+DELIVERY_CONFIRMATIONS = True
 
 # True once monitoring has printed its header, so a verbose notice after that closes its own block
 MONITORING_ACTIVE = False
@@ -1187,6 +1192,12 @@ def debug_print(_operation, **fields):
 def verbose_print(message):
     if VERBOSE_MODE:
         print(f"* {sanitize_error_text(message)}")
+
+
+# Prints one delivery confirmation in verbose mode unless DELIVERY_CONFIRMATIONS turns them off
+def verbose_delivery_print(message):
+    if DELIVERY_CONFIRMATIONS:
+        verbose_print(message)
 
 
 # Prints verbose-only notices as one block, so a standalone line is not left without the timestamp trailer
@@ -2309,7 +2320,7 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         print_recovery_error(e, context="smtp", detail=f"Sending the notification to {RECEIVER_EMAIL} failed: {e}")
         return 1
     # Reported separately from the "Sending email notification" line, which only records the attempt
-    verbose_print(f"Email delivered to {RECEIVER_EMAIL}: {subject}")
+    verbose_delivery_print(f"Email delivered to {RECEIVER_EMAIL}: '{subject}'")
     debug_print("SMTP delivery", recipient=RECEIVER_EMAIL, outcome="OK")
     return 0
 
@@ -2679,7 +2690,7 @@ def send_webhook(title, description, notification_type="status", force=False, sl
             retryable = response.status_code == 429 or 500 <= response.status_code <= 599
             debug_print("Webhook delivery", channel=provider, attempt=f"{attempt_number}/{WEBHOOK_MAX_ATTEMPTS}", status=response.status_code, retryable=retryable)
             if 200 <= response.status_code <= 299:
-                verbose_print(f"Webhook delivered through {webhook_provider_display_name(provider)}: {webhook_values['title']}")
+                verbose_delivery_print(f"Webhook delivered through {webhook_provider_display_name(provider)}: '{webhook_values['title']}'")
                 return 0
             last_error = f"HTTP {response.status_code}: {str(getattr(response, 'text', ''))[:200]}"
             if not retryable or attempt_number == WEBHOOK_MAX_ATTEMPTS:
