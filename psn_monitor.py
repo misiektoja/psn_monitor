@@ -674,11 +674,15 @@ def install_method_display_name(method=None):
     return {"pip": "PyPI install", "manual": "downloaded script"}.get(method or detect_install_method(), "unknown install")
 
 
+# The documentation placeholders a printed command carries unquoted, because the reader replaces them before running it
+COMMAND_PLACEHOLDERS = frozenset(("<psn_user_id>", "<npsso_code>", "<new-file>"))
+
+
 # Returns one command argument quoted for the shell of the host operating system
 def quote_command_argument(argument):
     text = str(argument)
-    # A <placeholder> is documentation for the reader to replace, so quoting it would only be noise
-    if text.startswith("<") and text.endswith(">"):
+    # Matched exactly rather than by shape, since any other angle-bracket value is user-derived and would otherwise reach the shell unquoted
+    if text in COMMAND_PLACEHOLDERS:
         return text
     return subprocess.list2cmdline([text]) if platform.system() == "Windows" else shlex.quote(text)
 

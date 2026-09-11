@@ -501,6 +501,8 @@ def test_the_missing_target_command_carries_the_files_and_the_placeholder(pm_mod
 def test_a_placeholder_argument_is_left_unquoted(pm_module):
     assert pm_module.render_command(["<psn_user_id>", "-n", "<npsso_code>"], include_paths=False, method="pip") == "psn_monitor <psn_user_id> -n <npsso_code>"
     assert pm_module.render_command(["a value"], include_paths=False, method="pip") == "psn_monitor 'a value'"
+    # A value only shaped like a placeholder is user input, so pasting the rendered command must not run a substitution
+    assert pm_module.render_command(["<$(echo>marker)>"], include_paths=False, method="pip") == "psn_monitor '<$(echo>marker)>'"
 
 
 # Verifies --generate-config keeps the paths out, since it writes the new file at the name in the command
