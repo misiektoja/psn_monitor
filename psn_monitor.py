@@ -3129,18 +3129,6 @@ def load_config_file(config_path, namespace=None, report_errors=True, advice_out
     return False
 
 
-# Resolves an executable path by checking if it's a valid file or searching in $PATH
-def resolve_executable(path):
-    if os.path.isfile(path) and os.access(path, os.X_OK):
-        return path
-
-    found = shutil.which(path)
-    if found:
-        return found
-
-    raise FileNotFoundError(f"Could not find executable '{path}'")
-
-
 # Normalizes Unicode punctuation, symbols and spacing in a string to plain ASCII
 def normalize_ascii(s):
     if not isinstance(s, str):
