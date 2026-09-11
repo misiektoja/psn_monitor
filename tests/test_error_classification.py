@@ -236,41 +236,58 @@ def test_every_retried_category_maps_to_a_policy(pm_module):
 
 
 # Every place that reports a problem without the classifier, and the reason it cannot use one
+# Every place that reports a problem without the classifier and the reason it cannot use one
 CLASSIFIER_EXEMPTIONS = {
     "or higher required": "runs at import on an interpreter too old to load the rest of the file",
     "Couldn't find the pytz library": "raised at import, while a dependency the classifier itself needs is missing",
     "Couldn't find the PSNAWP library": "raised at import, while a dependency the classifier itself needs is missing",
-    "sanitize_error_text(message)": "the debug and verbose printers, whose content the redactor guard covers",
     "Cannot clear the screen contents": "a cosmetic notice with nothing for the operator to recover from",
     "Rebuilt the PSNAWP session after": "reports the recovery action taken, printed under the classified advice",
     "Setup needs a writable dotenv file": "an answer hint inside the question that re-asks, where the next prompt is the recovery",
 }
 
 # Words that mark a printed line as a report of something going wrong
-TROUBLE_WORDS = re.compile(r"error|cannot|can't|failed|failure|invalid|not valid|missing|not installed|no such|refused|unsupported|needs to be", re.IGNORECASE)
+TROUBLE_WORDS = re.compile(r"error|cannot|can't|failed|failure|invalid|not valid|missing|not installed|no such|refused|unsupported|needs to be|could not|couldn't|unable to", re.IGNORECASE)
 
 
-# Verifies every reported problem carries a recovery category, so the operator is never left without a fix
-def test_every_reported_problem_goes_through_the_classifier():
-    source = SOURCE.read_text(encoding="utf-8")
-    unexplained = []
+# Returns the literal text one print argument shows, leaving out the parts an f-string fills at runtime
+def printed_text(node):
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else ""
+    if isinstance(node, ast.JoinedStr):
+        return "".join(printed_text(part) for part in node.values)
+    if isinstance(node, ast.BinOp):
+        return printed_text(node.left) + printed_text(node.right)
+    return ""
+
+
+# Returns every printed line that reads as a problem, paired with the line it sits on
+def reported_problems(source):
+    found = []
     for node in ast.walk(ast.parse(source)):
         if not (isinstance(node, ast.Call) and getattr(node.func, "id", "") in {"print", "SystemExit"}):
             continue
-        segment = ast.get_source_segment(source, node) or ""
-        if TROUBLE_WORDS.search(segment) and not any(marker in segment for marker in CLASSIFIER_EXEMPTIONS):
-            unexplained.append(f"line {node.lineno}: {' '.join(segment.split())[:120]}")
+        text = " ".join(printed_text(argument) for argument in node.args)
+        if TROUBLE_WORDS.search(text):
+            found.append((node.lineno, " ".join(text.split())))
+    return found
+
+
+# A problem reported without a category leaves the reader with a message and no next step
+def test_every_reported_problem_goes_through_the_classifier():
+    unexplained = [f"line {line}: {text[:120]}" for line, text in reported_problems(SOURCE.read_text(encoding="utf-8")) if not any(marker in text for marker in CLASSIFIER_EXEMPTIONS)]
 
     assert unexplained == []
 
 
-# Verifies the guard above still has something to find, so an exemption cannot quietly cover everything
+# An exemption list that stopped matching anything would quietly cover the whole file
 def test_the_classifier_guard_still_inspects_the_source():
     source = SOURCE.read_text(encoding="utf-8")
     inspected = [node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.Call) and getattr(node.func, "id", "") in {"print", "SystemExit"}]
+    problems = reported_problems(source)
 
-    assert len(inspected) > 100
-    assert all(marker in source for marker in CLASSIFIER_EXEMPTIONS)
+    assert len(inspected) > 200
+    assert all(any(marker in text for _, text in problems) for marker in CLASSIFIER_EXEMPTIONS), "an exemption stopped matching a printed line"
 
 
 # Verifies the install is detected from how the tool was started, since the commands to print differ
