@@ -2937,13 +2937,12 @@ def build_webhook_payload(title, description, notification_type, payload_values=
         raise ValueError("WEBHOOK_TEMPLATE could not be formatted with the supported placeholders") from exc
     if not isinstance(payload, dict):
         raise ValueError("WEBHOOK_TEMPLATE must be a JSON object or a dictionary")
-    if isinstance(payload, dict):
-        # An empty name or avatar means "use the webhook default", which Discord expects as an absent key
-        if payload.get("username") == "":
-            payload.pop("username")
-        if payload.get("avatar_url") == "":
-            payload.pop("avatar_url")
-        payload["allowed_mentions"] = {"parse": []}
+    # An empty name or avatar means "use the webhook default", which Discord expects as an absent key
+    if payload.get("username") == "":
+        payload.pop("username")
+    if payload.get("avatar_url") == "":
+        payload.pop("avatar_url")
+    payload["allowed_mentions"] = {"parse": []}
     return payload
 
 
