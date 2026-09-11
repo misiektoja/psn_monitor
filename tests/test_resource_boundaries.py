@@ -13,6 +13,7 @@ def test_info_resource_exhaustion_stops_followup_requests(monkeypatch, capsys):
     monkeypatch.setattr(monitor, "PSN_NPSSO", "synthetic-npsso")
     monkeypatch.setattr(monitor, "LOCAL_TIMEZONE", "UTC")
     calls = []
+
     # Supplies realistic HTTP payloads to the real authentication and request handlers
     def send(session, request, **kwargs):
         endpoint = urlparse(request.url).path

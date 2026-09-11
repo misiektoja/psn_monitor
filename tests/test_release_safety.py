@@ -80,6 +80,7 @@ def test_normal_startup_validates_before_network(monkeypatch, tmp_path, capsys):
     setting = "SPOTIFY_CHECK_INTERVAL" if hasattr(monitor, "runtime_numeric_errors") else "CHECK_INTERNET_TIMEOUT"
     config.write_text(setting + " = 1e309\n", encoding="utf-8")
     calls = []
+
     # Records attempts at the actual socket boundary without replacing a provider client
     def offline(sock, address):
         calls.append(address)
@@ -92,6 +93,7 @@ def test_normal_startup_validates_before_network(monkeypatch, tmp_path, capsys):
     assert not calls
     output = capsys.readouterr()
     assert setting in output.out + output.err
+
 
 @pytest.mark.parametrize("record", [{}, [], [1], [-1, "online"], [1e309, "online"], ["yesterday", "online"], [1700000000, {}]])
 # Damaged saved status is rejected before any caller performs date arithmetic
@@ -111,6 +113,7 @@ def test_valid_saved_status_keeps_extra_fields(tmp_path):
     path.write_text(json.dumps(record), encoding="utf-8")
     assert monitor.read_status_record(path) == record
 
+
 # Stops the complete info flow after the first real PSNAWP rate-limit response
 def test_info_rate_limit_stops_followup_requests(monkeypatch, capsys):
     from urllib.parse import urlparse
@@ -118,6 +121,7 @@ def test_info_rate_limit_stops_followup_requests(monkeypatch, capsys):
     monkeypatch.setattr(monitor, "PSN_NPSSO", "synthetic-npsso")
     monkeypatch.setattr(monitor, "LOCAL_TIMEZONE", "UTC")
     calls = []
+
     # Supplies realistic HTTP payloads to the real authentication and request handlers
     def send(session, request, **kwargs):
         endpoint = urlparse(request.url).path

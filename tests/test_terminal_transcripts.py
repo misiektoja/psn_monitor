@@ -187,4 +187,3 @@ def test_the_wizard_transcript_holds_the_output_contract(tmp_path):
     assert str(config) in text
     assert config.is_file(), "the wizard reported a file it did not write"
     assert exit_code == 0
-

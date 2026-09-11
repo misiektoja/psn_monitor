@@ -2,9 +2,11 @@ import json
 from urllib.parse import parse_qs, urlsplit
 import requests
 
+
 # Stops a bounded run at the HTTP boundary after the relevant output was produced
 class EndScenario(BaseException):
     pass
+
 
 # Supplies PSN responses without replacing clients or iterators
 class PsnHTTPPeer:

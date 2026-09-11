@@ -779,6 +779,7 @@ def test_the_credential_guidance_opens_its_own_group(capsys):
     assert f"\n\nSign in at https://my.playstation.com then copy the npsso value from: {monitor.NPSSO_SOURCE_URL}\n" in transcript
     assert "* Sign in at" not in transcript
 
+
 # Verifies the guide link opens the setup page the sibling monitors link, with no section fragment
 def test_the_welcome_guide_link_opens_the_shared_setup_page():
     assert monitor.QUICK_START_GUIDE_URL.endswith("/setup-and-first-run/")
