@@ -792,7 +792,8 @@ def recovery_exception_types():
 # Classifies a failure by exception type, then by message, without contacting PSN
 def classify_recovery_error_offline(error=None, context="runtime", detail=""):
     safe_detail = sanitize_error_text(detail or error or "")
-    message = str(detail or error or "").lower()
+    # Both are matched, since a caller that adds context would otherwise hide the error text the rules read
+    message = " ".join(part for part in (str(detail or ""), str(error or "")) if part).lower()
     monitoring = context == "monitor"
 
     if error is not None and is_too_many_open_files(error):

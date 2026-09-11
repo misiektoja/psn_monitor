@@ -515,3 +515,12 @@ def test_a_path_the_caller_passed_is_not_repeated(pm_module, monkeypatch):
     rendered = pm_module.tool_command("--doctor", "--config-file", "/tmp/other.conf", method="pip")
 
     assert rendered == "psn_monitor --doctor --config-file /tmp/other.conf --env-file /etc/psn.env"
+
+
+# Verifies added context does not replace the error text the rules read, which used to make every such failure unknown
+@pytest.mark.parametrize("message, expected", [("429 rate limit exceeded", "psn.rate_limited"), ("Connection timed out", "network.timeout")])
+def test_a_caller_supplied_detail_does_not_hide_the_error(pm_module, message, expected):
+    advice = pm_module.classify_recovery_error(Exception(message), detail="Cannot read the PSN profile")
+
+    assert advice.code == expected
+    assert "Cannot read the PSN profile" in advice.detail
