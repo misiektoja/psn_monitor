@@ -6351,6 +6351,13 @@ def _dotenv_contains_key(path, key):
     return any(match_dotenv_assignment(line, key) for line in target.read_text(encoding="utf-8").splitlines())
 
 
+# Returns the dotenv parser's own bindings for one file's text, where a quoted value written across several lines is one binding
+def _dotenv_bindings(text):
+    from io import StringIO
+    from dotenv.parser import parse_stream
+    return list(parse_stream(StringIO(text)))
+
+
 # Replaces dotenv assignments in place in one pass, leaving every other line and every comment untouched
 def update_dotenv_file(destination, updates):
     if not hasattr(updates, "items"):
@@ -6364,35 +6371,40 @@ def update_dotenv_file(destination, updates):
         if not isinstance(value, str):
             raise TypeError(f"Dotenv value for {key} must be a string")
     existing = target.read_text(encoding="utf-8") if target.is_file() else ""
-    lines = []
+    output_parts = []
     replaced = set()
-    for line in existing.splitlines():
-        rewritten = None
-        for key in updates:
-            match = match_dotenv_assignment(line, key)
-            if not match:
-                continue
-            if key in replaced:
-                rewritten = ""
-                break
-            replaced.add(key)
-            # A secret cleared by its owner is removed rather than emptied, so a disabled value cannot linger here
-            if not updates[key]:
-                rewritten = ""
-                break
-            # An already exported line is rewritten in place. Appending a second assignment would leave the
-            # old credential on disk, with only the load order deciding which one wins
-            rewritten = render_dotenv_assignment(key, updates[key], match.group(1))
-            break
-        if rewritten == "":
+    # Rebuilt from the parser's own bindings rather than physical lines, since a quoted value can span several
+    # of them and replacing only the first leaves the rest of the old secret behind as broken syntax
+    for binding in _dotenv_bindings(existing):
+        original = binding.original.string
+        blank_prefix = original[:len(original) - len(original.lstrip("\r\n"))]
+        if binding.key is None or binding.key not in updates:
+            output_parts.append(original)
             continue
-        lines.append(line if rewritten is None else rewritten)
+        # A secret cleared by its owner is removed rather than emptied, so a disabled value cannot linger here
+        if binding.key in replaced or not updates[binding.key]:
+            output_parts.append(blank_prefix)
+            replaced.add(binding.key)
+            continue
+        replaced.add(binding.key)
+        # An already exported assignment is rewritten in place. Appending a second one would leave the old
+        # credential on disk, with only the load order deciding which one wins
+        head = original[len(blank_prefix):]
+        output_parts.append(f"{blank_prefix}{render_dotenv_assignment(binding.key, updates[binding.key], head[:head.index(binding.key)])}\n")
+    content = "".join(output_parts)
+    # A file that did not end in a newline would otherwise take the first new assignment onto its last line
+    if content and not content.endswith("\n"):
+        content += "\n"
     for key, value in updates.items():
         if key not in replaced and value:
-            lines.append(render_dotenv_assignment(key, value))
+            content += f"{render_dotenv_assignment(key, value)}\n"
+    # Checked before it replaces the file, so a rewrite can never publish a secret the next run cannot read back
+    rewritten = {binding.key: binding.value for binding in _dotenv_bindings(content) if binding.key is not None}
+    if any(rewritten.get(key, "") != value for key, value in updates.items()):
+        raise ValueError(f"Updating '{{target}}' would not store the requested values")
     # Written through a temporary file, so an interrupted write cannot leave the file without its secrets.
     # No backup is taken here: a copy of the credential being replaced is the one thing not worth keeping
-    write_file_atomically(target, "\n".join(lines) + "\n")
+    write_file_atomically(target, content)
     for key, value in updates.items():
         verbose_print(f"{'Saved' if value else 'Removed'} {key} in '{target}'")
     return str(target)
