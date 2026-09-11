@@ -44,7 +44,7 @@ If you saved it under a different name or in a different directory, specify its 
 psn_monitor <psn_user_id> --config-file /path/psn_monitor_new.conf
 ```
 
-`--config-file none` switches automatic config discovery off for one run.
+`--config-file none` switches automatic config discovery off for one run. The startup summary reports `Discovery disabled` when it is in effect.
 
 ## Target Account
 

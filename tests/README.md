@@ -46,6 +46,7 @@ and again before anything is published to PyPI.
 | `test_repository_contracts.py` | Governance documents, issue templates, action pinning, release gating and the CI contract |
 | `test_repository_metadata.py` | Governance files, citation, funding, line endings, the declared editor style, the pinned linter and release integrity |
 | `test_startup_summary.py` | The startup summary rows, which view each one appears in, what the log file keeps and the welcome screen |
+| `test_startup_summary_channels.py` | Summary rows naming the webhook provider, the mail server, the masked recipient, the delivery confirmations and the runtime |
 | `test_tls_verification.py` | The `VERIFY_SSL` setting: which requests honour it, what is reported while it is off and its shipped default |
 | `test_terminal_transcripts.py` | What the doctor report, the welcome screen and the guided setup print on a real terminal |
 | `test_terminal_color.py` | The colour theme, which part colours which token, where colour must never reach and how it is switched off |

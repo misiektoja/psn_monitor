@@ -2721,7 +2721,7 @@ def send_notification_channels(notification_type, subject, body, body_html="", e
         print(f"Sending email notification to {RECEIVER_EMAIL}")
         email_delivered = send_email(subject, body, body_html, SMTP_SSL) == 0
     if webhook_attempted:
-        print("Sending webhook notification")
+        print(f"Sending webhook notification via {webhook_provider_display_name()}")
         webhook_delivered = send_webhook(subject, body, notification_type, force=True) == 0
     # Delivery, not the attempt, so a channel that failed is retried while one that succeeded is not resent
     return email_delivered, webhook_delivered
@@ -4905,6 +4905,34 @@ def startup_webhook_notification_state():
     return f"On ({', '.join(enabled)}) through {webhook_provider_display_name()}" if enabled else "Off"
 
 
+# Hides the middle of an address's local part, so a log can be shared while the reader can still spot a typo
+def mask_email_address(address):
+    text = str(address or "").strip()
+    local, at_sign, domain = text.partition("@")
+    if not at_sign or not local or not domain:
+        return text
+    masked = f"{local[0]}{'*' * (len(local) - 2)}{local[-1]}" if len(local) > 2 else f"{local[0]}{'*' * (len(local) - 1)}"
+    return f"{masked}@{domain}"
+
+
+# Names the mail server this run would use, leaving out the account that signs in to it
+def startup_email_transport():
+    if not SMTP_HOST or not SMTP_PORT:
+        return "Not configured"
+    return f"{SMTP_HOST}:{SMTP_PORT} ({'STARTTLS' if SMTP_SSL else 'TLS off'})"
+
+
+# Names the webhook service alerts would reach, with its host and, for ntfy, whether an access token is set
+def startup_webhook_provider():
+    if not WEBHOOK_ENABLED or not str(WEBHOOK_URL or "").strip():
+        return "Not configured"
+    host = webhook_destination_host()
+    details = [host] if host else []
+    if normalized_webhook_provider() == "ntfy":
+        details.append("access token set" if NTFY_ACCESS_TOKEN else "no access token")
+    return webhook_provider_display_name() + (f" ({', '.join(details)})" if details else "")
+
+
 # Builds every summary row, deciding per row whether it belongs in the concise view, the full view and the log
 def build_startup_summary(psn_user_id=None, config_path=None, env_path=None, log_path=None):
     supplied = doctor_secret_sources()
@@ -4917,17 +4945,25 @@ def build_startup_summary(psn_user_id=None, config_path=None, env_path=None, log
     return [
         StartupSummaryRow("Target", str(psn_user_id) if psn_user_id else "None", concise=True),
         StartupSummaryRow("Polling intervals", f"[offline: {display_time(PSN_CHECK_INTERVAL)}] [online: {display_time(PSN_ACTIVE_CHECK_INTERVAL)}]", concise=True),
+        StartupSummaryRow("Offline grace period", display_time(OFFLINE_INTERRUPT) if OFFLINE_INTERRUPT else "Disabled"),
         StartupSummaryRow("Notifications (email)", startup_notification_state(), concise=True),
+        StartupSummaryRow("Email transport", startup_email_transport()),
+        StartupSummaryRow("Email recipient", mask_email_address(RECEIVER_EMAIL) if RECEIVER_EMAIL else "Not configured"),
         StartupSummaryRow("Notifications (webhook)", startup_webhook_notification_state(), concise=True),
+        StartupSummaryRow("Webhook provider", startup_webhook_provider()),
+        StartupSummaryRow("Delivery confirmations", str(DELIVERY_CONFIRMATIONS)),
         StartupSummaryRow("Output", output_state, concise=True, full=False),
         StartupSummaryRow("Output logging", str(log_path) if log_path else "Disabled"),
-        StartupSummaryRow("Config", str(config_path) if config_path else "None", concise=True),
+        StartupSummaryRow("Config", str(config_path) if config_path else ("Discovery disabled" if CONFIG_DISCOVERY_DISABLED else "None"), concise=True),
         StartupSummaryRow("Dotenv", str(env_path) if env_path else "None", concise=True),
         # Each optional feature earns a concise row only once it is actually switched on
         StartupSummaryRow("Liveness output", display_time(LIVENESS_CHECK_INTERVAL) if LIVENESS_CHECK_INTERVAL else "Disabled", concise=bool(LIVENESS_CHECK_INTERVAL)),
         StartupSummaryRow("CSV output", CSV_FILE or "Disabled", concise=bool(CSV_FILE)),
         StartupSummaryRow("Status file", resolve_status_file(psn_user_id) if psn_user_id else "None"),
         StartupSummaryRow("Terminal truncation", f"{TRUNCATE_CHARS} chars" if TRUNCATE_CHARS else "Disabled", concise=bool(TRUNCATE_CHARS)),
+        StartupSummaryRow("Process id", str(os.getpid())),
+        StartupSummaryRow("Python version", platform.python_version()),
+        StartupSummaryRow("Operating system", f"{platform.platform(terse=True)} ({platform.machine()})"),
         StartupSummaryRow("Local timezone", LOCAL_TIMEZONE),
         StartupSummaryRow("Install method", install_method_display_name()),
         StartupSummaryRow("Secrets from dotenv", ", ".join(from_dotenv) if from_dotenv else "None"),
