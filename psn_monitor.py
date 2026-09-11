@@ -836,6 +836,11 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         return make_recovery_advice("file.unreadable", safe_detail or "A file the tool needs could not be read", recovery_fix_with_guide("Check that the path exists and that this user can read it, then retry", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
 
     if context == "file.unwritable":
+        # The wizard reaches this either because a destination was switched off or because the path cannot be written
+        if "nowhere to write the secrets" in message:
+            return make_recovery_advice("file.unwritable", safe_detail or "--setup has nowhere to write the secrets", recovery_fix_with_guide("Replace '--env-file none' with a writable path, or drop the flag to write .env in the current directory", SECRETS_GUIDE_URL), False, safe_detail)
+        if "nowhere to write the configuration" in message:
+            return make_recovery_advice("file.unwritable", safe_detail or "--setup has nowhere to write the configuration", recovery_fix_with_guide(f"Replace '--config-file none' with a writable path, or drop the flag to write {DEFAULT_CONFIG_FILENAME} in the current directory", CONFIG_GUIDE_URL), False, safe_detail)
         return make_recovery_advice("file.unwritable", safe_detail or "A file the tool needs could not be written", recovery_fix_with_guide("Check that the directory exists, that this user can write to it and that there is free space, then retry", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
 
     if context == "connectivity":
@@ -5197,9 +5202,9 @@ def _wizard_validate_destination(path, label):
 # Resolves both setup destinations, refusing the disabled settings that leave nowhere to write
 def _wizard_destinations(config_file=None, env_file=None):
     if config_file is not None and str(config_file).casefold() == "none":
-        raise ValueError("--setup needs a config destination. Replace '--config-file none' with a writable path")
+        raise ValueError("--setup has nowhere to write the configuration")
     if env_file is not None and str(env_file).casefold() == "none":
-        raise ValueError("--setup needs a dotenv destination. Replace '--env-file none' with a writable path")
+        raise ValueError("--setup has nowhere to write the secrets")
     config_path = Path(config_file).expanduser() if config_file is not None else Path.cwd() / DEFAULT_CONFIG_FILENAME
     env_path = Path(env_file).expanduser() if env_file is not None else Path.cwd() / ".env"
     return _wizard_validate_destination(config_path, "Configuration destination"), _wizard_validate_destination(env_path, "Dotenv destination")
