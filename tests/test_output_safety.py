@@ -54,6 +54,17 @@ def test_a_short_secret_is_still_redacted_where_it_is_exposed(pm_module, monkeyp
     assert "<redacted>" in redacted
 
 
+# Verifies a secret that contains another one is redacted whole, since replacing the shorter value first
+# would leave the rest of the longer one on screen
+def test_a_secret_containing_another_secret_is_redacted_whole(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "SMTP_PASSWORD", "npssoValue1234567890")
+    monkeypatch.setattr(pm_module, "PSN_NPSSO", "aVeryLongnpssoValue1234567890tail")
+
+    redacted = pm_module.sanitize_error_text("PSN refused aVeryLongnpssoValue1234567890tail")
+
+    assert redacted == "PSN refused <redacted>"
+
+
 # Verifies a placeholder that was never filled in is not treated as a secret worth redacting
 def test_placeholder_values_are_not_treated_as_secrets(pm_module, monkeypatch):
     monkeypatch.setattr(pm_module, "PSN_NPSSO", "your_psn_npsso_code")

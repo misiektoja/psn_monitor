@@ -86,6 +86,18 @@ def test_message_carries_both_parts_as_utf8(pm_module, smtp_double):
     assert "Pokémon" in str(make_header(decode_header(message["Subject"])))
 
 
+# Verifies an ASCII body is still declared and encoded as UTF-8, so a later accented character in the same
+# thread does not arrive in a different encoding than the rest of the message
+def test_an_ascii_body_is_still_declared_utf8(pm_module, smtp_double):
+    pm_module.send_email("subject", "plain body", "<b>html body</b>", True)
+
+    message = email.message_from_string(smtp_double.last.sent["message"])
+    parts = [part for part in message.walk() if part.get_content_maintype() == "text"]
+    assert [part.get_content_charset() for part in parts] == ["utf-8", "utf-8"]
+    assert [part["Content-Transfer-Encoding"] for part in parts] == ["base64", "base64"]
+    assert [part.get_payload(decode=True) for part in parts] == [b"plain body", b"<b>html body</b>"]
+
+
 # Verifies an IP address is accepted as the SMTP host, which a self-hosted relay commonly uses
 def test_ip_address_host_is_accepted(pm_module, smtp_double, monkeypatch):
     monkeypatch.setattr(pm_module, "SMTP_HOST", "192.0.2.25")

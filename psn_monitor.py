@@ -1078,7 +1078,7 @@ def join_setting_names(names, conjunction):
 
 # Returns every redactable secret value currently known to the process, longest first so overlaps redact fully
 def known_secret_values():
-    values = [value for key in SECRET_KEYS for value in (globals().get(key),) if secret_is_set(value) and len(value) >= MIN_REDACTABLE_SECRET_LENGTH]
+    values = [value for key in SECRET_KEYS for value in (globals().get(key),) if isinstance(value, str) and secret_is_set(value) and len(value) >= MIN_REDACTABLE_SECRET_LENGTH]
     return sorted(set(values), key=len, reverse=True)
 
 
@@ -2231,14 +2231,10 @@ def send_email(subject, body, body_html, use_ssl, smtp_timeout=15):
         email_msg["Subject"] = str(Header(subject, 'utf-8'))
 
         if body:
-            part1 = MIMEText(body, 'plain')
-            part1 = MIMEText(body.encode('utf-8'), 'plain', _charset='utf-8')
-            email_msg.attach(part1)
+            email_msg.attach(MIMEText(body, 'plain', _charset='utf-8'))
 
         if body_html:
-            part2 = MIMEText(body_html, 'html')
-            part2 = MIMEText(body_html.encode('utf-8'), 'html', _charset='utf-8')
-            email_msg.attach(part2)
+            email_msg.attach(MIMEText(body_html, 'html', _charset='utf-8'))
 
         smtpObj.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, email_msg.as_string())
         smtpObj.quit()
