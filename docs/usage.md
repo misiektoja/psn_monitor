@@ -102,9 +102,9 @@ Monitoring mode prints the settings that are actually in effect before the first
 
 Optional features appear once you switch them on, and `TLS verification` appears here whenever certificate checking is off.
 
-`--verbose` or `--debug` replaces this with the complete list, in the order it prints: the tolerated offline gap, the mail server and the masked recipient, the webhook service alerts go to, whether the delivery confirmations are printed, the log file, the liveness interval, the CSV file, the status file, the truncation width, the process id, the Python version, the operating system, the resolved time zone, the install method, which secrets came from the dotenv file, the environment, the configuration file or the command line, whether certificate checking is on, how log separators are written, whether colour is actually in use and the two flags themselves.
+`--verbose` or `--debug` replaces this with the complete list, in the order it prints: the tolerated offline gap, the mail server and the masked recipient, the webhook service alerts go to and whether that channel is switched on, whether the delivery confirmations are printed, the log file, the liveness interval, the CSV file, the status file, the truncation width, the process id, the Python version, the operating system, the resolved time zone, the install method, which secrets came from the dotenv file, the environment, the configuration file or the command line, whether certificate checking is on, how log separators are written, whether colour is actually in use and the two flags themselves.
 
-The sibling monitors print the same rows in the same order, so a setting sits in the same place whichever of them you are reading.
+The sibling monitors print the same rows in the same order, so a setting sits in the same place whichever of them you are reading. Each channel's own settings are indented under it.
 
 The log file always receives the complete list, whichever view the terminal was shown, so a log attached to a bug report carries every effective setting.
 
