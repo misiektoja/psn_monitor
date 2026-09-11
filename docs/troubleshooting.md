@@ -14,18 +14,18 @@ It writes no files, and it exits `1` if any check failed so you can run it from 
 
 The report opens with the detected install method, then six sections, each row marked `[PASS]`, `[WARN]`, `[FAIL]` or `[SKIP]` and colour-coded by status when colour output is on:
 
-* **Environment**: the Python version against the supported minimum, the required libraries, and the optional ones with what stops working without each
-* **Configuration**: the configuration and dotenv files in use, which secrets are loaded and where each came from, the local time zone including whether an `Auto` setting can be detected, whether TLS verification is on, whether the timing and count settings hold usable values and the files the tool would write, including the ones `-b` and `-d` asked for on the command line
-* **Authentication**: whether PlayStation Network accepts your npsso code, and which account it signed in as
-* **Connectivity**: that the connectivity endpoint answers, using the configured URL, timeout and TLS setting
-* **Target**: whether the monitored PlayStation ID exists and shares its presence with your account
-* **Notifications**: whether email and webhook alerts can fire. The email row signs in to the configured SMTP server without sending a message, the webhook row checks the destination and headers without contacting the service, and each ready row lists the alert categories that channel would deliver
+* **Environment**: Python and dependencies
+* **Configuration**: selected files, secret sources, timezone, TLS verification and output paths
+* **Authentication**: npsso validity and the signed-in account
+* **Connectivity**: network access
+* **Target**: whether the PlayStation ID exists and shares its presence with you
+* **Notifications**: email sign-in and webhook settings, without sending a message
 
-Every `[WARN]` and `[FAIL]` row carries the `To fix:` line described in [Error Messages and Recovery](#error-messages-and-recovery), indented under the marker it belongs to, plus a `Guide:` link when a documentation page covers that row. A `[SKIP]` row names a check that could not run and says why. An explicitly selected dotenv path that does not exist is reported as a warning with the path and recovery command. Secrets are reported by name and never by value, which makes the whole report safe to paste into a bug report.
+Warnings and failures include a `To fix:` action and relevant guide links. `[SKIP]` explains why a check could not run. Secrets are reported by name and source without their values.
 
 If a channel passes and you are on an interactive terminal, the doctor offers to send one real test email and one real test webhook. Each is approved separately, and nothing is delivered without a `y`. Ctrl+C at either prompt ends the run rather than declining one test and asking the next.
 
-The report ends with a **Next steps** block naming the command that starts monitoring, carrying the same `--config-file` and `--env-file` this run checked. It carries the target this run used, leaves it out when the configuration file already supplies one and otherwise shows `<psn_user_id>` for you to replace. While a check is failing it asks for the failures first.
+Follow the report's **Next steps** after correcting any failed checks. The printed start command uses the configuration and dotenv files you checked.
 
 ## Error Messages and Recovery
 
@@ -37,11 +37,13 @@ To fix: Generate a fresh NPSSO code, then put it in PSN_NPSSO in your dotenv fil
 Guide: https://misiektoja.github.io/psn_monitor/setup-and-first-run/#psn-npsso-code
 ```
 
-Every failure is sorted into a category, so an expired npsso code, a hidden profile, a rate limit, an unreachable network and a local file descriptor limit each get their own instructions instead of one generic message. A request that stops answering and is cut short by the watchdog counts as a failing check like any other, so it shares the outage report, the session rebuild and the error alert rather than only printing a line each time. Problems the tool survives, such as a missing optional library, are reported as `* Warning:` and it keeps running.
+Errors include instructions for the reported problem, such as an expired npsso code or hidden profile. Warnings, such as a missing optional library, let monitoring continue.
 
 Commands in the fix text match how you installed the tool: `psn_monitor ...` for a PyPI install and `python3 psn_monitor.py ...` for a downloaded script. It also carries the `--config-file` or `--env-file` you started with, so it can be pasted as it is.
 
-The banner that says nothing changed prints in any mode: `* Monitoring healthy for <psn_user_id>` with what was checked, followed by `Liveness check, timestamp:`. It is timed rather than counted in checks, so it appears once per `LIVENESS_CHECK_INTERVAL` of quiet, measured from the last thing the run printed. That setting defaults to 86400 seconds, a day. Set it to 0 to switch the banner off. A monitoring failure is reported as `* Error: <what failed> (retrying in <time>)`, with the `To fix:` paragraph under it the first time that category appears. Every monitor in this family prints that same line. During a long outage the failure is reported in full once, then the tool stays quiet and reminds you once an hour with `* Monitoring degraded for <psn_user_id>`, the summary of what is still failing, when it started and how many checks have failed so far, so a two-day outage is a handful of lines rather than one block per check. The reminder has its own clock and does not depend on `LIVENESS_CHECK_INTERVAL`, so it keeps coming when the banner is off. When the failure clears, `* Monitoring recovered for <psn_user_id>` reports how long it lasted. An outage that starts failing differently is still one outage: a lost connection that reads as a timeout on one check and as an unreachable host on the next prints nothing new, a change to another kind of failure that clears on its own is one line, `* Monitoring failure changed for <psn_user_id>. <what fails now>`, and a change to a failure that needs you is reported in full. The raw library error is not shown by default. Add `--debug` to print it as a `Technical detail:` line, with every secret redacted, unless it would only repeat the line above it.
+During quiet monitoring, `* Monitoring healthy for <psn_user_id>` confirms the tool is still running. `LIVENESS_CHECK_INTERVAL` defaults to 86400 seconds (24 hours). Set it to `0` to disable this reminder.
+
+Failures show an error and a `To fix:` action. A continuing outage produces a `* Monitoring degraded` reminder once an hour, even when liveness reminders are disabled. `* Monitoring recovered` marks recovery. Follow any new instructions if the failure changes. Use `--debug` for technical error details.
 
 ## Verbose and Debug Output
 
@@ -63,7 +65,7 @@ Debug lines are prefixed with `[DEBUG HH:MM:SS]`, then name the operation and li
 [DEBUG 00:03:02] Connectivity check: url=https://psn.example/probe, outcome=OK
 ```
 
-Debug fields depend on the operation. Webhook response traces report the HTTP status and retry decision. Failed requests include error details when available. Both modes redact every secret, including your npsso code, SMTP password, webhook URL and ntfy access token, and report a secret by name and source rather than by value. The npsso code also reports its length, because a code truncated while copying is the usual reason it stops working. Your SMTP password reports only that it is set.
+Debug output includes HTTP status, retries and error details. Both modes redact secret values. The npsso length is shown to help identify an incomplete copy.
 
 Both flags take effect before the configuration file is read, so they still work when the problem you are chasing is the configuration file itself. A flag you type always wins over `VERBOSE_MODE` or `DEBUG_MODE` in the configuration file. Set `DELIVERY_CONFIRMATIONS = False` to keep verbose mode without the `* Email sent to ...` and `* Webhook sent through ...` lines, which is worth doing when alerts are frequent.
 
@@ -82,6 +84,8 @@ If the tool cannot import a dependency, install the dependencies with the same P
 If a new terminal cannot find your saved settings, return to the directory used during setup or pass both `--config-file` and `--env-file` explicitly. Run `psn_monitor --doctor <psn_user_id>` to see which settings are loaded.
 
 ## Invalid saved settings and state
+
+If setup fails while saving, the configuration may already have changed. Correct the reported destination problem, rerun `--setup` with the same `--config-file` and `--env-file` paths then run `--doctor` before monitoring. The configuration backup restores non-secret settings only.
 
 Timing values must be finite and within the documented range. Normal startup checks effective timing settings before monitoring. A configuration syntax error reports its file, line number and parser message without echoing source text that may contain credentials.
 

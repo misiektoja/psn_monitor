@@ -82,7 +82,7 @@ Private entry preserves literal `${...}` text in saved passwords and other secre
 
 If you want to use email notifications functionality, configure SMTP settings in the `psn_monitor.conf` file: `SMTP_HOST`, `SMTP_PORT`, `SMTP_SSL`, `SMTP_USER`, `SENDER_EMAIL` and `RECEIVER_EMAIL`.
 
-Store the password with `psn_monitor --set-smtp-password`, which signs in to your mail server to check it before writing anything and keeps it out of your shell history. It reports incomplete mail settings before asking for the password, naming the ones still to set. An exported `SMTP_PASSWORD` wins over the saved one at startup, so the command says so after saving rather than leaving you with a value the next run will not read.
+Store the password with `psn_monitor --set-smtp-password` after configuring the other SMTP settings. It checks sign-in before saving and keeps the password out of shell history. An exported `SMTP_PASSWORD` overrides the saved value at startup.
 
 Verify your SMTP settings with the `--send-test-email` flag, which sends a real test message:
 
@@ -96,7 +96,7 @@ Hidden URL entry recognizes Discord and ntfy URLs. A bare topic name is saved as
 
 The service is detected from the URL at startup. While `WEBHOOK_PROVIDER` is left at its default, that detection is silent and `--verbose` reports it. A warning appears only when your configuration file sets `WEBHOOK_PROVIDER` to a service the URL disagrees with.
 
-A delivery keeps its original destination and credentials for every retry. Provider errors also redact Bearer and Basic credentials echoed without their Authorization scheme. Reloaded settings apply to the next delivery. Discord templates must produce a JSON object. Dictionary templates and JSON strings are supported, including strings with escaped format braces. Unknown fields such as `{descripton}` and placeholders the alert cannot fill are reported with the template text that failed, before delivery. Legacy JSON strings with doubled object braces still work. Alert text is expanded once, so quotes and braces in a title remain literal text. Mentions remain disabled in every template.
+Discord templates must produce a JSON object. Dictionary templates and JSON strings are supported, including legacy strings with doubled object braces. Unsupported placeholders are reported before delivery. Alert text is kept literal and mentions are disabled. Reloaded settings apply to the next delivery.
 
 Alerts can also be delivered to a **Discord** channel or an **ntfy** topic. The webhook channel is configured and switched on separately from email, so you can send game changes to Discord while email stays off, or use both.
 
@@ -174,7 +174,7 @@ psn_monitor --set-smtp-password
 psn_monitor --set-webhook-url
 ```
 
-Each asks for the value with the input hidden, checks it before saving anything, then writes it to your dotenv file with permissions that allow only you to read it. `--set-npsso` signs in to PlayStation Network and reports which account the code belongs to. `--set-smtp-password` signs in to your mail server without sending anything. `--set-webhook-url` checks the URL shape without contacting the service. If the check fails, nothing is written, so a working setup is never replaced by a broken one. Replacing a value that is already saved is confirmed first, and an existing `export PSN_NPSSO=...` line is rewritten in place rather than having a second assignment appended below it. A secret you clear, such as declining the ntfy access token during setup, has its line removed from the file rather than left behind as an empty value. All three need an interactive terminal.
+These commands need an interactive terminal and keep input hidden. `--set-npsso` signs in to PlayStation Network and reports the account. `--set-smtp-password` checks mail sign-in without sending a message. `--set-webhook-url` checks the URL without contacting the service. A failed check leaves the saved value unchanged. Replacements require confirmation and the dotenv file is saved with owner-only permissions.
 
 Use `--env-file` to choose which file they write to.
 
@@ -225,8 +225,7 @@ As a fallback, you can also store secrets in the configuration file or source co
 
 A secret no layer supplied is left out. A secret still holding its `your_...` placeholder counts as unset and is left out too. A run where nothing resolved says so in one line instead. A length appears only for the secrets whose length the provider issues, never for a password you chose.
 
-When a `--set-*` command or the setup wizard replaces a secret, it rewrites that one assignment in place and leaves every other line alone. A line you wrote as `export NAME=...` keeps its `export`, so a dotenv file you also source in a shell still exports it. A value you clear has its line removed rather than left empty.
-
+Secret commands update the selected value without changing other dotenv settings. Clearing a value removes its assignment.
 
 ### Reloading secrets and backup contents
 
@@ -235,7 +234,6 @@ assignment restores its independently configured fallback or clears the value wh
 A read or parsing failure keeps the last usable credentials and reports how to correct the file.
 An explicit reload can override a startup export with a value present in the file.
 
+Setup keeps the saved `DOTENV_FILE` unless you choose another path with `--env-file`. When you move it, review the private settings before saving. Kept credentials are copied to the new destination and the old file stays intact. Values already in the new dotenv file take precedence unless you replace them. At startup, a nonempty exported secret overrides the dotenv file. A dotenv value, including an empty one, overrides the configuration.
 
-Setup's configuration backup blanks inline secret assignments from older configurations while retaining
-other settings and comments. General `--generate-config` backups remain exact copies and can contain
-inline credentials. The dotenv file is not backed up during secret replacement.
+Setup moves retained credentials from older configuration files into the selected dotenv file unless that file already defines the same key. It leaves the original configuration in place if it cannot preserve those credentials. Setup creates a timestamped configuration backup with inline secrets removed. General `--generate-config` backups can contain inline credentials. Replaced dotenv secrets are not backed up.

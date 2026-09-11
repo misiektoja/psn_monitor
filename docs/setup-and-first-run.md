@@ -1,13 +1,5 @@
 # Setup & First Run
 
-Printed commands use short names. Activate the tool's virtual environment before running them. For a downloaded script, run them from the script directory. Recovery commands retain selected configuration and dotenv paths.
-
-Before replacing a configuration, setup copies retained inline credentials to the selected private dotenv file when that file has no value for the same key. An existing dotenv value, including an explicit empty value, keeps precedence. If preservation fails, the original configuration stays in place. Setup backups omit inline credentials.
-
-When rebuilding an existing configuration, setup keeps its saved `DOTENV_FILE` unless you pass `--env-file PATH`. A nonempty exported secret takes precedence over the dotenv file. An explicit empty value in that file still overrides the configuration, both after saving and on the next run. Quoted dotenv keys receive the same replacement confirmation as unquoted keys.
-
-Setup replaces each file separately. If saving secrets fails after the configuration was saved, setup stops and identifies the saved configuration. Correct the destination then rerun `--setup` with the same `--config-file` and `--env-file`, review the settings and run `--doctor` before monitoring. A crash between replacements can also leave a new configuration beside the previous dotenv file. The configuration backup can recover non-secret settings. Replaced secrets are not backed up.
-
 ## Before You Start
 
 Install the tool using [Installation](installation.md). You will need a PlayStation Network online ID and the [PSN NPSSO code](#psn-npsso-code). The wizard collects credentials through hidden prompts.
@@ -23,13 +15,17 @@ The quickest way to a working setup is the guided one:
 psn_monitor --setup
 ```
 
-It asks for the account to monitor, how often to check it, your [npsso code](#psn-npsso-code), whether to send email and webhook alerts and where the output goes, then writes a ready-to-run configuration file and a separate dotenv file for the secrets. Both destinations are checked before the first question, so an unwritable path or a directory given by mistake is reported straight away rather than after you have answered everything. `--setup` needs somewhere to put both files, so it refuses `--config-file none` and `--env-file none`.
+The wizard asks for the account, polling interval, [npsso code](#psn-npsso-code), optional email and webhook alerts and output files.
 
 Durations accept `120`, `2m`, `1.5h`, `1h 30m` or `1d`.
 
-Your npsso code is checked against PlayStation Network before it is saved, so you find out immediately if it was copied incompletely. Any answer setup cannot use is offered again, whether you left it empty or the service refused it. Declining keeps every answer you have already given rather than restarting: an unusable webhook URL switches webhook alerts off and an unanswered mail server setting switches email alerts off. Email setup signs in to the mail server before saving, so a wrong password or an unreachable host is caught during setup instead of at the first alert. No email is sent. A refused sign-in offers the mail server questions again, and if the server was only unreachable the answers are kept so `--doctor` can check them later.
+Setup checks your npsso code with PlayStation Network and checks email sign-in without sending a message. Invalid answers can be retried. If the mail server is unreachable, check the saved settings later with `--doctor`.
 
-Nothing is written until you choose **Save settings**. A final summary lists every answer and lets you go back and change one section without losing the others, and discarding asks a second time. The summary's **File destinations** section changes where the configuration and dotenv files are written. Moving the dotenv destination reviews the private settings again. Kept file credentials are saved to the new destination when you choose Save. An existing value at that destination, including an empty value, takes precedence unless you explicitly replace it. The old file is left intact. A configuration file already in place is replaced only after you agree, and setup offers to write somewhere else instead. The replaced file is backed up first. A rebuilt file starts from the settings already in place with your answers applied over them. A section you decline is cleared rather than carried over, so declining email leaves no mail server behind. A secret already in the dotenv file is never replaced without asking, and keeping it leaves the stored value untouched. A saved webhook URL or ntfy access token is offered by name, so it can be kept, replaced or, for the token, switched off, without ever being displayed. At the end it offers to run the [preflight checks](troubleshooting.md#doctor-preflight) and, once they pass, to start monitoring.
+Review the summary and change any section before choosing **Save settings**. Regular settings go to `psn_monitor.conf` and private values go to `.env`. Setup asks before replacing an existing configuration and keeps a timestamped backup. On a rerun, saved settings provide the defaults. Declining a section disables it, including any previously configured alerts. See [Storing Secrets](configuration.md#storing-secrets) for credential storage and backup details.
+
+Use `--config-file PATH` and `--env-file PATH` or the summary's **File destinations** section to choose other files. Both paths must be writable. `--config-file none` and `--env-file none` are not supported by setup.
+
+After saving, setup offers [Doctor Preflight](troubleshooting.md#doctor-preflight) then can start monitoring if the checks pass.
 
 The wizard needs an interactive terminal. Without one, use `--generate-config` and edit the file by hand.
 

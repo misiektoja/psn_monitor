@@ -13,7 +13,7 @@ Examples use the PyPI command. For a downloaded script, run commands from the di
 
 For example, `psn_monitor --setup` becomes `python3 psn_monitor.py --setup` on macOS or Linux. Use `python` on Windows. Replace placeholders such as `<psn_user_id>` with a PlayStation Network online ID.
 
-The manual-script examples assume the current directory contains `psn_monitor.py`. Commands printed by setup, Doctor and recovery messages use the running interpreter and the full script path. Packaged installations use the running interpreter with `-m psn_monitor`.
+Activate the tool's virtual environment before running these commands. For a downloaded script, run them from the directory containing `psn_monitor.py`.
 
 For first-time configuration, follow [Setup & First Run](setup-and-first-run.md). Use [Doctor Preflight](troubleshooting.md#doctor-preflight) to check a setup before monitoring.
 
@@ -100,7 +100,7 @@ The tool saves the timestamp and last status after every change, so the last sta
 psn_monitor <psn_user_id> --status-file ~/psn/last_status.json
 ```
 
-The status file is written through a temporary file in the same directory, so an interrupted run cannot leave a half-written file behind. A saved timestamp more than five minutes ahead of the machine clock is not used as history: the run warns, keeps the saved status and starts timing it again.
+Interrupted writes leave the previous status file intact. If a saved timestamp is more than five minutes ahead of the machine clock, monitoring warns and starts timing that status again.
 
 ## Startup Summary
 
@@ -119,7 +119,7 @@ Monitoring mode prints the settings that are actually in effect before the first
 
 Optional features appear once you switch them on, and `TLS verification` appears here whenever certificate checking is off.
 
-`--verbose` or `--debug` replaces this with the complete list, in the order it prints: the tolerated offline gap, the mail server and the masked recipient, the webhook service alerts go to and whether that channel is switched on, whether the delivery confirmations are printed, the log file, the liveness interval, the CSV file, the status file, the truncation width, the process id, the Python version, the operating system, the resolved time zone, the install method, which secrets came from the dotenv file, the environment, the configuration file or the command line, whether certificate checking is on, how log separators are written, whether colour is actually in use and the two flags themselves.
+Use `--verbose` or `--debug` for the full startup summary, including output paths, notification settings, secret sources and runtime information.
 
 The sibling monitors print the same rows in the same order, so a setting sits in the same place whichever of them you are reading. Each channel's own settings are indented under it.
 
@@ -154,7 +154,7 @@ To disable sending an email on errors, which is enabled by default:
 psn_monitor <psn_user_id> -e
 ```
 
-An error alert goes out once the same failure has lasted **5 minutes**, so a short outage or one lost request reaches nobody, while a failure that cannot clear on its own, such as an expired npsso code, is alerted at once. Each kind of failure alerts once per channel. A channel that could not deliver is tried again on a later failing check, after **5 minutes** at first and then after twice the previous wait, up to an hour. A run that recovered alerts again when it fails later. The same rule governs the webhook error alert.
+Email and webhook error alerts are sent after **5 minutes** of a continuing failure. Problems that need your action, such as an expired npsso code, alert immediately. Each kind of failure alerts once per channel. Failed deliveries are retried after 5 minutes, with increasing waits up to an hour. Alerts can fire again after monitoring recovers.
 
 Make sure you defined your [SMTP settings](configuration.md#smtp-settings) first.
 
@@ -240,7 +240,7 @@ On Windows, install [colorama](https://pypi.org/project/colorama/) for colours i
 
 Each part of the output has a logical name, and `COLOR_THEME` in the config file overrides only the names it lists. Combine attributes with spaces or `+`, for example `"bright_cyan bold"` or `"red underline"`. Valid colours are `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white` and their `bright_` variants, plus the `bold`, `dim`, `underline` and `blink` attributes. An empty string leaves that part uncoloured.
 
-Generated configuration files ship this block commented out, so the built-in defaults apply and a later change to them reaches you. Overrides you added are written back as a real block when setup rebuilds the file, so they are not lost. A configuration file written by an earlier version sets every colour explicitly and therefore keeps the old ones: delete its `COLOR_THEME` block to follow the current defaults, or edit the values you want to keep. Such a file still loads unchanged.
+The built-in colours apply unless you set `COLOR_THEME`. Older configurations may set every colour explicitly. Remove that block to use current defaults or edit individual values to keep a custom theme.
 
 ```python
 COLOR_THEME = {
