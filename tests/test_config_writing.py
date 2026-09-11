@@ -1,5 +1,6 @@
 """Tests for backups, atomic replacement and the guard on writing a generated config."""
 
+import re
 import ast
 import json
 import os
@@ -240,3 +241,34 @@ def test_the_generated_template_is_written_to_the_named_path(tmp_path):
     assert destination.is_file()
     assert monitor.parse_config_content(destination.read_text(encoding="utf-8"), str(destination))
     assert os.path.isdir(destination.parent)
+
+
+# Verifies the backup name every tool in this family writes, so one documented shape covers them all
+def test_the_backup_carries_the_family_name_and_mode(tmp_path):
+    destination = tmp_path / "monitor.conf"
+    destination.write_text("SETTING = 1\n", encoding="utf-8")
+
+    backup_path = monitor.create_timestamped_backup(destination)
+
+    assert re.fullmatch(r"monitor\.conf\.\d{14}\.bak", Path(backup_path).name)
+    assert Path(backup_path).read_text(encoding="utf-8") == "SETTING = 1\n"
+    assert stat.S_IMODE(Path(backup_path).stat().st_mode) == 0o600
+
+
+# Verifies a second backup in the same second takes its own name rather than overwriting the first
+def test_a_second_backup_in_the_same_second_keeps_the_first(tmp_path):
+    destination = tmp_path / "monitor.conf"
+    destination.write_text("first\n", encoding="utf-8")
+    first = monitor.create_timestamped_backup(destination)
+    destination.write_text("second\n", encoding="utf-8")
+
+    second = monitor.create_timestamped_backup(destination)
+
+    assert first != second
+    assert Path(first).read_text(encoding="utf-8") == "first\n"
+    assert Path(second).read_text(encoding="utf-8") == "second\n"
+
+
+# Verifies a destination that is not there yet earns no backup, since there is nothing to copy
+def test_a_missing_destination_earns_no_backup(tmp_path):
+    assert monitor.create_timestamped_backup(tmp_path / "absent.conf") is None
