@@ -113,9 +113,9 @@ def test_debug_reports_a_swallowed_exception(pm_module, both_modes_on, capsys):
 def test_a_degraded_feature_is_reported_without_debug_mode(pm_module, monkeypatch, capsys):
     monkeypatch.setitem(sys.modules, "wcwidth", None)
 
-    assert pm_module.resolve_truncate_chars(120, 0, False) == 0
+    assert pm_module.resolve_truncate_chars(120, 0, False) == 120
     output = capsys.readouterr().out
-    assert "Screen truncation is disabled because the optional 'wcwidth' library is missing" in output
+    assert "Screen truncation measures every character as one column because the optional 'wcwidth' library is missing" in output
     # Reported as a warning, since the tool keeps running without it
     assert output.startswith("* Warning:")
     assert "-m pip install wcwidth" in output

@@ -29,7 +29,7 @@ and again before anything is published to PyPI.
 
 | File | Area under test |
 | --- | --- |
-| `test_release_boundaries.py` | Real HTTP retries, Discord mention safety, SMTP password round trips and split terminal writes |
+| `test_release_boundaries.py` | Real HTTP retries, Discord mention safety, unrenderable templates, SMTP password round trips, split terminal writes and the width cap without wcwidth |
 | `test_real_psn_boundaries.py` | Real PSNAWP trophy iteration, private errors, quiet recovery and future history |
 | `test_compact_commands.py` | Literal short command prefixes, real help output and dependency hints |
 | `test_release_safety.py` | Credential preservation, private errors, timing checks, saved-state compatibility and real PSN rate limits |

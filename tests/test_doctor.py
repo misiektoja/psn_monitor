@@ -302,7 +302,7 @@ def test_a_missing_optional_dependency_warns_and_says_what_breaks(pm_module):
 
     missing = next(check for check in checks if "wcwidth" in check.label)
     assert missing.status == "WARN"
-    assert "Screen truncation is disabled" in missing.detail
+    assert "Wide characters count as one column, so a line holding them can run past the limit" in missing.detail
     assert "Every other feature is unaffected" in missing.detail
     assert "-m pip install wcwidth" in missing.advice.fix
 
