@@ -5043,6 +5043,10 @@ def runtime_configuration_errors():
     return errors
 
 
+# The values this file defines for the runtime settings checked above, so a configuration file that makes one
+# unusable can be reported and then ignored instead of stopping the commands that exist to correct it
+BUILT_IN_RUNTIME_SETTINGS = {statement.targets[0].id: statement.value.value for statement in ast.parse(CONFIG_BLOCK, "<built-in-config>", "exec").body if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name) and isinstance(statement.value, ast.Constant)}
+
 # The values this file defines for the settings checked below, so a configuration file that makes one
 # unusable can be reported and then ignored instead of stopping the commands that exist to correct it
 BUILT_IN_SHAPE_SETTINGS = {name: globals()[name] for name in ('PSN_LOGFILE', 'PSN_STATUS_FILE', 'CSV_FILE', 'DOTENV_FILE', 'COLOR_THEME') if name in globals()}
@@ -5055,6 +5059,22 @@ DISCARDED_SETTING_ERRORS = []
 # there instead of stopping the one run that could repair it
 def command_reports_configuration(arguments=()):
     return any(str(argument) in ("--doctor", "--setup") or str(argument).startswith("--set-") for argument in arguments)
+
+
+# Stops a monitoring run on a runtime setting it cannot use and lets the commands that repair configuration continue
+def prepare_runtime_settings(errors):
+    if not errors:
+        return
+    advice = make_recovery_advice("config.invalid", "Invalid settings: " + ". ".join(errors), recovery_fix_with_guide("Correct the reported settings in the configuration file or command line", CONFIG_GUIDE_URL), False)
+    if not command_reports_configuration(sys.argv[1:]):
+        print_recovery_advice(advice)
+        raise SystemExit(1)
+    # The secret commands never read these values, so the built-in one keeps them working until the setting is corrected
+    for name in (error.split(" ", 1)[0] for error in errors):
+        if name in BUILT_IN_RUNTIME_SETTINGS:
+            globals()[name] = BUILT_IN_RUNTIME_SETTINGS[name]
+    print_recovery_advice(advice, label="Warning")
+    print()
 
 
 # Validates effective path settings before startup expands or opens them
@@ -7534,10 +7554,7 @@ def main():
     if args.setup:
         sys.exit(run_setup_wizard(initial_target=args.psn_user_id, config_file=args.config_file, env_file=args.env_file))
 
-    configuration_errors = runtime_configuration_errors() + runtime_boolean_errors()
-    if configuration_errors:
-        print_recovery_advice(make_recovery_advice("config.invalid", "Invalid settings: " + ". ".join(configuration_errors), recovery_fix_with_guide("Correct the reported settings in the configuration file or command line", CONFIG_GUIDE_URL), False))
-        sys.exit(1)
+    prepare_runtime_settings(runtime_configuration_errors() + runtime_boolean_errors())
 
     if not check_internet():
         sys.exit(1)
