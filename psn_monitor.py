@@ -840,11 +840,12 @@ def recovery_exception_types():
     except Exception as diag_exc:
         debug_print("requests exception types unavailable, transient error detection is reduced", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
     try:
-        from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError, PSNAWPForbiddenError, PSNAWPInvalidTokenError, PSNAWPNotFoundError, PSNAWPTooManyRequestsError, PSNAWPUnauthorizedError
+        from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError, PSNAWPForbiddenError, PSNAWPInvalidTokenError, PSNAWPNotFoundError, PSNAWPTooManyRequestsError, PSNAWPUnauthorizedError, PSNAWPServerError
         types["auth"].extend((PSNAWPAuthenticationError, PSNAWPUnauthorizedError, PSNAWPInvalidTokenError))
         types["not_found"].append(PSNAWPNotFoundError)
         types["forbidden"].append(PSNAWPForbiddenError)
         types["rate_limited"].append(PSNAWPTooManyRequestsError)
+        types["unavailable"].append(PSNAWPServerError)
     except Exception as diag_exc:
         debug_print("PSNAWP exception types unavailable, PSN errors fall back to text matching", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
     return {name: tuple(values) for name, values in types.items()}
@@ -1433,6 +1434,85 @@ def truncate_string_per_line(message, truncate_width, tabsize=8):
         truncated_lines.append("".join(truncated))
 
     return "\n".join(truncated_lines)
+
+
+# Applies effective monitoring settings before preflight checks and one-shot commands
+def apply_runtime_cli_overrides(args):
+    for argument, setting in (("check_interval", "PSN_CHECK_INTERVAL"), ("active_interval", "PSN_ACTIVE_CHECK_INTERVAL")):
+        value = getattr(args, argument, None)
+        if value is not None:
+            globals()[setting] = value
+    for argument, setting in (("csv_file", "CSV_FILE"), ("status_file", "PSN_STATUS_FILE")):
+        value = getattr(args, argument, None)
+        if value:
+            globals()[setting] = value
+        if isinstance(globals()[setting], str) and globals()[setting]:
+            globals()[setting] = os.path.expanduser(globals()[setting])
+    for argument, setting in (("disable_logging", "DISABLE_LOGGING"), ("notify_active_inactive", "ACTIVE_INACTIVE_NOTIFICATION"), ("notify_game_change", "GAME_CHANGE_NOTIFICATION")):
+        if getattr(args, argument, None) is True:
+            globals()[setting] = True
+    if getattr(args, "notify_errors", None) is False:
+        globals()["ERROR_NOTIFICATION"] = False
+
+
+# Rejects timestamps that cannot safely reach date conversion
+def valid_state_timestamp(value):
+    if not finite_number(value) or value < 0:
+        return False
+    try:
+        datetime.fromtimestamp(value)
+    except (ValueError, OverflowError, OSError):
+        return False
+    return True
+
+
+# Reads saved history without adopting malformed values
+def read_status_record(path):
+    with open(path, "r", encoding="utf-8") as source:
+        record = json.load(source)
+    if not isinstance(record, list) or len(record) < 2:
+        raise ValueError("expected a status list containing a timestamp and status text")
+    if not isinstance(record[1], str) or not record[1].strip():
+        raise ValueError("the saved status must be nonempty text")
+    if not valid_state_timestamp(record[0]):
+        raise ValueError("the saved timestamp must be finite, nonnegative and representable")
+    return record
+
+
+# Accepts finite numeric values without overflowing on unusually large integers
+def finite_number(value):
+    import math
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+# Preserves inline credentials privately before setup replaces their only saved source
+def preserve_inline_config_secrets(config_path, env_path):
+    from dotenv import dotenv_values
+    source = Path(config_path).expanduser()
+    if not source.is_file():
+        return None
+    original = {}
+    if not load_config_file(source, namespace=original, report_errors=False):
+        raise ValueError("Existing configuration could not be read before preserving its inline secrets")
+    defaults = _config_template_defaults()
+    destination = Path(env_path).expanduser()
+    saved = dotenv_values(str(destination), interpolate=False) if destination.exists() else {}
+    updates = {}
+    for key in SECRET_KEYS:
+        value = original.get(key)
+        if isinstance(value, str) and value and value != defaults.get(key) and saved.get(key) is None:
+            updates[key] = value
+    if not updates:
+        return None
+    try:
+        return update_dotenv_file(destination, updates)
+    except Exception as exc:
+        raise OSError(f"Could not preserve inline secrets in '{destination}'. The original configuration was not replaced") from exc
 
 
 # Removes inline secret assignments from a setup backup while preserving other configuration text
@@ -3489,8 +3569,6 @@ def load_config_file(config_path, namespace=None, report_errors=True, advice_out
         detail = f"Config file '{config_path}' has invalid Python syntax"
         if exc.lineno is not None:
             detail += f" at line {exc.lineno}"
-        if exc.text:
-            detail += f" | Source: {exc.text.rstrip()}"
         detail += f" | Parser: {exc.msg}"
     # Checked before ValueError because UnicodeDecodeError derives from it
     except UnicodeDecodeError:
@@ -3527,6 +3605,12 @@ def normalize_ascii(s):
     while "  " in s:
         s = s.replace("  ", " ")
     return s.strip()
+
+
+# Identifies failures that make further requests in the same lookup inappropriate
+def psn_lookup_outage(error):
+    families = recovery_exception_types()
+    return any(isinstance(error, families[name]) for name in ("auth", "rate_limited", "timeout", "unavailable"))
 
 
 # Prints the last N earned trophies across titles with game, type and earn date
@@ -3612,6 +3696,8 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                 if name:
                     break
         except Exception as diag_exc:
+            if psn_lookup_outage(diag_exc):
+                raise
             debug_print("PSN API trophy_groups()", npcomm=npcomm, outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
         # B) per-title summary
@@ -3620,6 +3706,8 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                 summ = psn_user.trophy_summary(np_communication_id=npcomm, platform=platform)
                 name = _first_name_like(summ)
             except Exception as diag_exc:
+                if psn_lookup_outage(diag_exc):
+                    raise
                 debug_print("PSN API trophy_summary()", npcomm=npcomm, outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
         # C) scan titles
@@ -3632,6 +3720,8 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                         if name:
                             break
             except Exception as diag_exc:
+                if psn_lookup_outage(diag_exc):
+                    raise
                 debug_print("PSN API trophy_titles()", npcomm=npcomm, context="resolving a title name", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
         if not name:
@@ -3648,6 +3738,8 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
     try:
         titles_iter = psn_user.trophy_titles(limit=title_limit)
     except Exception as diag_exc:
+        if psn_lookup_outage(diag_exc):
+            raise
         debug_print("PSN API trophy_titles() failed, no trophy titles to scan", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
         titles_iter = []
 
@@ -3666,6 +3758,8 @@ def print_last_earned_trophies(psn_user, max_items=5, title_limit=15):
                     trophy_group_id="all",
                 )
             except Exception as diag_exc:
+                if psn_lookup_outage(diag_exc):
+                    raise
                 debug_print("PSN API trophies()", npcomm=npcomm, platform=plat, outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
                 continue
 
@@ -3816,8 +3910,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
 
     if os.path.isfile(psn_last_status_file):
         try:
-            with open(psn_last_status_file, 'r', encoding="utf-8") as f:
-                last_status_read = json.load(f)
+            last_status_read = read_status_record(psn_last_status_file)
             debug_print("Saved status read", path=psn_last_status_file)
             if last_status_read:
                 last_status_ts = last_status_read[0]
@@ -3833,7 +3926,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
                 elif status and status != "offline" and status == last_status:
                     status_ts_old = last_status_ts
         except Exception as diag_exc:
-            debug_print("Cannot reconcile the saved status with the PSN profile, falling back to the last online timestamp", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+            print_recovery_error(diag_exc, context="file.unreadable", detail=f"Cannot use saved status '{psn_last_status_file}'. Correct the file or move it aside. Showing the provider timestamp instead", label="Warning")
             if lastonline_ts and status == "offline":
                 status_ts_old = lastonline_ts
     else:
@@ -3902,8 +3995,7 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
     elif status != "offline":
         if os.path.isfile(psn_last_status_file):
             try:
-                with open(psn_last_status_file, 'r', encoding="utf-8") as f:
-                    last_status_read = json.load(f)
+                last_status_read = read_status_record(psn_last_status_file)
                 if last_status_read and last_status_read[1] == status:
                     print(f"* User is {str(status).upper()} for:\t\t{calculate_timespan(now_local(), int(last_status_read[0]), show_seconds=False)}")
             except Exception as diag_exc:
@@ -3924,6 +4016,9 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
                 f"({et.platinum + et.gold + et.silver + et.bronze} total)"
             )
         except Exception as diag_exc:
+            if psn_lookup_outage(diag_exc):
+                print_recovery_error(diag_exc, context="runtime", detail="The info lookup was stopped. Wait or correct the reported problem then run the command again")
+                return False
             debug_print("PSN API trophy_summary() failed, trophy level is not shown", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
         num_trophies = 5
@@ -3931,6 +4026,9 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
             print(f"\n* Getting list of last {num_trophies} earned trophies ...\n")
             print_last_earned_trophies(psn_user, max_items=num_trophies, title_limit=15)
         except Exception as diag_exc:
+            if psn_lookup_outage(diag_exc):
+                print_recovery_error(diag_exc, context="runtime", detail="The info lookup was stopped. Wait or correct the reported problem then run the command again")
+                return False
             debug_print("Cannot list the last earned trophies", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
     # Show recently played games only if requested
@@ -4043,6 +4141,9 @@ def get_user_info(psn_user_id, include_trophies=False, show_recent_games=True):
                     )
                     print(row)
         except Exception as diag_exc:
+            if psn_lookup_outage(diag_exc):
+                print_recovery_error(diag_exc, context="runtime", detail="The info lookup was stopped. Wait or correct the reported problem then run the command again")
+                return False
             debug_print("Cannot render the recently played games table", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
 
     if game_name:
@@ -4179,11 +4280,11 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
     if os.path.isfile(psn_last_status_file):
         try:
-            with open(psn_last_status_file, 'r', encoding="utf-8") as f:
-                last_status_read = json.load(f)
+            last_status_read = read_status_record(psn_last_status_file)
             debug_print("Saved status read", path=psn_last_status_file)
         except Exception as e:
-            print_recovery_error(e, context="file.unreadable", detail=f"Cannot load the last saved status from '{psn_last_status_file}': {e}")
+            print_recovery_error(e, context="file.unreadable", detail=f"Cannot load the saved status from '{psn_last_status_file}': {e}. Correct the file or move it aside to start a new history")
+            raise SystemExit(1) from None
         if last_status_read:
             last_status_ts = last_status_read[0]
             last_status = last_status_read[1]
@@ -4819,10 +4920,10 @@ def runtime_configuration_errors():
     positive_numbers = (("PSN_CHECK_INTERVAL", PSN_CHECK_INTERVAL), ("PSN_ACTIVE_CHECK_INTERVAL", PSN_ACTIVE_CHECK_INTERVAL), ("CHECK_INTERNET_TIMEOUT", CHECK_INTERNET_TIMEOUT))
     nonnegative_numbers = (("OFFLINE_INTERRUPT", OFFLINE_INTERRUPT), ("LIVENESS_CHECK_INTERVAL", LIVENESS_CHECK_INTERVAL))
     for name, value in positive_numbers:
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+        if not finite_number(value) or value <= 0:
             errors.append(f"{name} must be a number greater than zero, not {value!r}")
     for name, value in nonnegative_numbers:
-        if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+        if not finite_number(value) or value < 0:
             errors.append(f"{name} must be a number zero or greater, not {value!r}")
     if not isinstance(SMTP_PORT, int) or isinstance(SMTP_PORT, bool) or not 1 <= SMTP_PORT <= 65535:
         errors.append(f"SMTP_PORT must be an integer from 1 through 65535, not {SMTP_PORT!r}")
@@ -6276,14 +6377,17 @@ def _wizard_apply_saved_values(state, env_path=None):
     except (OSError, UnicodeError, ValueError) as exc:
         print_recovery_error(exc, context="file", detail=f"Could not read saved secrets from '{selected_path}'")
         raise SystemExit(1) from None
-    globals().update(state.config_values)
+    saved_config = _config_template_defaults()
+    if not load_config_file(state.config_path, namespace=saved_config):
+        raise SystemExit(1)
+    globals().update(saved_config)
     for key in SECRET_KEYS:
         if key in exported:
             value, source = exported[key], "environment"
         elif saved.get(key) is not None:
             value, source = saved[key], "dotenv file"
         else:
-            value, source = state.config_values.get(key), "configuration file"
+            value, source = saved_config.get(key), "configuration file"
         globals()[key] = value
         if source == "dotenv file":
             os.environ[key] = str(value)
@@ -6381,11 +6485,12 @@ def run_setup_wizard(initial_target=None, config_file=None, env_file=None, input
 
     # Everything above only filled the state, so this is the first and only point anything reaches disk
     try:
+        preserved_dotenv = preserve_inline_config_secrets(state.config_path, state.env_path)
         config_backup, _written = write_generated_config(state.config_path, generate_config_with_current_values(state.config_values), force=True, redact_secrets=True)
     except Exception as exc:
         print_recovery_error(exc, context="file.unwritable", detail=f"Could not write the configuration to '{state.config_path}': {exc}")
         return 1
-    secrets_written = False
+    secrets_written = bool(preserved_dotenv)
     if state.secret_updates:
         try:
             update_dotenv_file(state.env_path, state.secret_updates)
@@ -7233,13 +7338,8 @@ def main():
     if not resolved_secrets:
         debug_print("No private settings were resolved from config, dotenv, environment or the command line")
 
+    apply_runtime_cli_overrides(args)
     if doctor_mode:
-        # Doctor exits before monitoring applies these, so they are resolved here too and the output rows
-        # describe the run that was actually asked for. Nothing is written, only reported
-        if args.csv_file:
-            CSV_FILE = os.path.expanduser(args.csv_file)
-        if args.disable_logging is True:
-            DISABLE_LOGGING = True
         doctor_exit = run_doctor(args.psn_user_id, cfg_path, env_path, config_advice, timezone_advice)
         # A target the config file already carries is left out, so the command stays as short as the wizard's
         print_doctor_next_steps(args.psn_user_id, PSN_USER_ID, doctor_exit)
@@ -7247,6 +7347,11 @@ def main():
 
     if args.setup:
         sys.exit(run_setup_wizard(initial_target=args.psn_user_id, config_file=args.config_file, env_file=args.env_file))
+
+    configuration_errors = runtime_configuration_errors() + runtime_boolean_errors()
+    if configuration_errors:
+        print_recovery_advice(make_recovery_advice("config.invalid", "Invalid settings: " + ". ".join(configuration_errors), recovery_fix_with_guide("Correct the reported settings in the configuration file or command line", CONFIG_GUIDE_URL), False))
+        sys.exit(1)
 
     if not check_internet():
         sys.exit(1)
@@ -7311,11 +7416,8 @@ def main():
     if args.info_mode:
         include_trophies = args.include_trophies if hasattr(args, 'include_trophies') and args.include_trophies else False
         show_recent_games = not (hasattr(args, 'no_recent_games') and args.no_recent_games)
-        get_user_info(args.psn_user_id, include_trophies=include_trophies, show_recent_games=show_recent_games)
-        sys.exit(0)
-
-    if args.check_interval:
-        PSN_CHECK_INTERVAL = args.check_interval
+        info_result = get_user_info(args.psn_user_id, include_trophies=include_trophies, show_recent_games=show_recent_games)
+        sys.exit(1 if info_result is False else 0)
 
     # The interval can come from a config file, so the reminder is settled once every layer has been applied
     numeric_errors = [] if isinstance(LIVENESS_CHECK_INTERVAL, (int, float)) else [f"LIVENESS_CHECK_INTERVAL must be a number, not {LIVENESS_CHECK_INTERVAL!r}"]
@@ -7323,20 +7425,6 @@ def main():
         print_recovery_error(context="config", detail="Invalid numeric settings: " + ", ".join(numeric_errors))
         raise SystemExit(1)
     LIVENESS_REMINDER_SECONDS = LIVENESS_CHECK_INTERVAL if not numeric_errors and LIVENESS_CHECK_INTERVAL > 0 else 0
-
-    if args.active_interval:
-        PSN_ACTIVE_CHECK_INTERVAL = args.active_interval
-
-    if args.status_file:
-        PSN_STATUS_FILE = os.path.expanduser(args.status_file)
-    elif PSN_STATUS_FILE:
-        PSN_STATUS_FILE = os.path.expanduser(PSN_STATUS_FILE)
-
-    if args.csv_file:
-        CSV_FILE = os.path.expanduser(args.csv_file)
-    else:
-        if CSV_FILE:
-            CSV_FILE = os.path.expanduser(CSV_FILE)
 
     if CSV_FILE:
         try:
@@ -7352,9 +7440,6 @@ def main():
         print_recovery_error(context="config.invalid", detail=str(e))
         sys.exit(1)
 
-    if args.disable_logging is True:
-        DISABLE_LOGGING = True
-
     TRUNCATE_CHARS = resolve_truncate_chars(args.truncate, TRUNCATE_CHARS, DISABLE_LOGGING)
 
     if not DISABLE_LOGGING:
@@ -7365,15 +7450,6 @@ def main():
         debug_print("Logging output", path=FINAL_LOG_PATH)
     else:
         FINAL_LOG_PATH = None
-
-    if args.notify_active_inactive is True:
-        ACTIVE_INACTIVE_NOTIFICATION = True
-
-    if args.notify_game_change is True:
-        GAME_CHANGE_NOTIFICATION = True
-
-    if args.notify_errors is False:
-        ERROR_NOTIFICATION = False
 
     if SMTP_HOST.startswith("your_smtp_server_"):
         verbose_print("Email notifications are off because SMTP_HOST is still the shipped placeholder")

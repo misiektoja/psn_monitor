@@ -76,3 +76,11 @@ If `pip` reports an externally managed environment, follow the pipx steps in [In
 If the tool cannot import a dependency, install the dependencies with the same Python interpreter that runs the script. On macOS or Linux use `python3 -m pip install -r requirements.txt`. On Windows use `python -m pip install -r requirements.txt`. Match the requirements file to your downloaded script.
 
 If a new terminal cannot find your saved settings, return to the directory used during setup or pass both `--config-file` and `--env-file` explicitly. Run `psn_monitor --doctor <psn_user_id>` to see which settings are loaded.
+
+## Invalid saved settings and state
+
+Timing values must be finite and within the documented range. Normal startup checks effective timing settings before monitoring. A configuration syntax error reports its file, line number and parser message without echoing source text that may contain credentials.
+
+If a saved status file has an invalid structure, monitoring stops before replacing it. Correct the named file or move it aside to start a fresh baseline. Keep a copy if you need the old history. Older valid records and extra trailing metadata remain accepted.
+
+Info lookups stop after a rate limit, authentication failure or service outage instead of continuing to other trophy or recent-game requests. Correct the reported problem or wait before running the command again.

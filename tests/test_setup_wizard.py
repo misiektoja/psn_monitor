@@ -792,6 +792,8 @@ def test_saved_secrets_are_credited_to_the_dotenv_file(monkeypatch, tmp_path):
     monkeypatch.setattr(monitor, "PSN_NPSSO", "")
     state = types.SimpleNamespace(config_values={}, secret_updates={"PSN_NPSSO": NPSSO})
 
+    state.config_path = tmp_path / "saved-settings.conf"
+    state.config_path.write_text("\n".join(f"{name} = {value!r}" for name, value in state.config_values.items()) + "\n", encoding="utf-8")
     monitor._wizard_apply_saved_values(state, env_path=env_path)
 
     assert monitor.SECRET_SOURCES["PSN_NPSSO"] == "dotenv file"
@@ -807,6 +809,8 @@ def test_an_exported_secret_is_not_credited_to_the_dotenv_file(monkeypatch, tmp_
     monkeypatch.setattr(monitor, "EXPORTED_SECRET_KEYS", {"PSN_NPSSO"})
     state = types.SimpleNamespace(config_values={}, secret_updates={})
 
+    state.config_path = tmp_path / "saved-settings.conf"
+    state.config_path.write_text("\n".join(f"{name} = {value!r}" for name, value in state.config_values.items()) + "\n", encoding="utf-8")
     monitor._wizard_apply_saved_values(state, env_path=env_path)
 
     assert monitor.SECRET_SOURCES["PSN_NPSSO"] == "environment"
@@ -819,6 +823,8 @@ def test_the_saved_timezone_is_resolved_before_doctor_reads_it(monkeypatch, tmp_
     monkeypatch.setattr(monitor, "get_localzone", lambda: "Europe/Warsaw")
     state = monitor.WizardSetupState(tmp_path / "settings.conf", tmp_path / "private.env", {"LOCAL_TIMEZONE": "Auto"})
 
+    state.config_path = tmp_path / "saved-settings.conf"
+    state.config_path.write_text("\n".join(f"{name} = {value!r}" for name, value in state.config_values.items()) + "\n", encoding="utf-8")
     advice = monitor._wizard_apply_saved_values(state, env_path=None)
 
     assert advice is None

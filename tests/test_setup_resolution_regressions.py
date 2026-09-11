@@ -115,6 +115,8 @@ def test_post_save_uses_saved_empty_value_and_real_exports(monkeypatch, tmp_path
     state = monitor.WizardSetupState(tmp_path / "settings.conf", env, {"SMTP_PASSWORD": "synthetic-config"})
     if exported:
         monkeypatch.setenv("SMTP_PASSWORD", "synthetic-export")
+    state.config_path = tmp_path / "saved-settings.conf"
+    state.config_path.write_text("\n".join(f"{name} = {value!r}" for name, value in state.config_values.items()) + "\n", encoding="utf-8")
     monitor._wizard_apply_saved_values(state)
     assert monitor.SMTP_PASSWORD == ("synthetic-export" if exported else "")
 
