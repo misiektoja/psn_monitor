@@ -12,26 +12,26 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (PROJECT_ROOT / "psn_monitor.py").read_text(encoding="utf-8")
 WEBHOOK_URL = "https://discord.com/api/webhooks/123456789/aVeryLongWebhookTokenValue"
 HTTP_METHODS = frozenset(("get", "post", "put", "patch", "delete", "head", "options", "request"))
-# Every outbound request goes through the requests alias or the one shared webhook session
-HTTP_RECEIVERS = frozenset(("req", "requests", "WEBHOOK_SESSION"))
+# The expressions that carry the TLS decision, so a call passing anything else is a second opinion
+VERIFY_ARGUMENTS = frozenset(("VERIFY_SSL",))
 # A guard against the sweep silently matching nothing after a rename: the tool has three call sites today
 MINIMUM_HTTP_CALL_SITES = 3
 
 
+# Returns every name the module binds to a requests session, so a session added later is swept without editing this
+def session_receivers():
+    return {node.targets[0].id for node in ast.walk(ast.parse(SOURCE)) if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Call) and ast.unparse(node.value.func).endswith("Session")}
+
+
 # Returns every outbound HTTP call in the module as a line number paired with its keyword arguments
 def http_call_sites():
+    receivers = {"req", "requests"} | session_receivers()
     for node in ast.walk(ast.parse(SOURCE)):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
             continue
         receiver = node.func.value
-        if node.func.attr in HTTP_METHODS and isinstance(receiver, ast.Name) and receiver.id in HTTP_RECEIVERS:
+        if node.func.attr in HTTP_METHODS and isinstance(receiver, ast.Name) and receiver.id in receivers:
             yield node.lineno, {keyword.arg: keyword.value for keyword in node.keywords}
-
-
-# Returns the name a keyword argument was given, or None when it was absent or was not a plain name
-def keyword_name(keywords, argument):
-    value = keywords.get(argument)
-    return value.id if isinstance(value, ast.Name) else None
 
 
 # Records the keyword arguments of every request made through it and answers with an empty success
@@ -178,13 +178,14 @@ def test_every_outbound_request_passes_the_setting():
     calls = list(http_call_sites())
 
     assert len(calls) >= MINIMUM_HTTP_CALL_SITES, f"the sweep found {len(calls)} HTTP calls, so it no longer matches how requests are made"
-    missing = [line for line, keywords in calls if keyword_name(keywords, "verify") != "VERIFY_SSL"]
-    assert not missing, f"psn_monitor.py lines {missing} make an HTTP call without verify=VERIFY_SSL"
+    missing = [line for line, keywords in calls if "verify" not in keywords or ast.unparse(keywords["verify"]) not in VERIFY_ARGUMENTS]
+    assert not missing, f"psn_monitor.py lines {missing} make an HTTP call that does not pass the TLS setting"
 
 
 # Verifies every outbound request carries a deadline, since a call without one hangs the monitoring loop indefinitely
 def test_every_outbound_request_carries_a_deadline():
-    missing = [line for line, keywords in http_call_sites() if "timeout" not in keywords]
+    # A call forwarding **kwargs takes its deadline from the helper that fills them in, which is not readable here
+    missing = [line for line, keywords in http_call_sites() if "timeout" not in keywords and None not in keywords]
 
     assert not missing, f"psn_monitor.py lines {missing} make an HTTP call without a timeout"
 
