@@ -68,6 +68,16 @@ def ntfy_enabled(monkeypatch, pm_module):
     return pm_module
 
 
+# Verifies delivery refuses to follow a redirect, since requests follows them by default and the destination
+# is itself the credential: one Location header would hand the token and the payload to another host
+def test_delivery_never_follows_a_redirect(discord_enabled, webhook_session):
+    session = webhook_session()
+
+    discord_enabled.post_webhook_request(json={"content": "hello"})
+
+    assert session.requests[0]["allow_redirects"] is False
+
+
 # Verifies only a complete private HTTPS destination is accepted
 @pytest.mark.parametrize("url, accepted", [
     (DISCORD_URL, True),
