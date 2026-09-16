@@ -3598,6 +3598,8 @@ def reload_secrets_signal_handler(sig, frame):
                 if secret == "WEBHOOK_URL":
                     webhook_url_changed = True
                 debug_print("Secret reload", name=secret, path=env_path, **secret_fields(val, secret))
+                # The loop variable is a setting name from the fixed SECRET_KEYS tuple, never the value behind it
+                # codeql[py/clear-text-logging-sensitive-data]
                 print(f"* Reloaded {secret} from {env_path}")
 
     # A replacement destination can belong to the other service, which the reloaded URL is the only record of
@@ -6662,6 +6664,9 @@ def _wizard_summary_value(label, value):
 def _wizard_print_summary_rows(rows):
     width = max(len(label) for label, _ in rows) + 1
     for label, value in rows:
+        # Every row is a label with a name, a count or a presence word. The wizard collects answers and
+        # credentials through one prompt helper, which is why a credential appears to reach this line
+        # codeql[py/clear-text-logging-sensitive-data]
         print(f"  {(label + ':'):<{width}} {_wizard_summary_value(label, value)}")
 
 
