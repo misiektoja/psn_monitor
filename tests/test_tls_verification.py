@@ -1,5 +1,6 @@
-"""Tests for VERIFY_SSL: which requests honour it, what is reported while it is off and its shipped default."""
+"""Tests for VERIFY_SSL: which requests honour it, what is reported while it is off, its shipped default and a sweep over every outbound request."""
 
+import ast
 import ssl
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +11,27 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (PROJECT_ROOT / "psn_monitor.py").read_text(encoding="utf-8")
 WEBHOOK_URL = "https://discord.com/api/webhooks/123456789/aVeryLongWebhookTokenValue"
+HTTP_METHODS = frozenset(("get", "post", "put", "patch", "delete", "head", "options", "request"))
+# Every outbound request goes through the requests alias or the one shared webhook session
+HTTP_RECEIVERS = frozenset(("req", "requests", "WEBHOOK_SESSION"))
+# A guard against the sweep silently matching nothing after a rename: the tool has three call sites today
+MINIMUM_HTTP_CALL_SITES = 3
+
+
+# Returns every outbound HTTP call in the module as a line number paired with its keyword arguments
+def http_call_sites():
+    for node in ast.walk(ast.parse(SOURCE)):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        receiver = node.func.value
+        if node.func.attr in HTTP_METHODS and isinstance(receiver, ast.Name) and receiver.id in HTTP_RECEIVERS:
+            yield node.lineno, {keyword.arg: keyword.value for keyword in node.keywords}
+
+
+# Returns the name a keyword argument was given, or None when it was absent or was not a plain name
+def keyword_name(keywords, argument):
+    value = keywords.get(argument)
+    return value.id if isinstance(value, ast.Name) else None
 
 
 # Records the keyword arguments of every request made through it and answers with an empty success
@@ -149,6 +171,22 @@ def test_the_summary_promotes_the_row_only_while_verification_is_off(pm_module, 
 
     assert (row.full, row.concise) == (True, concise)
     assert row.value.startswith("On" if verify else "Off")
+
+
+# Verifies every outbound request passes the setting, so a call site added later cannot keep verifying while it is off
+def test_every_outbound_request_passes_the_setting():
+    calls = list(http_call_sites())
+
+    assert len(calls) >= MINIMUM_HTTP_CALL_SITES, f"the sweep found {len(calls)} HTTP calls, so it no longer matches how requests are made"
+    missing = [line for line, keywords in calls if keyword_name(keywords, "verify") != "VERIFY_SSL"]
+    assert not missing, f"psn_monitor.py lines {missing} make an HTTP call without verify=VERIFY_SSL"
+
+
+# Verifies every outbound request carries a deadline, since a call without one hangs the monitoring loop indefinitely
+def test_every_outbound_request_carries_a_deadline():
+    missing = [line for line, keywords in http_call_sites() if "timeout" not in keywords]
+
+    assert not missing, f"psn_monitor.py lines {missing} make an HTTP call without a timeout"
 
 
 # Verifies certificates are verified unless the reader turns that off, in the shipped config and the fallback alike
