@@ -421,6 +421,8 @@ def test_auth_probe_reports_terms_of_service_reacceptance(pm_module, monkeypatch
     hint = pm_module.probe_npsso_auth_error("npsso-test-value")
 
     assert "Terms of Service" in hint
+    # A substring check on advice text, not a URL allowlist
+    # codeql[py/incomplete-url-substring-sanitization]
     assert "https://my.account.sony.com" in hint
 
 

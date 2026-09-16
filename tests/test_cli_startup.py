@@ -740,6 +740,8 @@ def test_the_test_webhook_is_sent_and_exits(pm_module, monkeypatch, sent_webhook
     assert len(sent_webhooks) == 1
     assert sent_webhooks[0]["force"] is True
     output = capsys.readouterr().out
+    # A substring check on printed output, not a URL allowlist
+    # codeql[py/incomplete-url-substring-sanitization]
     assert "discord.com" in output
     assert WEBHOOK_URL not in output
 
