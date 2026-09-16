@@ -205,8 +205,11 @@ def test_the_site_url_matches_the_code():
 # Verifies the README stayed a landing page rather than growing back into the full documentation
 def test_the_readme_is_a_landing_page():
     text = README.read_text(encoding="utf-8")
+    # The guard is about prose, so the badge lines are dropped first. Linked badge markup is header chrome
+    # and is several times longer than the bare image tags it replaced
+    body = re.sub(r"(?m)^\[!\[.*\n?", "", text)
 
-    assert len(text) < 8000, "the README has grown back into full documentation"
+    assert len(body) < 8000, "the README has grown back into full documentation"
     assert monitor.DOCS_BASE_URL in text, "the README does not link to the documentation site"
 
 
