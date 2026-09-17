@@ -663,7 +663,7 @@ TIMEZONE_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#time-zone"
 SMTP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#smtp-settings"
 TLS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#tls-verification"
 WEBHOOK_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#webhook-settings"
-INTERVALS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#check-intervals"
+INTERVALS_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#check-intervals"
 DIAGNOSTICS_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#verbose-and-debug-output"
 
 # Installs this tool can be running from. There is no container image, so no container method is detected
