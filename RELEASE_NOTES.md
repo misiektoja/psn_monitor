@@ -2,7 +2,7 @@
 
 This is a high-level summary of the most important changes.
 
-# Changes in 1.9 (TBD)
+# Changes in 1.9 (18 Sep 2026)
 
 Version **1.9** adds **guided setup**, a read-only **Doctor preflight check**, **Discord and ntfy alerts** and **private credential entry**. **Coloured output**, startup summaries and verbose/debug modes make monitoring easier to follow. It protects saved history and credentials, improves profile reports and adds verifiable downloads. The release requires **PSNAWP 3.0.3 or newer**.
 
