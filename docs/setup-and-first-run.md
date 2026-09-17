@@ -1,56 +1,50 @@
 # Setup & First Run
 
-## Before You Start
+<a id="run-the-setup-wizard"></a>
+## Run the setup wizard
 
-Install the tool using [Installation](installation.md). You will need a PlayStation Network online ID and the [PSN NPSSO code](#psn-npsso-code). The wizard collects credentials through hidden prompts.
+Already installed? Run the setup command below for your installation and follow the prompts. Otherwise, start with [Installation](installation.md).
 
-Open a terminal in the directory where you want to keep the configuration and monitoring output. Later commands should use that directory or explicitly select the same `--config-file` and `--env-file` paths. Manual installations use the [command equivalents](usage.md#command-format).
+Setup asks who to monitor, your npsso code, how often to check and which alerts and output files you want. You can review your answers before saving. Regular settings go in `psn_monitor.conf` and private values go in `.env`. Keep `.env` private.
 
-<a id="setup-wizard"></a>
-## Guided Setup
+Press Enter to accept a default or Ctrl+C to cancel. Cancelling before saving leaves your files untouched. Cancelling after saving keeps the saved settings. For changes to an existing setup, see [Configuration File](configuration.md#configuration-file).
 
-The quickest way to a working setup is the guided one:
+After saving, follow the offered Doctor checks and monitoring steps.
 
-```sh
-psn_monitor --setup
-```
+=== "PyPI"
 
-The wizard asks for the account, polling interval, [npsso code](#psn-npsso-code), optional email and webhook alerts and output files.
+    ```sh
+    psn_monitor --setup
+    ```
 
-Durations accept `120`, `2m`, `1.5h`, `1h 30m` or `1d`.
+=== "Manual Python script on macOS or Linux"
 
-Setup checks your npsso code with PlayStation Network and checks email sign-in without sending a message. Invalid answers can be retried. If the mail server is unreachable, check the saved settings later with `--doctor`.
+    ```sh
+    python3 psn_monitor.py --setup
+    ```
 
-Review the summary and change any section before choosing **Save settings**. Regular settings go to `psn_monitor.conf` and private values go to `.env`. Setup asks before replacing an existing configuration and keeps a timestamped backup. On a rerun, saved settings provide the defaults. Declining a section disables it, including any previously configured alerts. See [Storing Secrets](configuration.md#storing-secrets) for credential storage and backup details.
+=== "Manual Python script on Windows"
 
-Use `--config-file PATH` and `--env-file PATH` or the summary's **File destinations** section to choose other files. Both paths must be writable. `--config-file none` and `--env-file none` are not supported by setup.
+    ```powershell
+    python psn_monitor.py --setup
+    ```
 
-After saving, setup offers [Doctor Preflight](troubleshooting.md#doctor-preflight) then can start monitoring if the checks pass.
+A **target** is the PSN ID you want to monitor. The wizard asks for your npsso code and checks it with PlayStation Network. See [PSN NPSSO Code](#psn-npsso-code) for how to get it.
 
-The wizard needs an interactive terminal. Without one, use `--generate-config` and edit the file by hand.
+The polling prompts accept plain seconds or the `s`, `m`, `h` and `d` units. They show both the seconds and a readable form of the default.
 
-## Quick Start
+With a saved target, running PSN Monitor without a target starts monitoring that account. If no target is saved, an interactive no-argument run offers setup.
 
-To set everything up yourself instead, grab your [npsso code](#psn-npsso-code) and track the `psn_user_id` gaming activities:
+<a id="before-you-start"></a>
+## Before you start
 
-```sh
-psn_monitor <psn_user_id> -n "your_psn_npsso_code"
-```
+You need three things before the first monitoring run:
 
-Or if you installed [manually](installation.md#manual-installation):
+1. A PSN target. Use the PlayStation Network online ID of the account you want to monitor.
+2. An npsso code from your own PSN account. See [PSN NPSSO Code](#psn-npsso-code).
+3. The monitored account must publish its online status. See [User Privacy Settings](#user-privacy-settings).
 
-```sh
-python3 psn_monitor.py <psn_user_id> -n "your_psn_npsso_code"
-```
-
-To get the list of all supported command-line arguments and flags:
-
-```sh
-psn_monitor --help
-```
-
-Run it without arguments to see the few commands worth starting with, including the guided setup and how to check your setup before monitoring. On a terminal it also offers to start the guided setup right there.
-
+<a id="psn-npsso-code"></a>
 ## PSN NPSSO Code
 
 Log in to your [My PlayStation](https://my.playstation.com/) account.
@@ -74,6 +68,7 @@ Tokens expire after 2 months. The tool alerts on expiration.
 
 If you store `PSN_NPSSO` in a dotenv file you can update its value and send a `SIGHUP` signal to the process to reload the file with the new npsso value without restarting the tool. More info in [Storing Secrets](configuration.md#storing-secrets) and [Signal Controls](usage.md#signal-controls-macoslinuxunix).
 
+<a id="user-privacy-settings"></a>
 ## User Privacy Settings
 
 In order to monitor PlayStation user activity, proper privacy settings need to be enabled on the monitored user account.
@@ -84,6 +79,94 @@ The value in **Privacy Settings → Personal Info | Messaging → Online Status 
 
 If it is set to **Friends only**, the account whose npsso code you use has to be a friend of the monitored account. `--doctor` reports whether the presence is actually visible to you.
 
-## Continue with Usage
+<a id="not-sure-which-command-you-need"></a>
+## Not sure which command you need?
 
-Use [Usage](usage.md) for monitoring and output options or [Configuration](configuration.md) to adjust saved settings. If setup or monitoring fails, run [Doctor Preflight](troubleshooting.md#doctor-preflight) and follow the reported recovery steps.
+| I want to... | Run this |
+| --- | --- |
+| Set up PSN Monitor for the first time | Use the setup command for your installation above |
+| Start monitoring with existing credentials | `psn_monitor <psn_user_id>` |
+| Start the account saved in `PSN_USER_ID` | `psn_monitor --config-file psn_monitor.conf` |
+| Check the npsso code, connectivity and one account | `psn_monitor --doctor <psn_user_id>` |
+| Most securely enter or replace `PSN_NPSSO` | Run `psn_monitor --set-npsso` and enter the code at the hidden prompt |
+| Save an SMTP password for email alerts | Run `psn_monitor --set-smtp-password` |
+| Send a test email | Run `psn_monitor --send-test-email` |
+| Set up webhook alerts | Run the setup wizard and choose webhook alerts |
+| Save a new webhook URL | Run `psn_monitor --set-webhook-url` |
+| Send a test webhook | Run `psn_monitor --send-test-webhook` |
+| Show detailed account information and exit | `psn_monitor <psn_user_id> -i` |
+| Also show the trophy summary | `psn_monitor <psn_user_id> -i --trophies` |
+| Write every change to a CSV file | `psn_monitor <psn_user_id> -b changes.csv` |
+| List every supported command-line flag | `psn_monitor --help` |
+
+<a id="run-individual-commands"></a>
+## Run Individual Commands
+
+The examples below use PyPI. For a manual script, replace `psn_monitor` with `python3 psn_monitor.py` on macOS or Linux. Use `python psn_monitor.py` on Windows and run it from the directory holding the script or give its full path. See [Command Format by Installation Method](usage.md#command-format-by-installation-method).
+
+Throughout this page `<psn_user_id>` means the PlayStation Network online ID you want to monitor.
+
+<a id="save-the-npsso-code"></a>
+### Save the npsso code
+
+To configure credentials without the wizard, `--set-npsso` is the recommended and most secure entry method. It reads the code through a hidden prompt, so the value does not appear on screen or in the command line. It checks the code with PlayStation Network before updating only `PSN_NPSSO`. If the check fails, it does not change the `.env` file.
+
+```sh
+psn_monitor --set-npsso
+```
+
+Use `--env-file PATH` to select another `.env` file. The `-n` and `--npsso-key` options still work, but their values may appear in shell history or process listings.
+
+<a id="save-notification-credentials"></a>
+### Save notification credentials
+
+The SMTP password is entered through a hidden prompt, checked against the mail server and saved as `SMTP_PASSWORD` in `.env`:
+
+```sh
+psn_monitor --set-smtp-password
+```
+
+A webhook URL is the private address used to deliver notifications. Treat it like a password because anyone who has it may be able to post through it. Follow the [webhook setup steps](configuration.md#webhook-settings) then save the link:
+
+```sh
+psn_monitor --set-webhook-url
+```
+
+The link is entered through a hidden prompt and saved as `WEBHOOK_URL` in `.env`. This command only saves the link. It does not turn on webhook alerts or send a message. See [Webhook Settings](configuration.md#webhook-settings) to choose your alerts then run `psn_monitor --send-test-webhook` to test them.
+
+<a id="start-monitoring"></a>
+### Start monitoring
+
+The first example uses a positional account. The second uses a saved `PSN_USER_ID`:
+
+```sh
+psn_monitor <psn_user_id>
+psn_monitor --config-file psn_monitor.conf
+```
+
+For a [manual script](installation.md#install-the-manual-script):
+
+```sh
+python3 psn_monitor.py <psn_user_id>
+```
+
+To check the setup before the first run, without writing anything:
+
+```sh
+psn_monitor --doctor <psn_user_id>
+```
+
+See [Doctor Preflight](troubleshooting.md#doctor-preflight) for what it reports.
+
+To see all supported command-line arguments and flags:
+
+```sh
+psn_monitor --help
+```
+
+<a id="next-step"></a>
+## Next Step
+
+Run [Doctor](troubleshooting.md#doctor-preflight) before an unattended run to confirm the npsso code, connectivity and notification settings.
+
+With the npsso code saved and a first run working, continue to [Configuration](configuration.md) for the monitored account, SMTP, webhooks and secrets. See [Usage](usage.md) for command formats, monitoring, listing commands, notifications and output files.

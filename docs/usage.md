@@ -1,6 +1,6 @@
 # Usage
 
-<a id="command-format"></a>
+<a id="command-format-by-installation-method"></a>
 ## Command Format by Installation Method
 
 Examples use the PyPI command. For a downloaded script, run commands from the directory containing `psn_monitor.py` and keep the same arguments:
@@ -17,6 +17,7 @@ Activate the tool's virtual environment before running these commands. For a dow
 
 For first-time configuration, follow [Setup & First Run](setup-and-first-run.md). Use [Doctor Preflight](troubleshooting.md#doctor-preflight) to check a setup before monitoring.
 
+<a id="user-information-display-mode"></a>
 ## User Information Display Mode
 
 The tool provides a detailed user information display mode that shows comprehensive PlayStation profile insights. This mode displays information once and then exits. It does not run continuous monitoring.
@@ -68,6 +69,7 @@ psn_monitor <psn_user_id> -i --trophies --no-recent-games
    <img src="https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/assets/psn_monitor_info.png" alt="psn_monitor_info" width="90%"/>
 </p>
 
+<a id="monitoring-mode"></a>
 ## Monitoring Mode
 
 To monitor a specific user's activity, just type the PlayStation (PSN) user's id:
@@ -102,29 +104,41 @@ psn_monitor <psn_user_id> --status-file ~/psn/last_status.json
 
 Interrupted writes leave the previous status file intact. If a saved timestamp is more than five minutes ahead of the machine clock, monitoring warns and starts timing that status again.
 
-## Startup Summary
+<a id="terminal-output"></a>
+## Terminal Output
 
-Monitoring mode prints the settings that are actually in effect before the first check:
+Use `--help` for examples grouped by task and matched to your installation.
 
-```
-* Target:                       misiektoja
-* Polling intervals:            [offline: 3 minutes] [online: 1 minute]
-* Notifications (email):        On (online and offline changes, game changes, errors)
-* Notifications (webhook):      On (online and offline changes, errors)
-* Output:                       psn_monitor_misiektoja.log
-* Config:                       psn_monitor.conf
-* Dotenv:                       .env
-* More details:                 use --verbose or --debug
-```
+Monitoring mode prints the settings that are actually in effect before the first check.
 
-Optional features appear once you switch them on, and `TLS verification` appears here whenever certificate checking is off.
+Optional features appear once you switch them on.
 
 Use `--verbose` or `--debug` for the full startup summary, including output paths, notification settings, secret sources and runtime information.
 
-The sibling monitors print the same rows in the same order, so a setting sits in the same place whichever of them you are reading. Each channel's own settings are indented under it.
+Use `--truncate N` or `TRUNCATE_CHARS` to limit screen line width. Set it to `999` to detect the terminal width automatically. Truncation does not change log files and is ignored when logging is disabled with `-d`.
 
-The log file always receives the complete list, whichever view the terminal was shown, so a log attached to a bug report carries every effective setting.
+The tool clears the terminal when monitoring starts. Set `CLEAR_SCREEN` to `False` to keep whatever is already on the screen.
 
+The screen is never cleared when output is redirected to a file or a pipe, in debug mode, or for a command that prints a result and exits, such as `--doctor`, `--help` and the test senders.
+
+Two settings add detail to what a run prints. `VERBOSE_MODE` adds the decisions the run made and `DEBUG_MODE` adds timestamped technical traces. Both are off by default, both are independent of each other and both have a flag that wins over the file, `--verbose` and `--debug`. `DELIVERY_CONFIRMATIONS` is on by default and controls whether verbose mode confirms each delivered email and webhook alert. See [Verbose and Debug Output](troubleshooting.md#verbose-and-debug-output).
+
+<a id="coloured-terminal-output"></a>
+### Coloured Terminal Output
+
+PSN Monitor colours live terminal output and help by default. Saved log files stay plain text.
+
+Turn colour off for one run with `--no-color` or permanently with `COLORED_OUTPUT = False`. Colour is also disabled for redirected output, `NO_COLOR` or an unsupported terminal. See [Terminal Colours](configuration.md#terminal-colours) for details and Windows support.
+
+Override individual colours with `COLOR_THEME`. It is merged over the built-in theme, so you only name the parts you want to change:
+
+```ini
+COLOR_THEME = { "game": "bright_magenta bold", "username": "green" }
+```
+
+See [Terminal Colours](configuration.md#terminal-colours) for every theme key and the accepted colour and style names.
+
+<a id="email-notifications"></a>
 ## Email Notifications
 
 To enable email notifications when a user gets online or offline:
@@ -164,6 +178,7 @@ Example email:
    <img src="https://raw.githubusercontent.com/misiektoja/psn_monitor/refs/heads/main/assets/psn_monitor_email_notifications.png" alt="psn_monitor_email_notifications" width="80%"/>
 </p>
 
+<a id="webhook-notifications"></a>
 ## Webhook Notifications
 
 Once the [webhook settings](configuration.md#webhook-settings) name a destination, each event type is switched on separately, the same way email alerts are: the user getting online or offline, a game starting, changing or stopping, and monitoring errors.
@@ -186,6 +201,7 @@ psn_monitor --send-test-webhook
 
 A failed delivery is retried once, a rate limit waits the delay the service asked for and bounds it, and redirects are never followed. When both channels are enabled, each is delivered independently: an alert that reached Discord is not sent again just because the email failed.
 
+<a id="csv-export"></a>
 ## CSV Export
 
 If you want to save all reported activities of the PSN user to a CSV file, set `CSV_FILE` or use the `-b` flag:
@@ -196,9 +212,38 @@ psn_monitor <psn_user_id> -b psn_user_id.csv
 
 The file is created automatically if it does not exist.
 
+<a id="check-intervals"></a>
+## Check Intervals
+
+If you want to customize the polling intervals, use the `-k` and `-c` flags (or the corresponding configuration options):
+
+```sh
+psn_monitor <psn_user_id> -k 30 -c 120
+```
+
+* `PSN_ACTIVE_CHECK_INTERVAL`, `-k`: check interval when the user is online (seconds)
+* `PSN_CHECK_INTERVAL`, `-c`: check interval when the user is offline (seconds)
+
+An active interval below 30 seconds invites the PlayStation Network rate limiter, which stops the tool seeing anything. `--doctor` warns when the configured interval is that short.
+
+<a id="liveness-reminder"></a>
+### Liveness Reminder
+
+While nothing changes, the tool prints one reminder that it is still running:
+
+```
+* Monitoring healthy for <psn_user_id>. The user is online with no activity change since the last check
+Liveness check, timestamp:	Mon 08 Sep 2026, 09:15:05
+```
+
+The reminder is timed in seconds, so it arrives at the same rate whichever check interval is in use. Set `LIVENESS_CHECK_INTERVAL` to change it (default: 86400, i.e. 24 hours), or to 0 to switch it off.
+
+Anything the tool prints about the target restarts the countdown, so a busy run stays quiet.
+
+<a id="signal-controls-macoslinuxunix"></a>
 ## Signal Controls (macOS/Linux/Unix)
 
-The tool has several signal handlers which allow changing its behavior without restarting it with new configuration options or flags.
+The tool has several signal handlers implemented which allow to change behavior of the tool without a need to restart it with new configuration options / flags.
 
 List of supported signals:
 
@@ -212,82 +257,15 @@ List of supported signals:
 
 `SIGHUP` keeps command-line credentials and nonempty environment values exported before startup. Change those values and restart to replace them.
 
-Send signals with `kill` or `pkill`, for example:
+Send signals with `kill` or `pkill`, e.g.:
 
 ```sh
 pkill -USR1 -f "psn_monitor <psn_user_id>"
 ```
 
-As Windows supports a limited number of signals, this functionality is available only on Linux, Unix and macOS.
+As Windows supports limited number of signals, this functionality is available only on Linux/Unix/macOS.
 
-## Terminal Colours
-
-Terminal output is coloured by default. Colour switches itself off when the output is not an interactive terminal, when `TERM` is unset or `dumb`, when `NO_COLOR` is set and when the output is piped or redirected, so a log file or a piped run never contains escape sequences.
-
-The `--help` screen is coloured too. Group headings, option names, the values those options take, the example commands and the comments above them each get their own colour, so the screen can be scanned instead of read.
-
-Turn it off for one run:
-
-```sh
-psn_monitor <psn_user_id> --no-color
-```
-
-Turn it off permanently in the config file:
-
-```python
-COLORED_OUTPUT = False
-```
-
-On Windows, install [colorama](https://pypi.org/project/colorama/) for colours in the older Command Prompt. Windows Terminal needs nothing extra.
-
-Each part of the output has a logical name, and `COLOR_THEME` in the config file overrides only the names it lists. Combine attributes with spaces or `+`, for example `"bright_cyan bold"` or `"red underline"`. Valid colours are `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white` and their `bright_` variants, plus the `bold`, `dim`, `underline` and `blink` attributes. An empty string leaves that part uncoloured.
-
-The built-in colours apply unless you set `COLOR_THEME`. Older configurations may set every colour explicitly. Remove that block to use current defaults or edit individual values to keep a custom theme.
-
-```python
-COLOR_THEME = {
-    "game": "bright_magenta bold",
-    "duration": "cyan",
-}
-```
-
-| Theme key | Default | What it colours |
-| --- | --- | --- |
-| `header` | `bright_cyan` | Report and wizard headings, and the tool name in the startup line |
-| `section` | `bright_white` | Section names and every command the tool tells you to run |
-| `username` | `bright_cyan underline` | The monitored PlayStation ID, the detected install method and wizard menu numbers |
-| `id` | `bright_magenta` | The numeric PSN account ID |
-| `status_active` | `green` | An online or available presence, and a game that just started |
-| `status_inactive` | `red` | A standby or unavailable presence, and a game that just stopped |
-| `status_offline` | `red` | An offline presence |
-| `status_other` | `white` | A presence value the tool does not recognise |
-| `game` | `bright_yellow` | Game titles |
-| `platform` | `blue` | Console names and the platform tag beside a game |
-| `trophy` | `bright_green` | Trophy level, trophy counts, trophy types and trophy names |
-| `duration` | `green` | Time spans such as `3 hours, 21 minutes` |
-| `status_change` | `yellow` | The `changed status` and `changed game` part of a change report |
-| `timestamp_label` | *(empty)* | The `Timestamp:` label, left uncoloured by default |
-| `timestamp_value` | `cyan` | The timestamp itself |
-| `info` | `cyan` | `To fix:` lines, notes, prompts and default markers |
-| `warning` | `yellow` | The opening `Warning:` word of a `* Warning:` line and `[WARN]` rows. The rest of the line keeps the colours of the values in it |
-| `error` | `red` | `* Error:` lines and `[FAIL]` rows |
-| `signal` | `yellow` | The name of the signal in a `* Signal ... received` line |
-| `email` | `bright_cyan` | Lines reporting an email being sent |
-| `webhook` | `bright_blue` | Lines reporting a webhook being sent |
-| `date` | `magenta` | Single dates and times |
-| `date_range` | `magenta` | Date and time ranges |
-| `boolean_true` | `green` | `True`, `Enabled`, `On` and `[PASS]` rows |
-| `boolean_false` | `red` | `False`, `Disabled` and `Off` |
-| `link` | `blue underline` | URLs |
-| `help_heading` | `bright_cyan bold` | The `--help` group headings and example task names |
-| `help_usage` | `bright_white bold` | The `usage:` label |
-| `help_option` | `bright_green` | Option names such as `--doctor` |
-| `help_metavar` | `yellow` | The value each option takes, such as a path or a number of seconds |
-| `help_placeholder` | `bright_magenta` | Values to replace in the help examples |
-| `help_command` | `bright_white` | The commands in the help examples |
-| `help_comment` | `bright_black` | The `#` comment above each help example |
-| `help_default` | `bright_black` | The `(default: ...)` notes |
-
+<a id="coloring-log-output-with-grc"></a>
 ## Coloring Log Output with GRC
 
 You can use [GRC](https://github.com/garabik/grc) to color logs.
