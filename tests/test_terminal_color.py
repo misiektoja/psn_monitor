@@ -760,7 +760,7 @@ def test_a_real_terminal_run_is_coloured(tmp_path):
 
 # Returns the documented theme table from the page that carries it
 def documented_theme_table():
-    page = (Path(monitor.__file__).parent / "docs" / "usage.md").read_text(encoding="utf-8")
+    page = (Path(monitor.__file__).parent / "docs" / "configuration.md").read_text(encoding="utf-8")
     return page.split("| Theme key | Default | What it colours |", 1)[1].split("\n\n", 1)[0]
 
 
