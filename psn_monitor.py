@@ -1104,10 +1104,12 @@ def print_liveness_banner(message):
 
 
 # Reminds about a lasting failure once an hour, so a broken run still says it is alive without repeating itself
-def print_outage_liveness(target, advice, since, failures=0):
+def print_outage_liveness(target, advice, since, failures=0, close=True):
     count = f", {failures} failed {'check' if failures == 1 else 'checks'}" if failures else ""
     print(f"* Monitoring degraded for {target}. {advice.summary} since {get_date_from_ts(since)}{count}")
-    print_cur_ts("Liveness check, timestamp:\t")
+    # A caller with an alert still to deliver closes the report itself, so the delivery lines stay inside it
+    if close:
+        print_cur_ts("Liveness check, timestamp:\t")
 
 
 # Notes that a reported outage now fails differently, in one line rather than a second full report
@@ -4783,7 +4785,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 print_outage_change(psn_user_id, advice)
                 failure_announced = True
             elif outage_outcome == "reminder":
-                print_outage_liveness(psn_user_id, advice, outage.since, outage.failures)
+                print_outage_liveness(psn_user_id, advice, outage.since, outage.failures, close=False)
                 failure_announced = True
 
             if error_streak >= policy["recreate_after"] and _recreate_session_rate_limited() and not rebuild_announced:
@@ -4802,8 +4804,11 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 printed_this_check = True
 
             # A rebuild or a retried alert can reach the screen on a check the outage reporter keeps quiet, and a
-            # line with nothing under it reads as a run that stopped there
-            if outage_outcome in ("full", "changed") or printed_this_check:
+            # line with nothing under it reads as a run that stopped there. The reminder closes last so the lines
+            # it carries stay inside the report rather than landing under the separator that ended it
+            if outage_outcome == "reminder":
+                print_cur_ts("Liveness check, timestamp:\t")
+            elif outage_outcome in ("full", "changed") or printed_this_check:
                 print_cur_ts("Timestamp:\t\t\t")
             debug_print("Waiting", interval=display_time(sleep_interval), reason=f"{kind} failure", streak=error_streak)
             time.sleep(sleep_interval)
