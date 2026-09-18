@@ -1257,12 +1257,16 @@ def format_diagnostic_line(operation, fields):
 def debug_print(_operation, **fields):
     if DEBUG_MODE:
         message = format_diagnostic_line(_operation, fields)
+        # The scanner does not treat the sanitizer as a barrier, so it reports the masked line as a leak
+        # codeql[py/clear-text-logging-sensitive-data]
         print(f"[DEBUG {datetime.now().strftime('%H:%M:%S')}] {sanitize_error_text(message)}")
 
 
 # Prints a rare operational event, shown only when verbose mode is on
 def verbose_print(message):
     if VERBOSE_MODE:
+        # The scanner does not treat the sanitizer as a barrier, so it reports the masked line as a leak
+        # codeql[py/clear-text-logging-sensitive-data]
         print(f"* {sanitize_error_text(message)}")
 
 
