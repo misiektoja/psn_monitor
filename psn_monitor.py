@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.9
+v1.9.1
 
 Tool implementing real-time tracking of Sony PlayStation (PSN) players activities:
 https://github.com/misiektoja/psn_monitor/
@@ -18,7 +18,7 @@ wcwidth (optional, measures wide characters correctly when TRUNCATE_CHARS is set
 colorama (optional, for better colours on Windows terminals)
 """
 
-VERSION = "1.9"
+VERSION = "1.9.1"
 
 # ---------------------------
 # CONFIGURATION SECTION START
