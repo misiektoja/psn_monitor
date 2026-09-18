@@ -1,6 +1,7 @@
-PSNAWP
+PSNAWP>=3.0.3
 requests
 python-dateutil
 pytz
 tzlocal
 python-dotenv
+wcwidth
