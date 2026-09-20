@@ -479,6 +479,7 @@ from datetime import datetime, timezone
 from dateutil import relativedelta
 from dateutil.parser import isoparse
 import calendar
+import html
 import requests as req
 import urllib3
 import signal
@@ -534,10 +535,18 @@ class ErrorAlertState:
         self.webhook_failures = 0
         self.email_retry_at = 0
         self.webhook_retry_at = 0
+        # The failure the delivered alert described and when it began, so the recovery alert can name them
+        self.advice = None
+        self.since = 0
 
     # Forgets the delivered alert and any hold, so the next failure earns each channel a new one
     def reset(self) -> None:
         self.__init__()
+
+    # Keeps the failure a delivered alert described, so the recovery alert can say what cleared
+    def remember(self, advice, since: int) -> None:
+        self.advice = advice
+        self.since = int(since)
 
     # Tells whether a channel still owes the alert and its wait after a failed attempt, if any, has passed
     def pending(self, channel: str, enabled, now: int) -> bool:
@@ -664,6 +673,9 @@ SMTP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#smtp-settings"
 TLS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#tls-verification"
 WEBHOOK_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#webhook-settings"
 INTERVALS_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#check-intervals"
+DOCTOR_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#doctor-preflight"
+CONNECTION_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#connection-problems"
+DESCRIPTOR_LIMIT_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#too-many-open-files"
 DIAGNOSTICS_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#verbose-and-debug-output"
 
 # Installs this tool can be running from. There is no container image, so no container method is detected
@@ -806,6 +818,11 @@ def recovery_fix_with_guide(fix, guide_url):
     return f"{fix}\nGuide: {guide_url}"
 
 
+# Escapes text for an HTML mail body and keeps its line breaks, which HTML would otherwise collapse into spaces
+def html_text(text):
+    return html.escape(str(text)).replace("\n", "<br>")
+
+
 # Returns the advice a cancelled secret entry reports, worded the same way by every one-shot secret command
 def secret_entry_cancelled_advice(subject, flag, guide_url):
     return make_recovery_advice("secret.entry", f"{subject[:1].upper()}{subject[1:]} setup was cancelled and the dotenv file was not changed", recovery_fix_with_guide(f"Run {flag} again when you have the value ready", guide_url), False)
@@ -864,6 +881,20 @@ def mentions_status_code(code, message):
     return re.search(rf"(?<![\w/]){code}(?!\w)", message) is not None
 
 
+# The fix a passing network failure shares, since the tool retries it on its own before the reader needs to act
+NETWORK_FAILURE_FIX = "Usually nothing to do, the tool retries on its own. If it continues, check network access, DNS, firewall and proxy settings"
+
+
+# Returns the advice for a PSN request that got no answer in time
+def network_timeout_advice(detail=""):
+    return make_recovery_advice("network.timeout", "PlayStation Network did not answer in time", recovery_fix_with_guide(NETWORK_FAILURE_FIX, CONNECTION_GUIDE_URL), True, detail)
+
+
+# Returns the advice for a PSN request that could not reach the service
+def network_unavailable_advice(detail=""):
+    return make_recovery_advice("network.unavailable", "PlayStation Network could not be reached", recovery_fix_with_guide(NETWORK_FAILURE_FIX, CONNECTION_GUIDE_URL), True, detail)
+
+
 # Classifies a failure by exception type, then by message, without contacting PSN
 def classify_recovery_error_offline(error=None, context="runtime", detail=""):
     safe_detail = sanitize_error_text(detail or error or "")
@@ -874,7 +905,7 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
     if error is not None and is_too_many_open_files(error):
         # Repeated auth refreshes against an expired NPSSO are a common way to reach the limit, so say so
         npsso_note = " This can also be a side effect of repeated PSN auth refreshes, so check your NPSSO code once the limit is raised." if ("oauth/token" in message or "authz" in message or "npsso" in message) else ""
-        return make_recovery_advice("resource.exhausted", "This process ran out of file descriptors, which is a local limit and not a PlayStation Network problem", recovery_fix_with_guide(f"Raise the file descriptor limit, for example with 'ulimit -n 4096', or set LimitNOFILE= if you run under systemd, then restart the tool.{npsso_note}", DIAGNOSTICS_GUIDE_URL), False, safe_detail)
+        return make_recovery_advice("resource.exhausted", "This process ran out of file descriptors, which is a local limit and not a PlayStation Network problem", recovery_fix_with_guide(f"Raise the file descriptor limit, for example with 'ulimit -n 4096', or set LimitNOFILE= if you run under systemd, then restart the tool.{npsso_note}", DESCRIPTOR_LIMIT_GUIDE_URL), False, safe_detail)
 
     if context == "config.missing":
         return make_recovery_advice("config.missing", safe_detail or "The configuration file was not found", recovery_fix_with_guide(f"Check the --config-file path, or create one with: {render_command(['--generate-config', 'psn_monitor.conf'], include_paths=False)}", CONFIG_GUIDE_URL), False, safe_detail)
@@ -909,7 +940,7 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         return make_recovery_advice("webhook.rejected", safe_detail or "The webhook service refused the delivery", recovery_fix_with_guide(f"Confirm the webhook still exists and that the saved URL is current, then run: {render_command(['--send-test-webhook'])}", WEBHOOK_GUIDE_URL), False, safe_detail)
 
     if context == "file.unreadable":
-        return make_recovery_advice("file.unreadable", safe_detail or "A file the tool needs could not be read", recovery_fix_with_guide("Check that the path exists and that this user can read it, then retry", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+        return make_recovery_advice("file.unreadable", safe_detail or "A file the tool needs could not be read", recovery_fix_with_guide("Check that the path exists and that this user can read it, then retry", CONFIG_GUIDE_URL), True, safe_detail)
 
     if context == "file.unwritable":
         # The wizard reaches this either because a destination was switched off or because the path cannot be written
@@ -917,7 +948,7 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
             return make_recovery_advice("file.unwritable", safe_detail or "--setup has nowhere to write the secrets", recovery_fix_with_guide("Replace '--env-file none' with a writable path, or drop the flag to write .env in the current directory", SECRETS_GUIDE_URL), False, safe_detail)
         if "nowhere to write the configuration" in message:
             return make_recovery_advice("file.unwritable", safe_detail or "--setup has nowhere to write the configuration", recovery_fix_with_guide(f"Replace '--config-file none' with a writable path, or drop the flag to write {DEFAULT_CONFIG_FILENAME} in the current directory", CONFIG_GUIDE_URL), False, safe_detail)
-        return make_recovery_advice("file.unwritable", safe_detail or "A file the tool needs could not be written", recovery_fix_with_guide("Check that the directory exists, that this user can write to it and that there is free space, then retry", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+        return make_recovery_advice("file.unwritable", safe_detail or "A file the tool needs could not be written", recovery_fix_with_guide("Check that the directory exists, that this user can write to it and that there is free space, then retry", CONFIG_GUIDE_URL), True, safe_detail)
 
     if context == "connectivity":
         # Classified from the error, because the detail names the endpoint rather than the failure
@@ -937,7 +968,7 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
 
     for current in iter_exc_chain(error):
         if isinstance(current, PsnMalformedResponse):
-            return make_recovery_advice("psn.malformed_response", "PlayStation Network returned a presence response in an unexpected shape", recovery_fix_with_guide("Nothing to do in most cases, the tool rebuilds its session and retries. If it continues, upgrade PSNAWP and rerun with --debug", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+            return make_recovery_advice("psn.malformed_response", "PlayStation Network returned a presence response in an unexpected shape", recovery_fix_with_guide("Nothing to do in most cases, the tool rebuilds its session and retries. If it continues, upgrade PSNAWP and rerun with --debug", DOCTOR_GUIDE_URL), True, safe_detail)
         if types["rate_limited"] and isinstance(current, types["rate_limited"]):
             return make_recovery_advice("psn.rate_limited", "PlayStation Network is rate limiting this account", recovery_fix_with_guide("Raise PSN_CHECK_INTERVAL and PSN_ACTIVE_CHECK_INTERVAL, or run fewer instances against the same account, then restart", INTERVALS_GUIDE_URL), True, safe_detail)
         if types["not_found"] and isinstance(current, types["not_found"]):
@@ -947,9 +978,9 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         if types["auth"] and isinstance(current, types["auth"]):
             return make_recovery_advice("auth.npsso_expired" if monitoring else "auth.npsso_invalid", "PlayStation Network rejected the NPSSO code" if monitoring else "PlayStation Network did not accept the NPSSO code", recovery_fix_with_guide(npsso_recovery_fix(monitoring), NPSSO_GUIDE_URL), False, safe_detail)
         if isinstance(current, types["timeout"]):
-            return make_recovery_advice("network.timeout", "PlayStation Network took too long to answer", recovery_fix_with_guide("Nothing to do in most cases, the tool retries on its own. If it continues, check your connection and any proxy", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+            return network_timeout_advice(safe_detail)
         if isinstance(current, types["unavailable"]):
-            return make_recovery_advice("network.unavailable", "PlayStation Network could not be reached", recovery_fix_with_guide("Nothing to do in most cases, the tool retries on its own. If it continues, check your internet connection, DNS and firewall", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+            return network_unavailable_advice(safe_detail)
 
     if "too many requests" in message or "rate limit" in message or mentions_status_code("429", message):
         return make_recovery_advice("psn.rate_limited", "PlayStation Network is rate limiting this account", recovery_fix_with_guide("Raise PSN_CHECK_INTERVAL and PSN_ACTIVE_CHECK_INTERVAL, or run fewer instances against the same account, then restart", INTERVALS_GUIDE_URL), True, safe_detail)
@@ -958,14 +989,14 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         return make_recovery_advice("auth.npsso_expired" if monitoring else "auth.npsso_invalid", "PlayStation Network rejected the NPSSO code" if monitoring else "PlayStation Network did not accept the NPSSO code", recovery_fix_with_guide(npsso_recovery_fix(monitoring), NPSSO_GUIDE_URL), False, safe_detail)
 
     if "read timed out" in message or "timeout" in message or "timed out" in message:
-        return make_recovery_advice("network.timeout", "PlayStation Network took too long to answer", recovery_fix_with_guide("Nothing to do in most cases, the tool retries on its own. If it continues, check your connection and any proxy", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+        return network_timeout_advice(safe_detail)
 
     if "remote end closed connection" in message or "connection reset by peer" in message or "connection aborted" in message or "temporarily unavailable" in message:
-        return make_recovery_advice("network.unavailable", "PlayStation Network could not be reached", recovery_fix_with_guide("Nothing to do in most cases, the tool retries on its own. If it continues, check your internet connection, DNS and firewall", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+        return network_unavailable_advice(safe_detail)
 
     for current in iter_exc_chain(error):
         if isinstance(current, (AttributeError, TypeError)):
-            return make_recovery_advice("psn.malformed_response", "PlayStation Network returned a presence response in an unexpected shape", recovery_fix_with_guide("Nothing to do in most cases, the tool rebuilds its session and retries. If it continues, upgrade PSNAWP and rerun with --debug", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+            return make_recovery_advice("psn.malformed_response", "PlayStation Network returned a presence response in an unexpected shape", recovery_fix_with_guide("Nothing to do in most cases, the tool rebuilds its session and retries. If it continues, upgrade PSNAWP and rerun with --debug", DOCTOR_GUIDE_URL), True, safe_detail)
 
     return make_recovery_advice("unknown", "Something unexpected went wrong", recovery_fix_with_guide(unknown_failure_fix(), DIAGNOSTICS_GUIDE_URL), True, safe_detail)
 
@@ -1025,19 +1056,80 @@ def print_recovery_error(error=None, context="runtime", debug=None, detail="", r
     return print_recovery_advice(classify_recovery_error(error, context, detail, probe_auth), debug, retry_note, with_fix, label, tracker)
 
 
-# Builds the subject line for one recovery notification
-def recovery_email_subject(advice, psn_user_id):
-    return f"{advice.summary} (PSN user: {psn_user_id})"
+# Builds the subject every failure alert shares, so an inbox fed by several monitors sorts them by tool
+def recovery_alert_subject(advice, target):
+    return f"PSN Monitor error: {advice.summary} (user: {target})"
 
 
-# Builds the body for one recovery notification, repeating the fix the operator sees on screen
-def recovery_email_body(advice, error_streak=0):
-    lines = [advice.summary, "", f"To fix: {advice.fix}"]
-    if error_streak > 1:
-        lines.extend(["", f"Failed checks in a row: {error_streak}"])
-    if advice.detail:
-        lines.extend(["", f"Technical detail: {advice.detail}"])
-    return "\n".join(lines) + get_cur_ts("\n\nTimestamp: ")
+# Lists the paragraphs of one failure alert in reading order, so the plain text, HTML and webhook bodies agree
+def recovery_alert_paragraphs(advice, retry_seconds, failed_checks=0, failing_since=0):
+    retry_lines = []
+    # A first failure has no run to count, so the count and its start appear once a check has failed again
+    if failed_checks > 1:
+        retry_lines.append(f"Failed checks in a row: {failed_checks}")
+        if failing_since:
+            retry_lines.append(f"Failing since: {get_date_from_ts(int(failing_since))}")
+    # A run that stops on this failure has no next check to name
+    if retry_seconds > 0:
+        retry_lines.append(f"Next retry in: {display_time(retry_seconds)}")
+    paragraphs = [advice.summary, f"To fix: {advice.fix}"]
+    if retry_lines:
+        paragraphs.append("\n".join(retry_lines))
+    # A detail that only repeats the summary spends a line saying nothing
+    if DEBUG_MODE and advice.detail and advice.detail != advice.summary:
+        paragraphs.append(f"Technical detail: {sanitize_error_text(advice.detail)}")
+    return paragraphs
+
+
+# Builds the plain text body of one failure alert, ending with the timestamp unless the webhook asks without it
+def recovery_alert_body(advice, retry_seconds, failed_checks=0, failing_since=0, timestamp=True):
+    body = "\n\n".join(recovery_alert_paragraphs(advice, retry_seconds, failed_checks, failing_since))
+    return body + get_cur_ts("\n\nTimestamp: ") if timestamp else body
+
+
+# Builds the HTML body of one failure alert, with the summary in bold and the same paragraphs as the plain text
+def recovery_alert_body_html(advice, retry_seconds, failed_checks=0, failing_since=0, timestamp=True):
+    summary, *rest = recovery_alert_paragraphs(advice, retry_seconds, failed_checks, failing_since)
+    content = "<br><br>".join([f"<b>{html_text(summary)}</b>", *(html_text(paragraph) for paragraph in rest)])
+    return f"<html><head></head><body>{content}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}</body></html>"
+
+
+# Builds the subject of the alert that closes a delivered failure alert, so it sorts next to the failure it ends
+def outage_recovery_subject(target, lasted):
+    return f"PSN Monitor recovered: monitoring {target} resumed after {display_time(max(1, lasted))}"
+
+
+# Builds the plain text body of one recovery alert, naming the failure it closes
+def outage_recovery_body(advice, target, lasted, timestamp=True):
+    body = f"Monitoring recovered for {target} after {display_time(max(1, lasted))}.\n\nThe failure was: {advice.summary}"
+    return body + get_cur_ts("\n\nTimestamp: ") if timestamp else body
+
+
+# Builds the HTML body of one recovery alert, matching the plain text
+def outage_recovery_body_html(advice, target, lasted, timestamp=True):
+    body = f"Monitoring recovered for <b>{html_text(target)}</b> after <b>{html_text(display_time(max(1, lasted)))}</b>.<br><br>The failure was: {html_text(advice.summary)}"
+    return f"<html><head></head><body>{body}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}</body></html>"
+
+
+# Sends the failure alert on the requested channels and returns what each delivered, without touching the alert state
+def send_failure_alert(advice, target, retry_seconds, failed_checks=0, failing_since=0, email_enabled=False, webhook_enabled=False):
+    body = recovery_alert_body(advice, retry_seconds, failed_checks, failing_since)
+    body_html = recovery_alert_body_html(advice, retry_seconds, failed_checks, failing_since)
+    webhook_body = recovery_alert_body(advice, retry_seconds, failed_checks, failing_since, timestamp=False)
+    return send_notification_channels("error", recovery_alert_subject(advice, target), body, body_html, email_enabled=email_enabled, webhook_enabled=webhook_enabled, webhook_body=webhook_body)
+
+
+# Sends the recovery alert on every channel whose failure alert was delivered and returns whether any went out
+def send_outage_recovery_alert(target, lasted, error_alert):
+    advice = error_alert.advice
+    email_enabled = bool(ERROR_NOTIFICATION and error_alert.email_sent)
+    webhook_enabled = bool(webhook_event_enabled("error") and error_alert.webhook_sent)
+    if advice is None or not (email_enabled or webhook_enabled):
+        return False
+    # An outage the reporter never confirmed still ends for the alert, which was sent on the alert state's clock
+    since_failure = lasted if lasted is not None else int(time.time()) - error_alert.since
+    delivered = send_notification_channels("error", outage_recovery_subject(target, since_failure), outage_recovery_body(advice, target, since_failure), outage_recovery_body_html(advice, target, since_failure), email_enabled=email_enabled, webhook_enabled=webhook_enabled, webhook_body=outage_recovery_body(advice, target, since_failure, timestamp=False))
+    return any(delivered)
 
 
 # Decides how a lasting failure is reported: in full when it is new, then on the liveness cadence while it lasts
@@ -1118,9 +1210,11 @@ def print_outage_change(target, advice):
 
 
 # Reports that a failure cleared, since a throttled failure no longer stops printing when it is over
-def print_outage_recovery(target, lasted):
+def print_outage_recovery(target, lasted, close=True):
     print(f"* Monitoring recovered for {target} after {display_time(max(1, lasted))}")
-    print_cur_ts("Timestamp:\t\t\t")
+    # A caller with a recovery alert still to deliver closes the report itself, so the delivery lines stay inside it
+    if close:
+        print_cur_ts("Timestamp:\t\t\t")
 
 
 # Suppresses a repeated fix paragraph until the failure category changes or a check succeeds
@@ -3220,7 +3314,7 @@ def send_webhook(title, description, notification_type="status", force=False, sl
 
 
 # Sends one alert through the email and webhook channels, each switched on independently of the other
-def send_notification_channels(notification_type, subject, body, body_html="", email_enabled=False, webhook_enabled=None):
+def send_notification_channels(notification_type, subject, body, body_html="", email_enabled=False, webhook_enabled=None, webhook_body=None):
     email_attempted = bool(email_enabled)
     webhook_attempted = webhook_event_enabled(notification_type) if webhook_enabled is None else bool(webhook_enabled)
     email_delivered = False
@@ -3230,7 +3324,8 @@ def send_notification_channels(notification_type, subject, body, body_html="", e
         email_delivered = send_email(subject, body, body_html, SMTP_SSL) == 0
     if webhook_attempted:
         print(f"Sending webhook notification via {webhook_provider_display_name()}")
-        webhook_delivered = send_webhook(subject, body, notification_type, force=True) == 0
+        # A webhook shows its own delivery time, so the caller may hand it the body without the timestamp trailer
+        webhook_delivered = send_webhook(subject, body if webhook_body is None else webhook_body, notification_type, force=True) == 0
     # Delivery, not the attempt, so a channel that failed is retried while one that succeeded is not resent
     return email_delivered, webhook_delivered
 
@@ -4726,7 +4821,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 error_email_pending = error_alert.pending("email", ERROR_NOTIFICATION, now)
                 error_webhook_pending = error_alert.pending("webhook", webhook_event_enabled("error"), now)
                 if error_email_pending or error_webhook_pending:
-                    email_delivered, webhook_delivered = send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice), email_enabled=error_email_pending, webhook_enabled=error_webhook_pending)
+                    # The check that follows runs at once, so there is no retry interval to name
+                    email_delivered, webhook_delivered = send_failure_alert(advice, psn_user_id, 0, email_enabled=error_email_pending, webhook_enabled=error_webhook_pending)
                     error_alert.record("email", error_email_pending, email_delivered, now)
                     error_alert.record("webhook", error_webhook_pending, webhook_delivered, now)
                 print_cur_ts("Timestamp:\t\t\t")
@@ -4771,7 +4867,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             if kind == "exhausted":
                 print_recovery_advice(advice)
                 if (ERROR_NOTIFICATION and not error_alert.email_sent) or (webhook_event_enabled("error") and not error_alert.webhook_sent):
-                    send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice), email_enabled=ERROR_NOTIFICATION and not error_alert.email_sent, webhook_enabled=webhook_event_enabled("error") and not error_alert.webhook_sent)
+                    # The tool stops here, so the alert names no retry interval
+                    send_failure_alert(advice, psn_user_id, 0, email_enabled=ERROR_NOTIFICATION and not error_alert.email_sent, webhook_enabled=webhook_event_enabled("error") and not error_alert.webhook_sent)
                 print_cur_ts("Timestamp:\t\t\t")
                 sys.exit(2)
 
@@ -4807,9 +4904,11 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             error_email_pending = alert_due and error_alert.pending("email", ERROR_NOTIFICATION, now)
             error_webhook_pending = alert_due and error_alert.pending("webhook", webhook_event_enabled("error"), now)
             if error_email_pending or error_webhook_pending:
-                email_delivered, webhook_delivered = send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice, error_streak), email_enabled=error_email_pending, webhook_enabled=error_webhook_pending)
+                email_delivered, webhook_delivered = send_failure_alert(advice, psn_user_id, sleep_interval, error_streak, error_since, email_enabled=error_email_pending, webhook_enabled=error_webhook_pending)
                 error_alert.record("email", error_email_pending, email_delivered, now)
                 error_alert.record("webhook", error_webhook_pending, webhook_delivered, now)
+                if email_delivered or webhook_delivered:
+                    error_alert.remember(advice, error_since)
                 failure_announced = failure_announced or email_delivered or webhook_delivered
                 printed_this_check = True
 
@@ -4829,8 +4928,12 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             if error_streak:
                 debug_print("Recovered", streak=error_streak, reported=failure_announced)
                 # A streak nobody was told about needs no recovery line, since nothing reported it as broken
-                if failure_announced and outage_lasted is not None:
-                    print_outage_recovery(psn_user_id, outage_lasted)
+                recovery_reported = failure_announced and outage_lasted is not None
+                if recovery_reported:
+                    print_outage_recovery(psn_user_id, outage_lasted, close=False)
+                # A delivered failure alert earns a recovery alert on the same channels, inside the same report
+                if send_outage_recovery_alert(psn_user_id, outage_lasted, error_alert) or recovery_reported:
+                    print_cur_ts("Timestamp:\t\t\t")
             recovery_hints.reset()
             error_alert.reset()
             error_streak = 0
@@ -4990,8 +5093,6 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
 # Preflight diagnostics. Every section, marker and summary sentence is shared with the sibling monitors,
 # so a user who runs two of them reads one report format rather than two
-DOCTOR_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#doctor-preflight"
-
 DOCTOR_SECTIONS = ("Environment", "Configuration", "Authentication", "Connectivity", "Target", "Notifications")
 
 # The theme entry each doctor result marker is drawn in, so a failure reads as one at a glance
@@ -7470,7 +7571,7 @@ def main():
         dest="notify_errors",
         action="store_false",
         default=None,
-        help="Disable email on errors (e.g. invalid NPSSO)"
+        help="Disable email on errors and the recovery alert that follows"
     )
     notify.add_argument(
         "--send-test-email",
@@ -7535,7 +7636,7 @@ def main():
         dest="webhook_errors",
         action="store_false",
         default=None,
-        help="Disable webhook alerts on errors"
+        help="Disable webhook alerts on errors and the recovery alert that follows"
     )
     webhook.add_argument(
         "--send-test-webhook",
