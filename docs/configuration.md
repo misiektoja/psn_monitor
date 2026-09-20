@@ -110,7 +110,7 @@ WEBHOOK_ENABLED = True
 WEBHOOK_PROVIDER = "discord"                    # or "ntfy"
 WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION = True     # user gets online or offline
 WEBHOOK_GAME_CHANGE_NOTIFICATION = True         # game starts, changes or stops
-WEBHOOK_ERROR_NOTIFICATION = True               # monitoring errors, enabled by default
+WEBHOOK_ERROR_NOTIFICATION = True               # monitoring failures and their recovery, enabled by default
 ```
 
 A `WEBHOOK_URL` left unset, or left at its `your_webhook_url` placeholder, switches webhook alerts off at startup instead of failing at the first alert. `--verbose` reports why.

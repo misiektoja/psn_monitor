@@ -168,7 +168,11 @@ To disable sending an email on errors, which is enabled by default:
 psn_monitor <psn_user_id> -e
 ```
 
-Email and webhook error alerts are sent after **5 minutes** of a continuing failure. Problems that need your action, such as an expired npsso code, alert immediately. Each kind of failure alerts once per channel. Failed deliveries are retried after 5 minutes, with increasing waits up to an hour. Alerts can fire again after monitoring recovers.
+Email and webhook failure alerts are sent after **5 minutes** of a continuing failure. Problems that need your action, such as an expired npsso code, alert immediately. The subject reads `PSN Monitor error: <what went wrong> (user: <psn_user_id>)` and the body gives the fix, a link to the page that covers it, how many checks failed in a row, since when the check has been failing and how long until the next attempt.
+
+A **recovery alert** follows on the same channels once the failure clears, naming how long it lasted and which failure it closes. `-e` / `--no-error-notify` switches off the failure email and the recovery email together, and `--no-webhook-error-notify` does the same for webhooks.
+
+Each kind of failure alerts once per channel. Failed deliveries are retried after 5 minutes, with increasing waits up to an hour. Alerts can fire again after monitoring recovers.
 
 Make sure you defined your [SMTP settings](configuration.md#smtp-settings) first.
 
@@ -198,6 +202,8 @@ Verify the destination without starting monitoring:
 ```sh
 psn_monitor --send-test-webhook
 ```
+
+The monitoring error event covers the failure alert and the recovery alert that follows it, with the same subject and text as the email alerts. The webhook message leaves out the timestamp line, since a chat message already shows when it arrived.
 
 A failed delivery is retried once, a rate limit waits the delay the service asked for and bounds it, and redirects are never followed. When both channels are enabled, each is delivered independently: an alert that reached Discord is not sent again just because the email failed.
 
