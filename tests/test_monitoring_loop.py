@@ -365,12 +365,17 @@ def test_a_halted_request_joins_the_outage(pm_module, psn_session, fake_clock, m
     run_monitor(pm_module)
 
     output = capsys.readouterr().out
-    assert "PlayStation Network took too long to answer" in output
+    assert "PlayStation Network did not answer in time" in output
     assert "Technical detail:" not in output
-    assert "psn_user.get_presence() did not answer" in sent_emails[0]["body"]
+    # The alert says what to do rather than naming the call that failed, which only debug output carries
+    assert "psn_user.get_presence() did not answer" not in sent_emails[0]["body"]
+    assert "Next retry in: " in sent_emails[0]["body"]
     assert "Rebuilt the PSNAWP session after 3 failed checks in a row" in output
     assert "Monitoring recovered for" in output
-    assert len(sent_emails) == 1
+    # The failure alert and the recovery alert that closes it, one each
+    assert len(sent_emails) == 2
+    assert sent_emails[0]["subject"] == "PSN Monitor error: PlayStation Network did not answer in time (user: misiektoja)"
+    assert sent_emails[1]["subject"].startswith("PSN Monitor recovered: monitoring misiektoja resumed after ")
 
 
 # Verifies a lasting outage reports itself once and then only on the hourly reminder, which keeps its own clock

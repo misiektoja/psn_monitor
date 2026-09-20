@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 import pytest
+import requests
 
 import psn_monitor as monitor
 
@@ -59,6 +60,16 @@ def test_every_guide_link_resolves_to_a_real_page_and_anchor():
         assert page.exists(), f"{name} points at a missing page: {page.name}"
         if anchor:
             assert anchor in page_anchors(page), f"{name} points at a missing anchor on {page.name}: #{anchor}"
+
+
+# The verbose and debug section explains the output flags, so a network failure sent there finds nothing about its cause
+def test_network_failures_link_to_the_connection_guide():
+    for error in (requests.Timeout("timed out"), requests.ConnectionError("connection refused")):
+        advice = monitor.classify_recovery_error(error)
+        assert advice.retryable is True
+        assert f"\nGuide: {monitor.CONNECTION_GUIDE_URL}" in advice.fix
+        assert "--doctor" not in advice.fix
+        assert "--debug" not in advice.fix
 
 
 # Verifies every page the navigation lists exists, so a renamed file fails here rather than in the built site
