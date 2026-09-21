@@ -54,6 +54,7 @@ and again before anything is published to PyPI.
 | `test_email_notifications.py` | SMTP validation, the delivered message and failure handling |
 | `test_error_classification.py` | The recovery categories, the advice and install-aware commands each failure produces, and the NPSSO auth probe |
 | `test_monitoring_loop.py` | End-to-end monitoring runs: status and game changes, session state, CSV history, alerts and every error recovery path |
+| `test_email_html.py` | HTML notification bodies: escaping, the Discord markdown form and the plain-text match |
 | `test_help_screen.py` | The `--help` screen: the option groups, the worked examples and the version banner |
 | `test_output_safety.py` | Secret redaction, terminal control sequence removal, screen truncation and the single output layer |
 | `test_presence_parsing.py` | Presence payload parsing, platform labels and title normalization |

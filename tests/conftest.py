@@ -226,8 +226,8 @@ def sent_webhooks(monkeypatch):
     delivered = []
 
     # Records one alert and reports success
-    def fake_send_webhook(title, description, notification_type="status", force=False, sleeper=None, report_delivery=True):
-        delivered.append({"title": title, "description": description, "type": notification_type, "force": force})
+    def fake_send_webhook(title, description, notification_type="status", force=False, sleeper=None, report_delivery=True, discord_description=""):
+        delivered.append({"title": title, "description": description, "type": notification_type, "force": force, "discord_description": discord_description})
         return 0
 
     monkeypatch.setattr(pm, "send_webhook", fake_send_webhook)
