@@ -1,6 +1,7 @@
 """Offline end-to-end tests that drive the monitoring loop with scripted PSN responses."""
 
 import json
+import re
 
 import pytest
 import requests
@@ -92,8 +93,20 @@ def test_user_going_online_is_announced_and_emailed(pm_module, psn_session, fake
     assert f"PSN user {USER_ID} changed status from offline to online" in output
     assert "*** User got ACTIVE !" in output
     assert len(sent_emails) == 1
-    assert sent_emails[0]["subject"].startswith(f"PSN user {USER_ID} is now online")
+    assert sent_emails[0]["subject"].startswith(f"PSN user {USER_ID} is online")
     assert json.loads((isolated_working_directory / LAST_STATUS_FILE).read_text(encoding="utf-8"))[1] == "online"
+
+
+# Verifies the status subject names one timestamp rather than the whole range, which the body already reports
+def test_the_status_subject_carries_a_single_timestamp(pm_module, psn_session, fake_clock, monkeypatch, sent_emails):
+    monkeypatch.setattr(pm_module, "ACTIVE_INACTIVE_NOTIFICATION", True)
+    psn_session([presence_payload(status="offline"), presence_payload(status="online")])
+
+    run_monitor(pm_module)
+
+    subject = sent_emails[0]["subject"]
+    assert re.fullmatch(rf"PSN user {USER_ID} is online \(after .+ - (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{{1,2}} \w{{3}} \d{{2}}:\d{{2}}\)", subject), subject
+    assert len(re.findall(r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b", subject)) == 1
 
 
 # Verifies going offline reports how long the session lasted and how many games were played
@@ -110,7 +123,7 @@ def test_user_going_offline_summarizes_the_session(pm_module, psn_session, fake_
     output = capsys.readouterr().out
     assert "*** User got OFFLINE !" in output
     assert "User played 1 games for total time of" in output
-    assert any("is now offline" in message["subject"] for message in sent_emails)
+    assert any("is offline" in message["subject"] for message in sent_emails)
 
 
 # Verifies a brief disconnect is folded back into the running session instead of starting a new one
@@ -614,7 +627,7 @@ def test_a_status_change_reaches_the_webhook_channel(pm_module, psn_session, fak
     run_monitor(pm_module)
 
     assert [alert["type"] for alert in sent_webhooks] == ["status"]
-    assert sent_webhooks[0]["title"].startswith(f"PSN user {USER_ID} is now online")
+    assert sent_webhooks[0]["title"].startswith(f"PSN user {USER_ID} is online")
 
 
 # Verifies a game change reaches the webhook channel on its own alert setting
