@@ -97,8 +97,8 @@ def test_user_going_online_is_announced_and_emailed(pm_module, psn_session, fake
     assert json.loads((isolated_working_directory / LAST_STATUS_FILE).read_text(encoding="utf-8"))[1] == "online"
 
 
-# Verifies the status subject names one timestamp rather than the whole range, which the body already reports
-def test_the_status_subject_carries_a_single_timestamp(pm_module, psn_session, fake_clock, monkeypatch, sent_emails):
+# Verifies the status subject names when the state started rather than the whole range, which the body already reports
+def test_the_status_subject_names_when_the_state_started(pm_module, psn_session, fake_clock, monkeypatch, sent_emails):
     monkeypatch.setattr(pm_module, "ACTIVE_INACTIVE_NOTIFICATION", True)
     psn_session([presence_payload(status="offline"), presence_payload(status="online")])
 
@@ -123,7 +123,11 @@ def test_user_going_offline_summarizes_the_session(pm_module, psn_session, fake_
     output = capsys.readouterr().out
     assert "*** User got OFFLINE !" in output
     assert "User played 1 games for total time of" in output
-    assert any("is offline" in message["subject"] for message in sent_emails)
+    # Going offline keeps the range, since that names the session the user was available for
+    offline = [message["subject"] for message in sent_emails if "is offline" in message["subject"]]
+    assert offline
+    for subject in offline:
+        assert re.fullmatch(rf"PSN user {USER_ID} is offline \(after .+: (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{{1,2}} \w{{3}} \d{{2}}:\d{{2}} - .+\)", subject), subject
 
 
 # Verifies a brief disconnect is folded back into the running session instead of starting a new one
