@@ -82,6 +82,8 @@ python3 -c "import pytz; print('\n'.join(pytz.all_timezones))"
 
 Email notifications need SMTP server details for the sending account. Add them to `psn_monitor.conf` or use the setup wizard. Setup checks the login without sending an email. To replace only the password, run `psn_monitor --set-smtp-password`. Password entry is hidden and preserves spaces.
 
+Every alert is sent as both HTML and plain text in one message. Mail clients that render HTML show the PlayStation ID, the game, the status and the values that changed in bold. Clients that do not fall back to the plain text, which is unchanged.
+
 Send one test message to verify the settings:
 
 ```sh
@@ -159,6 +161,8 @@ WEBHOOK_PROVIDER = "discord"
 ```
 
 Discord alerts are sent as an embed built from `WEBHOOK_TEMPLATE`. Mentions are always disabled, whatever the template says.
+
+Discord alerts carry the same emphasis as the HTML email, since Discord renders markdown in an embed. Bold values stay bold and links stay clickable. Only Discord gets that wording: ntfy receives the plain body, because it would show the markers literally.
 
 <a id="advanced-discord-format-customization"></a>
 ### Advanced Discord-format customization
