@@ -71,7 +71,7 @@ ACTIVE_INACTIVE_NOTIFICATION = False
 # Can also be enabled via the -g flag
 GAME_CHANGE_NOTIFICATION = False
 
-# Whether to send an email on errors
+# Whether to send an email on errors and the recovery alert that follows once the failure clears
 # Can also be disabled via the -e flag
 ERROR_NOTIFICATION = True
 
@@ -119,7 +119,7 @@ WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION = False
 # Can also be enabled via the --webhook-game-change flag
 WEBHOOK_GAME_CHANGE_NOTIFICATION = False
 
-# Whether to send a webhook alert on errors
+# Whether to send a webhook notification on monitoring errors and the recovery alert that follows once the failure clears
 # Can also be enabled via --webhook-errors or disabled via --no-webhook-error-notify
 WEBHOOK_ERROR_NOTIFICATION = True
 
@@ -7629,14 +7629,14 @@ def main():
         dest="webhook_errors",
         action="store_true",
         default=None,
-        help="Send a webhook alert on errors"
+        help="Send webhook alerts when monitoring has a problem and the recovery alert that follows"
     )
     webhook_error_toggle.add_argument(
         "--no-webhook-error-notify",
         dest="webhook_errors",
         action="store_false",
         default=None,
-        help="Disable webhook alerts on errors and the recovery alert that follows"
+        help="Disable webhook alerts when monitoring has a problem and the recovery alert that follows"
     )
     webhook.add_argument(
         "--send-test-webhook",
