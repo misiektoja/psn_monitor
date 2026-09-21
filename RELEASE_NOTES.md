@@ -2,7 +2,7 @@
 
 This is a high-level summary of the most important changes.
 
-# Changes in 2.0 (TBD)
+# Changes in 2.0 (22 Sep 2026)
 
 Version **2.0** sends every alert as an **HTML email** with the changed values in bold, and gives Discord the same formatting. It also gives every monitoring failure unified subject and body across email and webhook, followed by a **recovery alert** when monitoring resumes. Network failures now link to a new **Connection Problems** page section. Alert delivery messages stay within the correct check report and alert channels that still use placeholder configuration values are shown as not configured.
 
