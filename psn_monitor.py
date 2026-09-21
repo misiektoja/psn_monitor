@@ -841,6 +841,53 @@ def html_text(text):
     return html.escape(str(text)).replace("\n", "<br>")
 
 
+# Returns one value escaped for use inside an HTML attribute
+def escape_html_attr(value):
+    return html.escape(str(value or ""), quote=True)
+
+
+# Wraps one rendered fragment in the document every HTML alert body shares
+def html_email_body(content):
+    return f"<html><head></head><body>{content}</body></html>"
+
+
+# Turns a bare URL inside already escaped HTML text into a link, so an alert that prints a guide link is clickable
+def html_autolink_urls(content):
+    return re.sub(r"(?<![\"'=])(https?://[^\s<>\"']+[^\s<>\"'.,;:!?)\]])", r'<a href="\1">\1</a>', str(content))
+
+
+# Converts one HTML anchor to Discord markdown, leaving a self-labeled link bare so Discord turns it into a link itself
+def anchor_to_discord_markdown(url, inner_html):
+    target = html.unescape(str(url or "")).strip()
+    label = " ".join(html.unescape(re.sub(r"(?s)<[^>]+>", "", str(inner_html or ""))).split())
+    # Discord prints a masked link as plain text when its label repeats the destination, while a bare URL always links
+    if not target or not label or label == target:
+        return target or label
+    return f"[{inner_html}]({target})"
+
+
+# Converts one HTML email body to the Discord markdown subset, so a Discord alert reads like the email
+def html_body_to_discord_markdown(body_html):
+    text = re.sub(r"(?is)</?(?:html|head|body)\s*>", "", str(body_html or ""))
+    text = re.sub(r"(?is)<a\s[^>]*?href=[\"']([^\"']*)[\"'][^>]*>(.*?)</a>", lambda m: anchor_to_discord_markdown(m.group(1), m.group(2)), text)
+    text = re.sub(r"(?is)<b\s*>(.*?)</b\s*>", lambda m: f"**{m.group(1)}**" if m.group(1).strip() else m.group(1), text)
+    text = re.sub(r"(?is)<i\s*>(.*?)</i\s*>", lambda m: f"*{m.group(1)}*" if m.group(1).strip() else m.group(1), text)
+    text = re.sub(r"(?is)<br\s*/?>", "\n", text)
+    # Anything still tag-shaped is layout the markdown body has no use for, such as a stray paragraph or list wrapper
+    text = re.sub(r"(?s)<[^>]+>", "", text)
+    return html.unescape(text).strip()
+
+
+# Renders one PSN account as the bold subject of an alert
+def psn_user_html(psn_user_id):
+    return f"<b>{html_text(psn_user_id)}</b>"
+
+
+# Renders one game title as the bold subject of an alert
+def psn_game_html(game_name):
+    return f"<b>{html_text(game_name)}</b>"
+
+
 # Returns the advice a cancelled secret entry reports, worded the same way by every one-shot secret command
 def secret_entry_cancelled_advice(subject, flag, guide_url):
     return make_recovery_advice("secret.entry", f"{subject[:1].upper()}{subject[1:]} setup was cancelled and the dotenv file was not changed", recovery_fix_with_guide(f"Run {flag} again when you have the value ready", guide_url), False)
@@ -1109,16 +1156,18 @@ def recovery_alert_body(advice, retry_seconds, failed_checks=0, failing_since=0,
     return body + get_cur_ts("\n\nTimestamp: ") if timestamp else body
 
 
-# Bolds the moment an outage started, the field a reader looks for first in a failure alert
-def html_bold_failing_since(content):
-    return re.sub(r"(Failing since: )([^<]+)", r"\1<b>\2</b>", content, count=1)
+# Bolds the values a reader scans a failure alert for: how often it has failed and since when
+def html_bold_outage_fields(content):
+    for label in ("Failed checks in a row: ", "Failing since: "):
+        content = re.sub(f"({re.escape(label)})([^<]+)", r"\1<b>\2</b>", content, count=1)
+    return content
 
 
 # Builds the HTML body of one failure alert, with the summary in bold and the same paragraphs as the plain text
 def recovery_alert_body_html(advice, retry_seconds, failed_checks=0, failing_since=0, timestamp=True):
     summary, *rest = recovery_alert_paragraphs(advice, retry_seconds, failed_checks, failing_since)
-    content = "<br><br>".join([f"<b>{html_text(summary)}</b>", *(html_text(paragraph) for paragraph in rest)])
-    return html_bold_failing_since(f"<html><head></head><body>{content}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}</body></html>")
+    content = "<br><br>".join([f"<b>{html_text(summary)}</b>", *(html_autolink_urls(html_text(paragraph)) for paragraph in rest)])
+    return html_bold_outage_fields(html_email_body(f"{content}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}"))
 
 
 # Builds the subject of the alert that closes a delivered failure alert, so it sorts next to the failure it ends
@@ -1135,7 +1184,7 @@ def outage_recovery_body(advice, target, lasted, timestamp=True):
 # Builds the HTML body of one recovery alert, matching the plain text
 def outage_recovery_body_html(advice, target, lasted, timestamp=True):
     body = f"Monitoring recovered for <b>{html_text(target)}</b> after <b>{html_text(display_time(max(1, lasted)))}</b>.<br><br>The failure was: {html_text(advice.summary)}"
-    return f"<html><head></head><body>{body}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}</body></html>"
+    return html_email_body(f"{body}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}")
 
 
 # Sends the failure alert on the requested channels and returns what each delivered, without touching the alert state
@@ -1143,7 +1192,7 @@ def send_failure_alert(advice, target, retry_seconds, failed_checks=0, failing_s
     body = recovery_alert_body(advice, retry_seconds, failed_checks, failing_since)
     body_html = recovery_alert_body_html(advice, retry_seconds, failed_checks, failing_since)
     webhook_body = recovery_alert_body(advice, retry_seconds, failed_checks, failing_since, timestamp=False)
-    return send_notification_channels("error", recovery_alert_subject(advice, target), body, body_html, email_enabled=email_enabled, webhook_enabled=webhook_enabled, webhook_body=webhook_body)
+    return send_notification_channels("error", recovery_alert_subject(advice, target), body, body_html, email_enabled=email_enabled, webhook_enabled=webhook_enabled, webhook_body=webhook_body, webhook_body_html=recovery_alert_body_html(advice, retry_seconds, failed_checks, failing_since, timestamp=False))
 
 
 # Sends the recovery alert on every channel whose failure alert was delivered and returns whether any went out
@@ -1155,7 +1204,7 @@ def send_outage_recovery_alert(target, lasted, error_alert):
         return False
     # An outage the reporter never confirmed still ends for the alert, which was sent on the alert state's clock
     since_failure = lasted if lasted is not None else int(time.time()) - error_alert.since
-    delivered = send_notification_channels("error", outage_recovery_subject(target, since_failure), outage_recovery_body(advice, target, since_failure), outage_recovery_body_html(advice, target, since_failure), email_enabled=email_enabled, webhook_enabled=webhook_enabled, webhook_body=outage_recovery_body(advice, target, since_failure, timestamp=False))
+    delivered = send_notification_channels("error", outage_recovery_subject(target, since_failure), outage_recovery_body(advice, target, since_failure), outage_recovery_body_html(advice, target, since_failure), email_enabled=email_enabled, webhook_enabled=webhook_enabled, webhook_body=outage_recovery_body(advice, target, since_failure, timestamp=False), webhook_body_html=outage_recovery_body_html(advice, target, since_failure, timestamp=False))
     return any(delivered)
 
 
@@ -3273,7 +3322,7 @@ def _retain_webhook_secrets(deliver):
 
 @_retain_webhook_secrets
 # Sends one webhook through its own bounded retry path, which never shares the PlayStation Network retry policy
-def send_webhook(title, description, notification_type="status", force=False, sleeper=None, report_delivery=True):
+def send_webhook(title, description, notification_type="status", force=False, sleeper=None, report_delivery=True, discord_description=""):
     if not force and not webhook_event_enabled(notification_type):
         debug_print("Webhook delivery", outcome="skipped", type=notification_type, reason="alerts are disabled")
         return 1
@@ -3293,10 +3342,12 @@ def send_webhook(title, description, notification_type="status", force=False, sl
     if header_error is not None:
         print_webhook_error(header_error)
         return 1
+    # Discord renders markdown, so it gets the email's formatting while ntfy keeps the plain body it can display
+    effective_description = discord_description if provider == "discord" and discord_description else description
     try:
-        webhook_values = build_webhook_values(title, description, notification_type)
+        webhook_values = build_webhook_values(title, effective_description, notification_type)
         request_headers = build_webhook_headers(provider, webhook_values)
-        discord_payload = build_webhook_payload(title, description, notification_type, webhook_values) if provider == "discord" else None
+        discord_payload = build_webhook_payload(title, effective_description, notification_type, webhook_values) if provider == "discord" else None
     except ValueError as exc:
         print_webhook_error(exc)
         return 1
@@ -3341,7 +3392,7 @@ def send_webhook(title, description, notification_type="status", force=False, sl
 
 
 # Sends one alert through the email and webhook channels, each switched on independently of the other
-def send_notification_channels(notification_type, subject, body, body_html="", email_enabled=False, webhook_enabled=None, webhook_body=None):
+def send_notification_channels(notification_type, subject, body, body_html="", email_enabled=False, webhook_enabled=None, webhook_body=None, webhook_body_html=""):
     email_attempted = bool(email_enabled)
     webhook_attempted = webhook_event_enabled(notification_type) if webhook_enabled is None else bool(webhook_enabled)
     email_delivered = False
@@ -3352,7 +3403,8 @@ def send_notification_channels(notification_type, subject, body, body_html="", e
     if webhook_attempted:
         print(f"Sending webhook notification via {webhook_provider_display_name()}")
         # A webhook shows its own delivery time, so the caller may hand it the body without the timestamp trailer
-        webhook_delivered = send_webhook(subject, body if webhook_body is None else webhook_body, notification_type, force=True) == 0
+        discord_description = html_body_to_discord_markdown(webhook_body_html or body_html)
+        webhook_delivered = send_webhook(subject, body if webhook_body is None else webhook_body, notification_type, force=True, discord_description=discord_description) == 0
     # Delivery, not the attempt, so a channel that failed is retried while one that succeeded is not resent
     return email_delivered, webhook_delivered
 
@@ -4999,8 +5051,10 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             m_subject_was_since = f", was {status_old}: {get_range_of_dates_from_tss(int(status_ts_old), int(status_ts), short=True)}"
             m_subject_after = calculate_timespan(int(status_ts), int(status_ts_old), show_seconds=False)
             m_body_was_since = f" ({get_range_of_dates_from_tss(int(status_ts_old), int(status_ts), short=True)})"
+            m_body_was_since_html = f" ({html_text(get_range_of_dates_from_tss(int(status_ts_old), int(status_ts), short=True))})"
 
             m_body_short_offline_msg = ""
+            m_body_short_offline_msg_html = ""
 
             # Player got online
             if status_old == "offline" and status and status != "offline":
@@ -5014,10 +5068,12 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                     status_online_start_ts = status_online_start_ts_old
                     short_offline_msg = f"Short offline interruption ({display_time(status_ts - status_ts_old)}), online start timestamp set back to {get_short_date_from_ts(status_online_start_ts_old)}"
                     m_body_short_offline_msg = f"\n\n{short_offline_msg}"
+                    m_body_short_offline_msg_html = f"<br><br>Short offline interruption (<b>{html_text(display_time(status_ts - status_ts_old))}</b>), online start timestamp set back to <b>{html_text(get_short_date_from_ts(status_online_start_ts_old))}</b>"
                     print(short_offline_msg)
                 act_inact_flag = True
 
             m_body_played_games = ""
+            m_body_played_games_html = ""
 
             # Player got offline
             if status_old and status_old != "offline" and status == "offline":
@@ -5026,6 +5082,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                     online_since_msg = f"(after {calculate_timespan(int(status_ts), int(status_online_start_ts), show_seconds=False)}: {get_range_of_dates_from_tss(int(status_online_start_ts), int(status_ts), short=True)})"
                     m_subject_was_since = f", was available: {get_range_of_dates_from_tss(int(status_online_start_ts), int(status_ts), short=True)}"
                     m_body_was_since = f" ({get_range_of_dates_from_tss(int(status_ts_old), int(status_ts), short=True)})\n\nUser was available for {calculate_timespan(int(status_ts), int(status_online_start_ts), show_seconds=False)} ({get_range_of_dates_from_tss(int(status_online_start_ts), int(status_ts), short=True)})"
+                    m_body_was_since_html = f" ({html_text(get_range_of_dates_from_tss(int(status_ts_old), int(status_ts), short=True))})<br><br>User was available for <b>{html_text(calculate_timespan(int(status_ts), int(status_online_start_ts), show_seconds=False))}</b> ({html_text(get_range_of_dates_from_tss(int(status_online_start_ts), int(status_ts), short=True))})"
                 else:
                     online_since_msg = ""
                 if games_number > 0:
@@ -5033,6 +5090,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                         game_total_ts += (int(game_ts) - int(game_ts_old))
                         game_total_after_offline_counted = True
                     m_body_played_games = f"\n\nUser played {games_number} games for total time of {display_time(game_total_ts)}"
+                    m_body_played_games_html = f"<br><br>User played <b>{games_number}</b> games for total time of <b>{html_text(display_time(game_total_ts))}</b>"
                     print(f"User played {games_number} games for total time of {display_time(game_total_ts)}")
                 print(f"*** User got OFFLINE ! {online_since_msg}")
                 status_online_start_ts_old = status_online_start_ts
@@ -5040,26 +5098,31 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 act_inact_flag = True
 
             m_body_user_in_game = ""
+            m_body_user_in_game_html = ""
             if status != "offline" and game_name:
                 launchplatform_str = ""
                 if launchplatform:
                     launchplatform_str = f" ({launchplatform})"
                 print(f"User is currently in-game: {game_name}{launchplatform_str}")
                 m_body_user_in_game = f"\n\nUser is currently in-game: {game_name}{launchplatform_str}"
+                m_body_user_in_game_html = f"<br><br>User is currently in-game: {psn_game_html(game_name)}{html_text(launchplatform_str)}"
 
             change = True
 
             m_subject = f"PSN user {psn_user_id} is now {status} (after {m_subject_after}{m_subject_was_since})"
             m_body = f"PSN user {psn_user_id} changed status from {status_old} to {status}\n\nUser was {status_old} for {calculate_timespan(int(status_ts), int(status_ts_old))}{m_body_was_since}{m_body_short_offline_msg}{m_body_user_in_game}{m_body_played_games}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+            m_body_html = html_email_body(f"PSN user {psn_user_html(psn_user_id)} changed status from <b>{html_text(status_old)}</b> to <b>{html_text(status)}</b><br><br>User was <b>{html_text(status_old)}</b> for <b>{html_text(calculate_timespan(int(status_ts), int(status_ts_old)))}</b>{m_body_was_since_html}{m_body_short_offline_msg_html}{m_body_user_in_game_html}{m_body_played_games_html}{get_cur_ts('<br><br>Timestamp: ')}")
             webhook_status_enabled = webhook_event_enabled("status") and act_inact_flag
             if (ACTIVE_INACTIVE_NOTIFICATION and act_inact_flag) or webhook_status_enabled:
-                send_notification_channels("status", m_subject, m_body, email_enabled=ACTIVE_INACTIVE_NOTIFICATION and act_inact_flag, webhook_enabled=webhook_status_enabled)
+                send_notification_channels("status", m_subject, m_body, m_body_html, email_enabled=ACTIVE_INACTIVE_NOTIFICATION and act_inact_flag, webhook_enabled=webhook_status_enabled)
 
             status_ts_old = status_ts
             print_cur_ts("Timestamp:\t\t\t")
 
         # Player started/stopped/changed the game
         if game_name != game_name_old:
+            # Cleared so the guard below cannot resend the status alert when no game branch produced a body
+            m_subject = m_body = m_body_html = ""
 
             launchplatform_str = ""
             if launchplatform:
@@ -5072,6 +5135,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 game_total_ts += (int(game_ts) - int(game_ts_old))
                 games_number += 1
                 m_body = f"PSN user {psn_user_id} changed game from '{game_name_old}' to '{game_name}'{launchplatform_str} after {calculate_timespan(int(game_ts), int(game_ts_old))}\n\nUser played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to ')}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                m_body_html = html_email_body(f"PSN user {psn_user_html(psn_user_id)} changed game from '{psn_game_html(game_name_old)}' to '{psn_game_html(game_name)}'{html_text(launchplatform_str)} after <b>{html_text(calculate_timespan(int(game_ts), int(game_ts_old)))}</b><br><br>User played game from {html_text(get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to '))}{get_cur_ts('<br><br>Timestamp: ')}")
                 if launchplatform:
                     launchplatform_str = f"{launchplatform}, "
                 m_subject = f"PSN user {psn_user_id} changed game to '{game_name}' ({launchplatform_str}after {calculate_timespan(int(game_ts), int(game_ts_old), show_seconds=False)}: {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True)})"
@@ -5082,6 +5146,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 games_number += 1
                 m_subject = f"PSN user {psn_user_id} now plays '{game_name}'{launchplatform_str}"
                 m_body = f"PSN user {psn_user_id} now plays '{game_name}'{launchplatform_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                m_body_html = html_email_body(f"PSN user {psn_user_html(psn_user_id)} now plays '{psn_game_html(game_name)}'{html_text(launchplatform_str)}{get_cur_ts('<br><br>Timestamp: ')}")
 
             # User stopped playing the game
             elif game_name_old and not game_name:
@@ -5091,11 +5156,12 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                     game_total_ts += (int(game_ts) - int(game_ts_old))
                 m_subject = f"PSN user {psn_user_id} stopped playing '{game_name_old}' (after {calculate_timespan(int(game_ts), int(game_ts_old), show_seconds=False)}: {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True)})"
                 m_body = f"PSN user {psn_user_id} stopped playing '{game_name_old}' after {calculate_timespan(int(game_ts), int(game_ts_old))}\n\nUser played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to ')}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                m_body_html = html_email_body(f"PSN user {psn_user_html(psn_user_id)} stopped playing '{psn_game_html(game_name_old)}' after <b>{html_text(calculate_timespan(int(game_ts), int(game_ts_old)))}</b><br><br>User played game from {html_text(get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to '))}{get_cur_ts('<br><br>Timestamp: ')}")
 
             change = True
 
             if m_subject and m_body and (GAME_CHANGE_NOTIFICATION or webhook_event_enabled("game")):
-                send_notification_channels("game", m_subject, m_body, email_enabled=GAME_CHANGE_NOTIFICATION)
+                send_notification_channels("game", m_subject, m_body, m_body_html, email_enabled=GAME_CHANGE_NOTIFICATION)
 
             game_ts_old = game_ts
             print_cur_ts("Timestamp:\t\t\t")
