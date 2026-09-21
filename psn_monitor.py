@@ -646,6 +646,24 @@ def iter_exc_chain(ex, max_depth=8):
         cur = getattr(cur, "__cause__", None) or getattr(cur, "__context__", None)
 
 
+# Names the transport failure behind an exception chain, since a timeout raised with no message leaves the text rules nothing to read
+def network_failure_code(ex):
+    timed_out = False
+    unreachable = False
+    for current in iter_exc_chain(ex):
+        name = type(current).__name__
+        # A TLS failure has its own advice, so a chain that names one is left to the rules that recognize it
+        if "SSL" in name or "Certificate" in name:
+            return ""
+        if isinstance(current, TimeoutError) or "Timeout" in name:
+            timed_out = True
+        elif isinstance(current, ConnectionError) or name in ("gaierror", "herror") or any(term in name for term in ("Connect", "ProxyError", "NameResolution", "Unreachable")):
+            unreachable = True
+    if timed_out:
+        return "network.timeout"
+    return "network.unavailable" if unreachable else ""
+
+
 # Reports whether this process hit the local file descriptor limit rather than a remote failure
 def is_too_many_open_files(ex):
     for cur in iter_exc_chain(ex):
@@ -998,6 +1016,10 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         if isinstance(current, (AttributeError, TypeError)):
             return make_recovery_advice("psn.malformed_response", "PlayStation Network returned a presence response in an unexpected shape", recovery_fix_with_guide("Nothing to do in most cases, the tool rebuilds its session and retries. If it continues, upgrade PSNAWP and rerun with --debug", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
 
+    # Read last, so a chain whose text nothing matched is still named by the exception types it carries
+    transport_code = network_failure_code(error)
+    if transport_code:
+        return network_timeout_advice(safe_detail) if transport_code == "network.timeout" else network_unavailable_advice(safe_detail)
     return make_recovery_advice("unknown", "Something unexpected went wrong", recovery_fix_with_guide(unknown_failure_fix(), DIAGNOSTICS_GUIDE_URL), True, safe_detail)
 
 
