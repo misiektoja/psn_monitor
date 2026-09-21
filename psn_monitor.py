@@ -4807,15 +4807,22 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             _close_psnawp_sessions(psnawp)
         except Exception as diag_exc:
             debug_print("Closing the old PSNAWP session before recreating it", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+        # Guarded like the presence call, since both reach PSN and neither carries a request timeout of its own
+        if platform.system() != 'Windows':
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(FUNCTION_TIMEOUT)
         try:
             psnawp = psn_client()
             psn_user = psnawp.user(online_id=psn_user_id)
             last_recreate_ts = now
-            verbose_notice("Recreated the PSNAWP session")
+            debug_print("Recreating the PSNAWP session", outcome="OK")
             return True
         except Exception as diag_exc:
             debug_print("Recreating the PSNAWP session", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
             return False
+        finally:
+            if platform.system() != 'Windows':
+                signal.alarm(0)
 
     sleep_interval = get_sleep_interval()
 
@@ -4922,7 +4929,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 print_outage_liveness(psn_user_id, advice, outage.since, outage.failures, close=False)
                 failure_announced = True
 
-            if error_streak >= policy["recreate_after"] and _recreate_session_rate_limited() and not rebuild_announced:
+            if policy["recreate_after"] and not rebuild_announced and error_streak >= policy["recreate_after"] and _recreate_session_rate_limited():
                 print(f"* Rebuilt the PSNAWP session after {error_streak} failed {'check' if error_streak == 1 else 'checks'} in a row")
                 rebuild_announced = True
                 printed_this_check = True
