@@ -980,7 +980,9 @@
 </ul>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>psn_monitor<span class="w"> </span>&lt;psn_user_id&gt;<span class="w"> </span>-e
 </code></pre></div>
-<p>Email and webhook error alerts are sent after <strong>5 minutes</strong> of a continuing failure. Problems that need your action, such as an expired npsso code, alert immediately. Each kind of failure alerts once per channel. Failed deliveries are retried after 5 minutes, with increasing waits up to an hour. Alerts can fire again after monitoring recovers.</p>
+<p>Email and webhook failure alerts are sent after <strong>5 minutes</strong> of a continuing failure. Problems that need your action, such as an expired npsso code, alert immediately. The subject reads <code>PSN Monitor error: &lt;what went wrong&gt; (user: &lt;psn_user_id&gt;)</code> and the body gives the fix, a link to the page that covers it, how many checks failed in a row, since when the check has been failing and how long until the next attempt.</p>
+<p>A <strong>recovery alert</strong> follows on the same channels once the failure clears, naming how long it lasted and which failure it closes. <code>-e</code> / <code>--no-error-notify</code> switches off the failure email and the recovery email together, and <code>--no-webhook-error-notify</code> does the same for webhooks.</p>
+<p>Each kind of failure alerts once per channel. Failed deliveries are retried after 5 minutes, with increasing waits up to an hour. Alerts can fire again after monitoring recovers.</p>
 <p>Make sure you defined your <a href="../configuration/#smtp-settings">SMTP settings</a> first.</p>
 <p>Example email:</p>
 <p align="center">
@@ -999,6 +1001,7 @@
 <p>Verify the destination without starting monitoring:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>psn_monitor<span class="w"> </span>--send-test-webhook
 </code></pre></div>
+<p>The monitoring error event covers the failure alert and the recovery alert that follows it, with the same subject and text as the email alerts. The webhook message leaves out the timestamp line, since a chat message already shows when it arrived.</p>
 <p>A failed delivery is retried once, a rate limit waits the delay the service asked for and bounds it, and redirects are never followed. When both channels are enabled, each is delivered independently: an alert that reached Discord is not sent again just because the email failed.</p>
 <p><a id="csv-export"></a></p>
 <h2 id="csv-export">CSV Export<a class="headerlink" href="#csv-export" title="Permanent link">&para;</a></h2>
