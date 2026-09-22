@@ -27,6 +27,13 @@ def offline_auth_probe(monkeypatch, pm_module):
     monkeypatch.setattr(pm_module, "probe_npsso_auth_error", lambda npsso: None)
 
 
+@pytest.fixture
+# Gives webhook delivery tests a valid local destination without contacting it
+def configured_webhook(monkeypatch, pm_module):
+    monkeypatch.setattr(pm_module, "WEBHOOK_PROVIDER", "discord")
+    monkeypatch.setattr(pm_module, "WEBHOOK_URL", "https://discord.com/api/webhooks/123/private-token")
+
+
 # Runs the monitoring loop until the scripted responses are exhausted
 def run_monitor(pm_module, csv_file_name=""):
     with pytest.raises(LoopFinished):
@@ -623,7 +630,7 @@ def test_unreachable_profile_stops_startup(pm_module, psn_session, fake_clock, c
 
 
 # Verifies a status change reaches the webhook channel even when email alerts are off
-def test_a_status_change_reaches_the_webhook_channel(pm_module, psn_session, fake_clock, monkeypatch, sent_webhooks, capsys):
+def test_a_status_change_reaches_the_webhook_channel(pm_module, psn_session, fake_clock, monkeypatch, sent_webhooks, capsys, configured_webhook):
     monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION", True)
     psn_session([presence_payload(status="offline"), presence_payload(status="online")])
@@ -635,7 +642,7 @@ def test_a_status_change_reaches_the_webhook_channel(pm_module, psn_session, fak
 
 
 # Verifies a game change reaches the webhook channel on its own alert setting
-def test_a_game_change_reaches_the_webhook_channel(pm_module, psn_session, fake_clock, monkeypatch, sent_webhooks):
+def test_a_game_change_reaches_the_webhook_channel(pm_module, psn_session, fake_clock, monkeypatch, sent_webhooks, configured_webhook):
     monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_GAME_CHANGE_NOTIFICATION", True)
     psn_session([presence_payload(status="online"), presence_payload(status="online", game="Bloodborne")])
@@ -647,7 +654,7 @@ def test_a_game_change_reaches_the_webhook_channel(pm_module, psn_session, fake_
 
 
 # Verifies each channel is switched on by its own setting rather than by the other channel's
-def test_the_channels_are_selected_independently(pm_module, psn_session, fake_clock, monkeypatch, sent_emails, sent_webhooks):
+def test_the_channels_are_selected_independently(pm_module, psn_session, fake_clock, monkeypatch, sent_emails, sent_webhooks, configured_webhook):
     monkeypatch.setattr(pm_module, "ACTIVE_INACTIVE_NOTIFICATION", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_GAME_CHANGE_NOTIFICATION", True)
@@ -660,7 +667,7 @@ def test_the_channels_are_selected_independently(pm_module, psn_session, fake_cl
 
 
 # Verifies an error alert reaches both channels once, and is not repeated while the same failure persists
-def test_an_error_alerts_both_channels_once(pm_module, psn_session, fake_clock, monkeypatch, sent_emails, sent_webhooks):
+def test_an_error_alerts_both_channels_once(pm_module, psn_session, fake_clock, monkeypatch, sent_emails, sent_webhooks, configured_webhook):
     monkeypatch.setattr(pm_module, "ERROR_NOTIFICATION", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_ERROR_NOTIFICATION", True)
@@ -677,7 +684,7 @@ def test_an_error_alerts_both_channels_once(pm_module, psn_session, fake_clock, 
 
 
 # Verifies the channel that failed is retried once its hold has passed while the one that succeeded is not resent
-def test_only_the_failed_channel_is_retried(pm_module, psn_session, fake_clock, monkeypatch, sent_webhooks, capsys):
+def test_only_the_failed_channel_is_retried(pm_module, psn_session, fake_clock, monkeypatch, sent_webhooks, capsys, configured_webhook):
     monkeypatch.setattr(pm_module, "ERROR_NOTIFICATION", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_ERROR_NOTIFICATION", True)

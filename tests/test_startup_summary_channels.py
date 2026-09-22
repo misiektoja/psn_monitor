@@ -182,8 +182,10 @@ def test_a_placeholder_destination_is_reported_as_unconfigured(monkeypatch, labe
     assert summary_values()[label] == "Not configured"
 
 
-# Verifies a channel with its alert types on but no destination is not reported as live, since the rollup is the only line the short view prints
-def test_a_channel_without_a_destination_is_reported_as_off(monkeypatch):
+# Verifies selected channels name missing local settings while valid channels remain on
+def test_a_channel_without_a_destination_is_reported_as_unavailable(monkeypatch):
+    for name, value in (("SMTP_HOST", "smtp.example.com"), ("SMTP_PORT", 587), ("SMTP_USER", "sender@example.com"), ("SMTP_PASSWORD", "test-password"), ("SENDER_EMAIL", "sender@example.com"), ("RECEIVER_EMAIL", "alerts@example.com"), ("WEBHOOK_ENABLED", True), ("WEBHOOK_PROVIDER", "discord"), ("WEBHOOK_URL", "https://discord.com/api/webhooks/1/token")):
+        monkeypatch.setattr(monitor, name, value)
     monkeypatch.setattr(monitor, "ERROR_NOTIFICATION", True)
     monkeypatch.setattr(monitor, "WEBHOOK_ERROR_NOTIFICATION", True)
     assert monitor.startup_notification_state().startswith("On (")
@@ -192,5 +194,5 @@ def test_a_channel_without_a_destination_is_reported_as_off(monkeypatch):
     monkeypatch.setattr(monitor, "SMTP_HOST", "your_smtp_server_ssl")
     monkeypatch.setattr(monitor, "WEBHOOK_URL", "your_webhook_url")
 
-    assert monitor.startup_notification_state() == "Off (not configured)"
-    assert monitor.startup_webhook_notification_state() == "Off (not configured)"
+    assert monitor.startup_notification_state() == "Unavailable (SMTP_HOST is not a valid IP address or hostname)"
+    assert monitor.startup_webhook_notification_state() == "Unavailable (WEBHOOK_URL is empty or still set to its placeholder)"

@@ -288,16 +288,17 @@ def test_error_alerts_can_be_disabled(pm_module, monkeypatch, monitor_calls):
     assert pm_module.ERROR_NOTIFICATION is False
 
 
-# Verifies notifications are switched off when SMTP was never configured, so nothing fails on every change
-def test_unconfigured_smtp_disables_every_notification(pm_module, monkeypatch, monitor_calls, capsys):
+# Verifies selected email alerts remain visible when SMTP settings are unavailable
+def test_unconfigured_smtp_keeps_selected_alerts_unavailable(pm_module, monkeypatch, monitor_calls, capsys):
     monkeypatch.setattr(pm_module, "SMTP_HOST", "your_smtp_server_ssl")
     monkeypatch.setattr(pm_module, "ERROR_NOTIFICATION", True)
 
     assert run_main(pm_module, monkeypatch, ["-a", "-g", USER_ID]) == 0
 
-    assert pm_module.ACTIVE_INACTIVE_NOTIFICATION is False
-    assert pm_module.GAME_CHANGE_NOTIFICATION is False
-    assert pm_module.ERROR_NOTIFICATION is False
+    assert pm_module.ACTIVE_INACTIVE_NOTIFICATION is True
+    assert pm_module.GAME_CHANGE_NOTIFICATION is True
+    assert pm_module.ERROR_NOTIFICATION is True
+    assert "Notifications (email):        Unavailable (SMTP_HOST" in capsys.readouterr().out
 
 
 # Verifies the startup banner reports the settings the run will actually use
@@ -722,13 +723,15 @@ def test_an_explicit_provider_is_not_corrected(pm_module, monkeypatch, monitor_c
     assert pm_module.WEBHOOK_PROVIDER == "ntfy"
 
 
-# Verifies an enabled channel with an unusable destination is switched off rather than failing at each alert
-def test_an_enabled_channel_without_a_destination_is_switched_off(pm_module, monkeypatch, monitor_calls):
+# Verifies selected webhook alerts remain unavailable until their destination is valid
+def test_an_enabled_channel_without_a_destination_is_unavailable(pm_module, monkeypatch, monitor_calls, capsys):
     monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_ERROR_NOTIFICATION", True)
 
     assert run_main(pm_module, monkeypatch, [USER_ID]) == 0
 
-    assert pm_module.WEBHOOK_ENABLED is False
+    assert pm_module.WEBHOOK_ENABLED is True
+    assert "Notifications (webhook):      Unavailable (WEBHOOK_URL" in capsys.readouterr().out
 
 
 # Verifies the test webhook is sent past the alert settings and exits without starting monitoring

@@ -500,8 +500,21 @@ def test_a_rejected_delivery_is_classified(pm_module, discord_enabled, webhook_s
     assert "To fix:" in output
 
 
+# Verifies unavailable automatic channels make no attempt or status line
+def test_unavailable_channels_are_silent(pm_module, monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(pm_module, "SMTP_PASSWORD", "")
+    monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_URL", "")
+    monkeypatch.setattr(pm_module, "send_email", lambda *args, **kwargs: calls.append("email"))
+    monkeypatch.setattr(pm_module, "send_webhook", lambda *args, **kwargs: calls.append("webhook"))
+    assert pm_module.send_notification_channels("error", "Subject", "Body", email_enabled=True, webhook_enabled=True) == (False, False)
+    assert calls == []
+    assert capsys.readouterr().out == ""
+
+
 # Verifies the two channels are switched on independently and each reports its own delivery
-def test_each_channel_reports_its_own_delivery(pm_module, monkeypatch, capsys):
+def test_each_channel_reports_its_own_delivery(pm_module, monkeypatch, capsys, discord_enabled):
     monkeypatch.setattr(pm_module, "send_email", lambda *args, **kwargs: 1)
     monkeypatch.setattr(pm_module, "send_webhook", lambda *args, **kwargs: 0)
 
@@ -525,7 +538,7 @@ def test_a_channel_that_is_off_is_not_contacted(pm_module, monkeypatch):
 
 
 # Verifies the webhook channel falls back to its own alert settings when the caller names no preference
-def test_the_webhook_channel_falls_back_to_its_own_settings(pm_module, monkeypatch):
+def test_the_webhook_channel_falls_back_to_its_own_settings(pm_module, monkeypatch, discord_enabled):
     calls = []
     monkeypatch.setattr(pm_module, "send_email", lambda *args, **kwargs: 0)
     monkeypatch.setattr(pm_module, "send_webhook", lambda *args, **kwargs: calls.append(args[2]) or 0)

@@ -18,6 +18,9 @@ class RecordingChannels:
 # channel blocked for the length of the outage would otherwise hear nothing at all
 def test_a_channel_that_missed_the_failure_alert_is_told_about_the_whole_outage(monkeypatch):
     channels = RecordingChannels()
+    monkeypatch.setattr(monitor, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(monitor, "WEBHOOK_PROVIDER", "discord")
+    monkeypatch.setattr(monitor, "WEBHOOK_URL", "https://discord.com/api/webhooks/123/private-token")
     monkeypatch.setattr(monitor, "send_notification_channels", channels)
     monkeypatch.setattr(monitor, "ERROR_NOTIFICATION", True)
     monkeypatch.setattr(monitor, "webhook_event_enabled", lambda notification_type: True)
