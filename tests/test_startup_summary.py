@@ -170,6 +170,9 @@ def test_the_notification_row_reports_when_everything_is_off(pm_module, monkeypa
 
 # Verifies the webhook rollup names what is switched on rather than only whether the channel is on
 def test_the_webhook_row_names_the_alerts(pm_module, monkeypatch):
+    # The shared fixture leaves the placeholder URL in place, which the rollup reads as a channel with no destination
+    monkeypatch.setattr(pm_module, "WEBHOOK_PROVIDER", "discord")
+    monkeypatch.setattr(pm_module, "WEBHOOK_URL", "https://discord.com/api/webhooks/1/private-token")
     monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION", True)
     monkeypatch.setattr(pm_module, "WEBHOOK_ERROR_NOTIFICATION", True)

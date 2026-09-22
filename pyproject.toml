@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "psn_monitor"
-version = "1.9"
+version = "2.0"
 description = "Tool implementing real-time tracking of Sony PlayStation (PSN) players activities"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -37,7 +37,7 @@ keywords = ["psn", "playstation","monitoring", "tracking", "real-time", "osint",
 [project.optional-dependencies]
 test = ["pytest>=7.0", "pyyaml>=6.0"]
 # Pinned so a new ruff release cannot fail CI on a rule that did not exist when the change was written
-lint = ["ruff==0.16.7"]
+lint = ["ruff==0.16.8"]
 
 [project.urls]
 Homepage = "https://github.com/misiektoja/psn_monitor"

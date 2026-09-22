@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Author: Michal Szymanski <misiektoja-github@rm-rf.ninja>
-v1.9
+v2.0
 
 Tool implementing real-time tracking of Sony PlayStation (PSN) players activities:
 https://github.com/misiektoja/psn_monitor/
@@ -18,7 +18,7 @@ wcwidth (optional, measures wide characters correctly when TRUNCATE_CHARS is set
 colorama (optional, for better colours on Windows terminals)
 """
 
-VERSION = "1.9"
+VERSION = "2.0"
 
 # ---------------------------
 # CONFIGURATION SECTION START
@@ -71,7 +71,7 @@ ACTIVE_INACTIVE_NOTIFICATION = False
 # Can also be enabled via the -g flag
 GAME_CHANGE_NOTIFICATION = False
 
-# Whether to send an email on errors
+# Whether to send an email on errors and the recovery alert that follows once the failure clears
 # Can also be disabled via the -e flag
 ERROR_NOTIFICATION = True
 
@@ -119,7 +119,7 @@ WEBHOOK_ACTIVE_INACTIVE_NOTIFICATION = False
 # Can also be enabled via the --webhook-game-change flag
 WEBHOOK_GAME_CHANGE_NOTIFICATION = False
 
-# Whether to send a webhook alert on errors
+# Whether to send a webhook notification on monitoring errors and the recovery alert that follows once the failure clears
 # Can also be enabled via --webhook-errors or disabled via --no-webhook-error-notify
 WEBHOOK_ERROR_NOTIFICATION = True
 
@@ -479,6 +479,7 @@ from datetime import datetime, timezone
 from dateutil import relativedelta
 from dateutil.parser import isoparse
 import calendar
+import html
 import requests as req
 import urllib3
 import signal
@@ -534,14 +535,26 @@ class ErrorAlertState:
         self.webhook_failures = 0
         self.email_retry_at = 0
         self.webhook_retry_at = 0
+        # The failure the delivered alert described and when it began, so the recovery alert can name them
+        self.advice = None
+        self.since = 0
 
     # Forgets the delivered alert and any hold, so the next failure earns each channel a new one
     def reset(self) -> None:
         self.__init__()
 
+    # Keeps the failure a delivered alert described, so the recovery alert can say what cleared
+    def remember(self, advice, since: int) -> None:
+        self.advice = advice
+        self.since = int(since)
+
     # Tells whether a channel still owes the alert and its wait after a failed attempt, if any, has passed
     def pending(self, channel: str, enabled, now: int) -> bool:
         return bool(enabled) and not getattr(self, f"{channel}_sent") and now >= getattr(self, f"{channel}_retry_at")
+
+    # Tells whether a channel was owed the failure alert but never received it, so the recovery can tell it the whole story
+    def missed(self, channel: str, enabled) -> bool:
+        return bool(enabled) and not getattr(self, f"{channel}_sent") and getattr(self, f"{channel}_failures") > 0
 
     # Records one attempt, holding a channel that failed for a growing wait so a broken server is not dialled on every check
     def record(self, channel: str, attempted: bool, delivered: bool, now: int) -> None:
@@ -637,6 +650,24 @@ def iter_exc_chain(ex, max_depth=8):
         cur = getattr(cur, "__cause__", None) or getattr(cur, "__context__", None)
 
 
+# Names the transport failure behind an exception chain, since a timeout raised with no message leaves the text rules nothing to read
+def network_failure_code(ex):
+    timed_out = False
+    unreachable = False
+    for current in iter_exc_chain(ex):
+        name = type(current).__name__
+        # A TLS failure has its own advice, so a chain that names one is left to the rules that recognize it
+        if "SSL" in name or "Certificate" in name:
+            return ""
+        if isinstance(current, TimeoutError) or "Timeout" in name:
+            timed_out = True
+        elif isinstance(current, ConnectionError) or name in ("gaierror", "herror") or any(term in name for term in ("Connect", "ProxyError", "NameResolution", "Unreachable")):
+            unreachable = True
+    if timed_out:
+        return "network.timeout"
+    return "network.unavailable" if unreachable else ""
+
+
 # Reports whether this process hit the local file descriptor limit rather than a remote failure
 def is_too_many_open_files(ex):
     for cur in iter_exc_chain(ex):
@@ -664,6 +695,9 @@ SMTP_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#smtp-settings"
 TLS_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#tls-verification"
 WEBHOOK_GUIDE_URL = f"{DOCS_BASE_URL}/configuration/#webhook-settings"
 INTERVALS_GUIDE_URL = f"{DOCS_BASE_URL}/usage/#check-intervals"
+DOCTOR_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#doctor-preflight"
+CONNECTION_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#connection-problems"
+DESCRIPTOR_LIMIT_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#too-many-open-files"
 DIAGNOSTICS_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#verbose-and-debug-output"
 
 # Installs this tool can be running from. There is no container image, so no container method is detected
@@ -806,6 +840,58 @@ def recovery_fix_with_guide(fix, guide_url):
     return f"{fix}\nGuide: {guide_url}"
 
 
+# Escapes text for an HTML mail body and keeps its line breaks, which HTML would otherwise collapse into spaces
+def html_text(text):
+    return html.escape(str(text)).replace("\n", "<br>")
+
+
+# Returns one value escaped for use inside an HTML attribute
+def escape_html_attr(value):
+    return html.escape(str(value or ""), quote=True)
+
+
+# Wraps one rendered fragment in the document every HTML alert body shares
+def html_email_body(content):
+    return f"<html><head></head><body>{content}</body></html>"
+
+
+# Turns a bare URL inside already escaped HTML text into a link, so an alert that prints a guide link is clickable
+def html_autolink_urls(content):
+    return re.sub(r"(?<![\"'=])(https?://[^\s<>\"']+[^\s<>\"'.,;:!?)\]])", r'<a href="\1">\1</a>', str(content))
+
+
+# Converts one HTML anchor to Discord markdown, leaving a self-labeled link bare so Discord turns it into a link itself
+def anchor_to_discord_markdown(url, inner_html):
+    target = html.unescape(str(url or "")).strip()
+    label = " ".join(html.unescape(re.sub(r"(?s)<[^>]+>", "", str(inner_html or ""))).split())
+    # Discord prints a masked link as plain text when its label repeats the destination, while a bare URL always links
+    if not target or not label or label == target:
+        return target or label
+    return f"[{inner_html}]({target})"
+
+
+# Converts one HTML email body to the Discord markdown subset, so a Discord alert reads like the email
+def html_body_to_discord_markdown(body_html):
+    text = re.sub(r"(?is)</?(?:html|head|body)\s*>", "", str(body_html or ""))
+    text = re.sub(r"(?is)<a\s[^>]*?href=[\"']([^\"']*)[\"'][^>]*>(.*?)</a>", lambda m: anchor_to_discord_markdown(m.group(1), m.group(2)), text)
+    text = re.sub(r"(?is)<b\s*>(.*?)</b\s*>", lambda m: f"**{m.group(1)}**" if m.group(1).strip() else m.group(1), text)
+    text = re.sub(r"(?is)<i\s*>(.*?)</i\s*>", lambda m: f"*{m.group(1)}*" if m.group(1).strip() else m.group(1), text)
+    text = re.sub(r"(?is)<br\s*/?>", "\n", text)
+    # Anything still tag-shaped is layout the markdown body has no use for, such as a stray paragraph or list wrapper
+    text = re.sub(r"(?s)<[^>]+>", "", text)
+    return html.unescape(text).strip()
+
+
+# Renders one PSN account as the bold subject of an alert
+def psn_user_html(psn_user_id):
+    return f"<b>{html_text(psn_user_id)}</b>"
+
+
+# Renders one game title as the bold subject of an alert
+def psn_game_html(game_name):
+    return f"<b>{html_text(game_name)}</b>"
+
+
 # Returns the advice a cancelled secret entry reports, worded the same way by every one-shot secret command
 def secret_entry_cancelled_advice(subject, flag, guide_url):
     return make_recovery_advice("secret.entry", f"{subject[:1].upper()}{subject[1:]} setup was cancelled and the dotenv file was not changed", recovery_fix_with_guide(f"Run {flag} again when you have the value ready", guide_url), False)
@@ -864,6 +950,20 @@ def mentions_status_code(code, message):
     return re.search(rf"(?<![\w/]){code}(?!\w)", message) is not None
 
 
+# The fix a passing network failure shares, since the tool retries it on its own before the reader needs to act
+NETWORK_FAILURE_FIX = "Usually nothing to do, the tool retries on its own. If it continues, check network access, DNS, firewall and proxy settings"
+
+
+# Returns the advice for a PSN request that got no answer in time
+def network_timeout_advice(detail=""):
+    return make_recovery_advice("network.timeout", "PlayStation Network did not answer in time", recovery_fix_with_guide(NETWORK_FAILURE_FIX, CONNECTION_GUIDE_URL), True, detail)
+
+
+# Returns the advice for a PSN request that could not reach the service
+def network_unavailable_advice(detail=""):
+    return make_recovery_advice("network.unavailable", "PlayStation Network could not be reached", recovery_fix_with_guide(NETWORK_FAILURE_FIX, CONNECTION_GUIDE_URL), True, detail)
+
+
 # Classifies a failure by exception type, then by message, without contacting PSN
 def classify_recovery_error_offline(error=None, context="runtime", detail=""):
     safe_detail = sanitize_error_text(detail or error or "")
@@ -874,7 +974,7 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
     if error is not None and is_too_many_open_files(error):
         # Repeated auth refreshes against an expired NPSSO are a common way to reach the limit, so say so
         npsso_note = " This can also be a side effect of repeated PSN auth refreshes, so check your NPSSO code once the limit is raised." if ("oauth/token" in message or "authz" in message or "npsso" in message) else ""
-        return make_recovery_advice("resource.exhausted", "This process ran out of file descriptors, which is a local limit and not a PlayStation Network problem", recovery_fix_with_guide(f"Raise the file descriptor limit, for example with 'ulimit -n 4096', or set LimitNOFILE= if you run under systemd, then restart the tool.{npsso_note}", DIAGNOSTICS_GUIDE_URL), False, safe_detail)
+        return make_recovery_advice("resource.exhausted", "This process ran out of file descriptors, which is a local limit and not a PlayStation Network problem", recovery_fix_with_guide(f"Raise the file descriptor limit, for example with 'ulimit -n 4096', or set LimitNOFILE= if you run under systemd, then restart the tool.{npsso_note}", DESCRIPTOR_LIMIT_GUIDE_URL), False, safe_detail)
 
     if context == "config.missing":
         return make_recovery_advice("config.missing", safe_detail or "The configuration file was not found", recovery_fix_with_guide(f"Check the --config-file path, or create one with: {render_command(['--generate-config', 'psn_monitor.conf'], include_paths=False)}", CONFIG_GUIDE_URL), False, safe_detail)
@@ -909,7 +1009,7 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         return make_recovery_advice("webhook.rejected", safe_detail or "The webhook service refused the delivery", recovery_fix_with_guide(f"Confirm the webhook still exists and that the saved URL is current, then run: {render_command(['--send-test-webhook'])}", WEBHOOK_GUIDE_URL), False, safe_detail)
 
     if context == "file.unreadable":
-        return make_recovery_advice("file.unreadable", safe_detail or "A file the tool needs could not be read", recovery_fix_with_guide("Check that the path exists and that this user can read it, then retry", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+        return make_recovery_advice("file.unreadable", safe_detail or "A file the tool needs could not be read", recovery_fix_with_guide("Check that the path exists and that this user can read it, then retry", CONFIG_GUIDE_URL), True, safe_detail)
 
     if context == "file.unwritable":
         # The wizard reaches this either because a destination was switched off or because the path cannot be written
@@ -917,7 +1017,7 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
             return make_recovery_advice("file.unwritable", safe_detail or "--setup has nowhere to write the secrets", recovery_fix_with_guide("Replace '--env-file none' with a writable path, or drop the flag to write .env in the current directory", SECRETS_GUIDE_URL), False, safe_detail)
         if "nowhere to write the configuration" in message:
             return make_recovery_advice("file.unwritable", safe_detail or "--setup has nowhere to write the configuration", recovery_fix_with_guide(f"Replace '--config-file none' with a writable path, or drop the flag to write {DEFAULT_CONFIG_FILENAME} in the current directory", CONFIG_GUIDE_URL), False, safe_detail)
-        return make_recovery_advice("file.unwritable", safe_detail or "A file the tool needs could not be written", recovery_fix_with_guide("Check that the directory exists, that this user can write to it and that there is free space, then retry", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+        return make_recovery_advice("file.unwritable", safe_detail or "A file the tool needs could not be written", recovery_fix_with_guide("Check that the directory exists, that this user can write to it and that there is free space, then retry", CONFIG_GUIDE_URL), True, safe_detail)
 
     if context == "connectivity":
         # Classified from the error, because the detail names the endpoint rather than the failure
@@ -947,9 +1047,9 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         if types["auth"] and isinstance(current, types["auth"]):
             return make_recovery_advice("auth.npsso_expired" if monitoring else "auth.npsso_invalid", "PlayStation Network rejected the NPSSO code" if monitoring else "PlayStation Network did not accept the NPSSO code", recovery_fix_with_guide(npsso_recovery_fix(monitoring), NPSSO_GUIDE_URL), False, safe_detail)
         if isinstance(current, types["timeout"]):
-            return make_recovery_advice("network.timeout", "PlayStation Network took too long to answer", recovery_fix_with_guide("Nothing to do in most cases, the tool retries on its own. If it continues, check your connection and any proxy", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+            return network_timeout_advice(safe_detail)
         if isinstance(current, types["unavailable"]):
-            return make_recovery_advice("network.unavailable", "PlayStation Network could not be reached", recovery_fix_with_guide("Nothing to do in most cases, the tool retries on its own. If it continues, check your internet connection, DNS and firewall", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+            return network_unavailable_advice(safe_detail)
 
     if "too many requests" in message or "rate limit" in message or mentions_status_code("429", message):
         return make_recovery_advice("psn.rate_limited", "PlayStation Network is rate limiting this account", recovery_fix_with_guide("Raise PSN_CHECK_INTERVAL and PSN_ACTIVE_CHECK_INTERVAL, or run fewer instances against the same account, then restart", INTERVALS_GUIDE_URL), True, safe_detail)
@@ -958,15 +1058,19 @@ def classify_recovery_error_offline(error=None, context="runtime", detail=""):
         return make_recovery_advice("auth.npsso_expired" if monitoring else "auth.npsso_invalid", "PlayStation Network rejected the NPSSO code" if monitoring else "PlayStation Network did not accept the NPSSO code", recovery_fix_with_guide(npsso_recovery_fix(monitoring), NPSSO_GUIDE_URL), False, safe_detail)
 
     if "read timed out" in message or "timeout" in message or "timed out" in message:
-        return make_recovery_advice("network.timeout", "PlayStation Network took too long to answer", recovery_fix_with_guide("Nothing to do in most cases, the tool retries on its own. If it continues, check your connection and any proxy", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+        return network_timeout_advice(safe_detail)
 
     if "remote end closed connection" in message or "connection reset by peer" in message or "connection aborted" in message or "temporarily unavailable" in message:
-        return make_recovery_advice("network.unavailable", "PlayStation Network could not be reached", recovery_fix_with_guide("Nothing to do in most cases, the tool retries on its own. If it continues, check your internet connection, DNS and firewall", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
+        return network_unavailable_advice(safe_detail)
 
     for current in iter_exc_chain(error):
         if isinstance(current, (AttributeError, TypeError)):
             return make_recovery_advice("psn.malformed_response", "PlayStation Network returned a presence response in an unexpected shape", recovery_fix_with_guide("Nothing to do in most cases, the tool rebuilds its session and retries. If it continues, upgrade PSNAWP and rerun with --debug", DIAGNOSTICS_GUIDE_URL), True, safe_detail)
 
+    # Read last, so a chain whose text nothing matched is still named by the exception types it carries
+    transport_code = network_failure_code(error)
+    if transport_code:
+        return network_timeout_advice(safe_detail) if transport_code == "network.timeout" else network_unavailable_advice(safe_detail)
     return make_recovery_advice("unknown", "Something unexpected went wrong", recovery_fix_with_guide(unknown_failure_fix(), DIAGNOSTICS_GUIDE_URL), True, safe_detail)
 
 
@@ -1025,19 +1129,109 @@ def print_recovery_error(error=None, context="runtime", debug=None, detail="", r
     return print_recovery_advice(classify_recovery_error(error, context, detail, probe_auth), debug, retry_note, with_fix, label, tracker)
 
 
-# Builds the subject line for one recovery notification
-def recovery_email_subject(advice, psn_user_id):
-    return f"{advice.summary} (PSN user: {psn_user_id})"
+# Builds the subject every failure alert shares, so an inbox fed by several monitors sorts them by tool
+def recovery_alert_subject(advice, target):
+    return f"PSN Monitor error: {advice.summary} (user: {target})"
 
 
-# Builds the body for one recovery notification, repeating the fix the operator sees on screen
-def recovery_email_body(advice, error_streak=0):
-    lines = [advice.summary, "", f"To fix: {advice.fix}"]
-    if error_streak > 1:
-        lines.extend(["", f"Failed checks in a row: {error_streak}"])
-    if advice.detail:
-        lines.extend(["", f"Technical detail: {advice.detail}"])
-    return "\n".join(lines) + get_cur_ts("\n\nTimestamp: ")
+# Lists the paragraphs of one failure alert in reading order, so the plain text, HTML and webhook bodies agree
+def recovery_alert_paragraphs(advice, retry_seconds, failed_checks=0, failing_since=0):
+    retry_lines = []
+    # A first failure has no run to count, so the count and its start appear once a check has failed again
+    if failed_checks > 1:
+        retry_lines.append(f"Failed checks in a row: {failed_checks}")
+        if failing_since:
+            retry_lines.append(f"Failing since: {get_date_from_ts(int(failing_since))}")
+    # A run that stops on this failure has no next check to name
+    if retry_seconds > 0:
+        retry_lines.append(f"Next retry in: {display_time(retry_seconds)}")
+    paragraphs = [advice.summary, f"To fix: {advice.fix}"]
+    if retry_lines:
+        paragraphs.append("\n".join(retry_lines))
+    # A detail that only repeats the summary spends a line saying nothing
+    if DEBUG_MODE and advice.detail and advice.detail != advice.summary:
+        paragraphs.append(f"Technical detail: {sanitize_error_text(advice.detail)}")
+    return paragraphs
+
+
+# Builds the plain text body of one failure alert, ending with the timestamp unless the webhook asks without it
+def recovery_alert_body(advice, retry_seconds, failed_checks=0, failing_since=0, timestamp=True):
+    body = "\n\n".join(recovery_alert_paragraphs(advice, retry_seconds, failed_checks, failing_since))
+    return body + get_cur_ts("\n\nTimestamp: ") if timestamp else body
+
+
+# Bolds the values a reader scans a failure alert for: how often it has failed and since when
+def html_bold_outage_fields(content):
+    for label in ("Failed checks in a row: ", "Failing since: "):
+        content = re.sub(f"({re.escape(label)})([^<]+)", r"\1<b>\2</b>", content, count=1)
+    return content
+
+
+# Builds the HTML body of one failure alert, with the summary in bold and the same paragraphs as the plain text
+def recovery_alert_body_html(advice, retry_seconds, failed_checks=0, failing_since=0, timestamp=True):
+    summary, *rest = recovery_alert_paragraphs(advice, retry_seconds, failed_checks, failing_since)
+    content = "<br><br>".join([f"<b>{html_text(summary)}</b>", *(html_autolink_urls(html_text(paragraph)) for paragraph in rest)])
+    return html_bold_outage_fields(html_email_body(f"{content}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}"))
+
+
+# Builds the subject of the alert that closes a delivered failure alert, so it sorts next to the failure it ends
+def outage_recovery_subject(target, lasted):
+    return f"PSN Monitor recovered: monitoring {target} resumed after {display_time(max(1, lasted))}"
+
+
+# Builds the plain text body of one recovery alert, naming the failure it closes
+def outage_recovery_body(advice, target, lasted, timestamp=True):
+    body = f"Monitoring recovered for {target} after {display_time(max(1, lasted))}.\n\nThe failure was: {advice.summary}"
+    return body + get_cur_ts("\n\nTimestamp: ") if timestamp else body
+
+
+# Builds the HTML body of one recovery alert, matching the plain text
+def outage_recovery_body_html(advice, target, lasted, timestamp=True):
+    body = f"Monitoring recovered for <b>{html_text(target)}</b> after <b>{html_text(display_time(max(1, lasted)))}</b>.<br><br>The failure was: {html_text(advice.summary)}"
+    return html_email_body(f"{body}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}")
+
+
+# Sends the failure alert on the requested channels and returns what each delivered, without touching the alert state
+def send_failure_alert(advice, target, retry_seconds, failed_checks=0, failing_since=0, email_enabled=False, webhook_enabled=False):
+    body = recovery_alert_body(advice, retry_seconds, failed_checks, failing_since)
+    body_html = recovery_alert_body_html(advice, retry_seconds, failed_checks, failing_since)
+    webhook_body = recovery_alert_body(advice, retry_seconds, failed_checks, failing_since, timestamp=False)
+    return send_notification_channels("error", recovery_alert_subject(advice, target), body, body_html, email_enabled=email_enabled, webhook_enabled=webhook_enabled, webhook_body=webhook_body, webhook_body_html=recovery_alert_body_html(advice, retry_seconds, failed_checks, failing_since, timestamp=False))
+
+
+# Tells a channel that never received the failure alert about the whole outage, since a bare recovery would close
+# a failure it was never told about
+def outage_missed_body(advice, target, lasted, timestamp=True):
+    lasted = max(1, lasted)
+    body = f"Monitoring failed for {target} at {get_date_from_ts(int(time.time()) - lasted)} and recovered after {display_time(lasted)}.\n\nThe failure was: {advice.summary}\n\nThe failure alert could not be delivered here while the failure lasted."
+    return body + get_cur_ts("\n\nTimestamp: ") if timestamp else body
+
+
+# Builds the HTML body of the combined failure and recovery alert, matching the plain text
+def outage_missed_body_html(advice, target, lasted, timestamp=True):
+    lasted = max(1, lasted)
+    body = f"Monitoring failed for <b>{html_text(target)}</b> at <b>{html_text(get_date_from_ts(int(time.time()) - lasted))}</b> and recovered after <b>{html_text(display_time(lasted))}</b>.<br><br>The failure was: {html_text(advice.summary)}<br><br>The failure alert could not be delivered here while the failure lasted."
+    return html_email_body(f"{body}{get_cur_ts('<br><br>Timestamp: ') if timestamp else ''}")
+
+
+# Sends the recovery alert on every channel whose failure alert was delivered, tells a channel that never got one
+# about the whole outage at once and returns whether any went out
+def send_outage_recovery_alert(target, lasted, error_alert):
+    advice = error_alert.advice
+    email_enabled = bool(ERROR_NOTIFICATION and error_alert.email_sent)
+    webhook_enabled = bool(webhook_event_enabled("error") and error_alert.webhook_sent)
+    # A channel whose failure alert never got through hears about the outage and its end together, rather than
+    # nothing at all, which is what a channel blocked for the length of the outage would otherwise receive
+    email_missed = error_alert.missed("email", ERROR_NOTIFICATION)
+    webhook_missed = error_alert.missed("webhook", webhook_event_enabled("error"))
+    if advice is None or not (email_enabled or webhook_enabled or email_missed or webhook_missed):
+        return False
+    # An outage the reporter never confirmed still ends for the alert, which was sent on the alert state's clock
+    since_failure = lasted if lasted is not None else int(time.time()) - error_alert.since
+    email_text, email_html = (outage_missed_body, outage_missed_body_html) if email_missed else (outage_recovery_body, outage_recovery_body_html)
+    webhook_text, webhook_html = (outage_missed_body, outage_missed_body_html) if webhook_missed else (outage_recovery_body, outage_recovery_body_html)
+    delivered = send_notification_channels("error", outage_recovery_subject(target, since_failure), email_text(advice, target, since_failure), email_html(advice, target, since_failure), email_enabled=email_enabled or email_missed, webhook_enabled=webhook_enabled or webhook_missed, webhook_body=webhook_text(advice, target, since_failure, timestamp=False), webhook_body_html=webhook_html(advice, target, since_failure, timestamp=False))
+    return any(delivered)
 
 
 # Decides how a lasting failure is reported: in full when it is new, then on the liveness cadence while it lasts
@@ -1104,10 +1298,12 @@ def print_liveness_banner(message):
 
 
 # Reminds about a lasting failure once an hour, so a broken run still says it is alive without repeating itself
-def print_outage_liveness(target, advice, since, failures=0):
+def print_outage_liveness(target, advice, since, failures=0, close=True):
     count = f", {failures} failed {'check' if failures == 1 else 'checks'}" if failures else ""
     print(f"* Monitoring degraded for {target}. {advice.summary} since {get_date_from_ts(since)}{count}")
-    print_cur_ts("Liveness check, timestamp:\t")
+    # A caller with an alert still to deliver closes the report itself, so the delivery lines stay inside it
+    if close:
+        print_cur_ts("Liveness check, timestamp:\t")
 
 
 # Notes that a reported outage now fails differently, in one line rather than a second full report
@@ -1116,9 +1312,11 @@ def print_outage_change(target, advice):
 
 
 # Reports that a failure cleared, since a throttled failure no longer stops printing when it is over
-def print_outage_recovery(target, lasted):
+def print_outage_recovery(target, lasted, close=True):
     print(f"* Monitoring recovered for {target} after {display_time(max(1, lasted))}")
-    print_cur_ts("Timestamp:\t\t\t")
+    # A caller with a recovery alert still to deliver closes the report itself, so the delivery lines stay inside it
+    if close:
+        print_cur_ts("Timestamp:\t\t\t")
 
 
 # Suppresses a repeated fix paragraph until the failure category changes or a check succeeds
@@ -1852,10 +2050,14 @@ _QUOTED_USER_ID_CONTEXT_RE = re.compile(r"\b(?:user(?:\s+id)?|for)\s+$", re.IGNO
 # The two presence values a status change reports, coloured with the same table the "Status:" row uses
 _FROM_TO_STATUS_RE = re.compile(r"(changed status from\s+)(\w+)(\s+to\s+)(\w+)")
 _DURATION_RE = re.compile(r"~?\b[0-9]{1,20}[ \t]{1,20}(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\b", re.IGNORECASE)
-_LONG_DATE_RE = re.compile(r"\b(?:\w{3}\s+)?\d{1,2}\s+\w{3}(?:\s+\d{2,4})?[\s,]*\d{2}:\d{2}(:\d{2})?(\s*[AP]M)?\b", re.IGNORECASE)
+# The weekday in front of a date, taken from the abbreviations the running locale prints. A date is separated
+# from its weekday by one space, so the wide gap of a padded listing column cannot pull the word before it,
+# such as the last word of a line, into the date
+_WEEKDAY_ABBR_PATTERN = "|".join(re.escape(day_abbr) for day_abbr in calendar.day_abbr)
+_LONG_DATE_RE = re.compile(r"\b(?:(?:" + _WEEKDAY_ABBR_PATTERN + r")[\t ])?\d{1,2}\s+\w{3}(?:\s+\d{2,4})?[\s,]*\d{2}:\d{2}(:\d{2})?(\s*[AP]M)?\b", re.IGNORECASE)
 _TIME_ONLY_RE = re.compile(r"(?<![\w:])(~?(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:\s*[AP]M)?)(?![\w:])", re.IGNORECASE)
-_SHORT_RANGE_DATE_RE = re.compile(r"\(\w{3}\s+\d{1,2}\s+\w{3}\s+\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\)", re.IGNORECASE)
-_DATE_RANGE_RE = re.compile(r"\b\w{3}\s+\d{1,2}\s+\w{3}\s+\d{2}:\d{2}(\s*[AP]M)?\s*(?:-|to)\s*\d{2}:\d{2}(\s*[AP]M)?\b", re.IGNORECASE)
+_SHORT_RANGE_DATE_RE = re.compile(r"\((?:" + _WEEKDAY_ABBR_PATTERN + r")[\t ]\d{1,2}\s+\w{3}\s+\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\)", re.IGNORECASE)
+_DATE_RANGE_RE = re.compile(r"\b(?:" + _WEEKDAY_ABBR_PATTERN + r")[\t ]\d{1,2}\s+\w{3}\s+\d{2}:\d{2}(\s*[AP]M)?\s*(?:-|to)\s*\d{2}:\d{2}(\s*[AP]M)?\b", re.IGNORECASE)
 _HOUR_RANGE_RE = re.compile(r"\b\d{2}:\d{2}(\s*[AP]M)?\s*-\s*\d{2}:\d{2}(\s*[AP]M)?\b", re.IGNORECASE)
 _URL_RE = re.compile(r"(https?://[^\s\]]+)")
 _BOOLEAN_TRUE_RE = re.compile(r"\bTrue\b|\bEnabled\b")
@@ -2064,6 +2266,8 @@ def _colorize_quoted_name(match, style_name):
 # Applies the colour rules to a single output line
 def _colorize_line(line):
     lowered = line.lower()
+    # Read before any highlight is inserted, since the label column has to be measured on the plain text
+    is_settings_row = is_startup_summary_row(line)
 
     # The notification summary row carries its own On/Off state word
     notification_match = _NOTIFICATION_SUMMARY_STATE_RE.match(line)
@@ -2160,6 +2364,10 @@ def _colorize_line(line):
     # Mark the opening word of a warning and the name of a reported signal, rather than painting the whole line
     line = _sub_outside_color(_WARNING_LABEL_RE, lambda mo: mo.group(0)[:mo.start(1) - mo.start(0)] + colorize("warning", mo.group(1)), line)
     line = _sub_outside_color(_SIGNAL_NAME_RE, lambda mo: colorize("signal", mo.group(0)), line)
+
+    # A summary row reports a setting, so a value that happens to read like a log keyword must not paint the whole row
+    if is_settings_row:
+        return line
 
     # Whole-line styling last, so the colours applied above survive the nesting logic
     if lowered.startswith("to fix:") or _INFO_LINE_RE.match(line):
@@ -3140,7 +3348,7 @@ def _retain_webhook_secrets(deliver):
 
 @_retain_webhook_secrets
 # Sends one webhook through its own bounded retry path, which never shares the PlayStation Network retry policy
-def send_webhook(title, description, notification_type="status", force=False, sleeper=None, report_delivery=True):
+def send_webhook(title, description, notification_type="status", force=False, sleeper=None, report_delivery=True, discord_description=""):
     if not force and not webhook_event_enabled(notification_type):
         debug_print("Webhook delivery", outcome="skipped", type=notification_type, reason="alerts are disabled")
         return 1
@@ -3160,10 +3368,12 @@ def send_webhook(title, description, notification_type="status", force=False, sl
     if header_error is not None:
         print_webhook_error(header_error)
         return 1
+    # Discord renders markdown, so it gets the email's formatting while ntfy keeps the plain body it can display
+    effective_description = discord_description if provider == "discord" and discord_description else description
     try:
-        webhook_values = build_webhook_values(title, description, notification_type)
+        webhook_values = build_webhook_values(title, effective_description, notification_type)
         request_headers = build_webhook_headers(provider, webhook_values)
-        discord_payload = build_webhook_payload(title, description, notification_type, webhook_values) if provider == "discord" else None
+        discord_payload = build_webhook_payload(title, effective_description, notification_type, webhook_values) if provider == "discord" else None
     except ValueError as exc:
         print_webhook_error(exc)
         return 1
@@ -3208,7 +3418,7 @@ def send_webhook(title, description, notification_type="status", force=False, sl
 
 
 # Sends one alert through the email and webhook channels, each switched on independently of the other
-def send_notification_channels(notification_type, subject, body, body_html="", email_enabled=False, webhook_enabled=None):
+def send_notification_channels(notification_type, subject, body, body_html="", email_enabled=False, webhook_enabled=None, webhook_body=None, webhook_body_html=""):
     email_attempted = bool(email_enabled)
     webhook_attempted = webhook_event_enabled(notification_type) if webhook_enabled is None else bool(webhook_enabled)
     email_delivered = False
@@ -3218,7 +3428,9 @@ def send_notification_channels(notification_type, subject, body, body_html="", e
         email_delivered = send_email(subject, body, body_html, SMTP_SSL) == 0
     if webhook_attempted:
         print(f"Sending webhook notification via {webhook_provider_display_name()}")
-        webhook_delivered = send_webhook(subject, body, notification_type, force=True) == 0
+        # A webhook shows its own delivery time, so the caller may hand it the body without the timestamp trailer
+        discord_description = html_body_to_discord_markdown(webhook_body_html or body_html)
+        webhook_delivered = send_webhook(subject, body if webhook_body is None else webhook_body, notification_type, force=True, discord_description=discord_description) == 0
     # Delivery, not the attempt, so a channel that failed is retried while one that succeeded is not resent
     return email_delivered, webhook_delivered
 
@@ -4673,15 +4885,22 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             _close_psnawp_sessions(psnawp)
         except Exception as diag_exc:
             debug_print("Closing the old PSNAWP session before recreating it", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
+        # Guarded like the presence call, since both reach PSN and neither carries a request timeout of its own
+        if platform.system() != 'Windows':
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(FUNCTION_TIMEOUT)
         try:
             psnawp = psn_client()
             psn_user = psnawp.user(online_id=psn_user_id)
             last_recreate_ts = now
-            verbose_notice("Recreated the PSNAWP session")
+            debug_print("Recreating the PSNAWP session", outcome="OK")
             return True
         except Exception as diag_exc:
             debug_print("Recreating the PSNAWP session", outcome="failed", error=f"{type(diag_exc).__name__}: {diag_exc}")
             return False
+        finally:
+            if platform.system() != 'Windows':
+                signal.alarm(0)
 
     sleep_interval = get_sleep_interval()
 
@@ -4714,7 +4933,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 error_email_pending = error_alert.pending("email", ERROR_NOTIFICATION, now)
                 error_webhook_pending = error_alert.pending("webhook", webhook_event_enabled("error"), now)
                 if error_email_pending or error_webhook_pending:
-                    email_delivered, webhook_delivered = send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice), email_enabled=error_email_pending, webhook_enabled=error_webhook_pending)
+                    # The check that follows runs at once, so there is no retry interval to name
+                    email_delivered, webhook_delivered = send_failure_alert(advice, psn_user_id, 0, email_enabled=error_email_pending, webhook_enabled=error_webhook_pending)
                     error_alert.record("email", error_email_pending, email_delivered, now)
                     error_alert.record("webhook", error_webhook_pending, webhook_delivered, now)
                 print_cur_ts("Timestamp:\t\t\t")
@@ -4759,7 +4979,8 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             if kind == "exhausted":
                 print_recovery_advice(advice)
                 if (ERROR_NOTIFICATION and not error_alert.email_sent) or (webhook_event_enabled("error") and not error_alert.webhook_sent):
-                    send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice), email_enabled=ERROR_NOTIFICATION and not error_alert.email_sent, webhook_enabled=webhook_event_enabled("error") and not error_alert.webhook_sent)
+                    # The tool stops here, so the alert names no retry interval
+                    send_failure_alert(advice, psn_user_id, 0, email_enabled=ERROR_NOTIFICATION and not error_alert.email_sent, webhook_enabled=webhook_event_enabled("error") and not error_alert.webhook_sent)
                 print_cur_ts("Timestamp:\t\t\t")
                 sys.exit(2)
 
@@ -4783,10 +5004,10 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 print_outage_change(psn_user_id, advice)
                 failure_announced = True
             elif outage_outcome == "reminder":
-                print_outage_liveness(psn_user_id, advice, outage.since, outage.failures)
+                print_outage_liveness(psn_user_id, advice, outage.since, outage.failures, close=False)
                 failure_announced = True
 
-            if error_streak >= policy["recreate_after"] and _recreate_session_rate_limited() and not rebuild_announced:
+            if policy["recreate_after"] and not rebuild_announced and error_streak >= policy["recreate_after"] and _recreate_session_rate_limited():
                 print(f"* Rebuilt the PSNAWP session after {error_streak} failed {'check' if error_streak == 1 else 'checks'} in a row")
                 rebuild_announced = True
                 printed_this_check = True
@@ -4795,15 +5016,20 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             error_email_pending = alert_due and error_alert.pending("email", ERROR_NOTIFICATION, now)
             error_webhook_pending = alert_due and error_alert.pending("webhook", webhook_event_enabled("error"), now)
             if error_email_pending or error_webhook_pending:
-                email_delivered, webhook_delivered = send_notification_channels("error", recovery_email_subject(advice, psn_user_id), recovery_email_body(advice, error_streak), email_enabled=error_email_pending, webhook_enabled=error_webhook_pending)
+                email_delivered, webhook_delivered = send_failure_alert(advice, psn_user_id, sleep_interval, error_streak, error_since, email_enabled=error_email_pending, webhook_enabled=error_webhook_pending)
                 error_alert.record("email", error_email_pending, email_delivered, now)
                 error_alert.record("webhook", error_webhook_pending, webhook_delivered, now)
+                if email_delivered or webhook_delivered:
+                    error_alert.remember(advice, error_since)
                 failure_announced = failure_announced or email_delivered or webhook_delivered
                 printed_this_check = True
 
             # A rebuild or a retried alert can reach the screen on a check the outage reporter keeps quiet, and a
-            # line with nothing under it reads as a run that stopped there
-            if outage_outcome in ("full", "changed") or printed_this_check:
+            # line with nothing under it reads as a run that stopped there. The reminder closes last so the lines
+            # it carries stay inside the report rather than landing under the separator that ended it
+            if outage_outcome == "reminder":
+                print_cur_ts("Liveness check, timestamp:\t")
+            elif outage_outcome in ("full", "changed") or printed_this_check:
                 print_cur_ts("Timestamp:\t\t\t")
             debug_print("Waiting", interval=display_time(sleep_interval), reason=f"{kind} failure", streak=error_streak)
             time.sleep(sleep_interval)
@@ -4814,8 +5040,12 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             if error_streak:
                 debug_print("Recovered", streak=error_streak, reported=failure_announced)
                 # A streak nobody was told about needs no recovery line, since nothing reported it as broken
-                if failure_announced and outage_lasted is not None:
-                    print_outage_recovery(psn_user_id, outage_lasted)
+                recovery_reported = failure_announced and outage_lasted is not None
+                if recovery_reported:
+                    print_outage_recovery(psn_user_id, outage_lasted, close=False)
+                # A delivered failure alert earns a recovery alert on the same channels, inside the same report
+                if send_outage_recovery_alert(psn_user_id, outage_lasted, error_alert) or recovery_reported:
+                    print_cur_ts("Timestamp:\t\t\t")
             recovery_hints.reset()
             error_alert.reset()
             error_streak = 0
@@ -4844,11 +5074,13 @@ def psn_monitor_user(psn_user_id, csv_file_name):
             print(f"PSN user {psn_user_id} changed status from {status_old} to {status}")
             print(f"User was {status_old} for {calculate_timespan(int(status_ts), int(status_ts_old))} ({get_range_of_dates_from_tss(int(status_ts_old), int(status_ts), short=True)})")
 
-            m_subject_was_since = f", was {status_old}: {get_range_of_dates_from_tss(int(status_ts_old), int(status_ts), short=True)}"
+            m_subject_since = f" - {get_short_date_from_ts(int(status_ts_old))}"
             m_subject_after = calculate_timespan(int(status_ts), int(status_ts_old), show_seconds=False)
             m_body_was_since = f" ({get_range_of_dates_from_tss(int(status_ts_old), int(status_ts), short=True)})"
+            m_body_was_since_html = f" ({html_text(get_range_of_dates_from_tss(int(status_ts_old), int(status_ts), short=True))})"
 
             m_body_short_offline_msg = ""
+            m_body_short_offline_msg_html = ""
 
             # Player got online
             if status_old == "offline" and status and status != "offline":
@@ -4862,18 +5094,21 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                     status_online_start_ts = status_online_start_ts_old
                     short_offline_msg = f"Short offline interruption ({display_time(status_ts - status_ts_old)}), online start timestamp set back to {get_short_date_from_ts(status_online_start_ts_old)}"
                     m_body_short_offline_msg = f"\n\n{short_offline_msg}"
+                    m_body_short_offline_msg_html = f"<br><br>Short offline interruption (<b>{html_text(display_time(status_ts - status_ts_old))}</b>), online start timestamp set back to <b>{html_text(get_short_date_from_ts(status_online_start_ts_old))}</b>"
                     print(short_offline_msg)
                 act_inact_flag = True
 
             m_body_played_games = ""
+            m_body_played_games_html = ""
 
             # Player got offline
             if status_old and status_old != "offline" and status == "offline":
                 if status_online_start_ts > 0:
                     m_subject_after = calculate_timespan(int(status_ts), int(status_online_start_ts), show_seconds=False)
                     online_since_msg = f"(after {calculate_timespan(int(status_ts), int(status_online_start_ts), show_seconds=False)}: {get_range_of_dates_from_tss(int(status_online_start_ts), int(status_ts), short=True)})"
-                    m_subject_was_since = f", was available: {get_range_of_dates_from_tss(int(status_online_start_ts), int(status_ts), short=True)}"
+                    m_subject_since = f": {get_range_of_dates_from_tss(int(status_online_start_ts), int(status_ts), short=True)}"
                     m_body_was_since = f" ({get_range_of_dates_from_tss(int(status_ts_old), int(status_ts), short=True)})\n\nUser was available for {calculate_timespan(int(status_ts), int(status_online_start_ts), show_seconds=False)} ({get_range_of_dates_from_tss(int(status_online_start_ts), int(status_ts), short=True)})"
+                    m_body_was_since_html = f" ({html_text(get_range_of_dates_from_tss(int(status_ts_old), int(status_ts), short=True))})<br><br>User was available for <b>{html_text(calculate_timespan(int(status_ts), int(status_online_start_ts), show_seconds=False))}</b> ({html_text(get_range_of_dates_from_tss(int(status_online_start_ts), int(status_ts), short=True))})"
                 else:
                     online_since_msg = ""
                 if games_number > 0:
@@ -4881,6 +5116,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                         game_total_ts += (int(game_ts) - int(game_ts_old))
                         game_total_after_offline_counted = True
                     m_body_played_games = f"\n\nUser played {games_number} games for total time of {display_time(game_total_ts)}"
+                    m_body_played_games_html = f"<br><br>User played <b>{games_number}</b> games for total time of <b>{html_text(display_time(game_total_ts))}</b>"
                     print(f"User played {games_number} games for total time of {display_time(game_total_ts)}")
                 print(f"*** User got OFFLINE ! {online_since_msg}")
                 status_online_start_ts_old = status_online_start_ts
@@ -4888,26 +5124,31 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 act_inact_flag = True
 
             m_body_user_in_game = ""
+            m_body_user_in_game_html = ""
             if status != "offline" and game_name:
                 launchplatform_str = ""
                 if launchplatform:
                     launchplatform_str = f" ({launchplatform})"
                 print(f"User is currently in-game: {game_name}{launchplatform_str}")
                 m_body_user_in_game = f"\n\nUser is currently in-game: {game_name}{launchplatform_str}"
+                m_body_user_in_game_html = f"<br><br>User is currently in-game: {psn_game_html(game_name)}{html_text(launchplatform_str)}"
 
             change = True
 
-            m_subject = f"PSN user {psn_user_id} is now {status} (after {m_subject_after}{m_subject_was_since})"
+            m_subject = f"PSN user {psn_user_id} is {status} (after {m_subject_after}{m_subject_since})"
             m_body = f"PSN user {psn_user_id} changed status from {status_old} to {status}\n\nUser was {status_old} for {calculate_timespan(int(status_ts), int(status_ts_old))}{m_body_was_since}{m_body_short_offline_msg}{m_body_user_in_game}{m_body_played_games}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+            m_body_html = html_email_body(f"PSN user {psn_user_html(psn_user_id)} changed status from <b>{html_text(status_old)}</b> to <b>{html_text(status)}</b><br><br>User was <b>{html_text(status_old)}</b> for <b>{html_text(calculate_timespan(int(status_ts), int(status_ts_old)))}</b>{m_body_was_since_html}{m_body_short_offline_msg_html}{m_body_user_in_game_html}{m_body_played_games_html}{get_cur_ts('<br><br>Timestamp: ')}")
             webhook_status_enabled = webhook_event_enabled("status") and act_inact_flag
             if (ACTIVE_INACTIVE_NOTIFICATION and act_inact_flag) or webhook_status_enabled:
-                send_notification_channels("status", m_subject, m_body, email_enabled=ACTIVE_INACTIVE_NOTIFICATION and act_inact_flag, webhook_enabled=webhook_status_enabled)
+                send_notification_channels("status", m_subject, m_body, m_body_html, email_enabled=ACTIVE_INACTIVE_NOTIFICATION and act_inact_flag, webhook_enabled=webhook_status_enabled)
 
             status_ts_old = status_ts
             print_cur_ts("Timestamp:\t\t\t")
 
         # Player started/stopped/changed the game
         if game_name != game_name_old:
+            # Cleared so the guard below cannot resend the status alert when no game branch produced a body
+            m_subject = m_body = m_body_html = ""
 
             launchplatform_str = ""
             if launchplatform:
@@ -4920,6 +5161,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 game_total_ts += (int(game_ts) - int(game_ts_old))
                 games_number += 1
                 m_body = f"PSN user {psn_user_id} changed game from '{game_name_old}' to '{game_name}'{launchplatform_str} after {calculate_timespan(int(game_ts), int(game_ts_old))}\n\nUser played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to ')}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                m_body_html = html_email_body(f"PSN user {psn_user_html(psn_user_id)} changed game from '{psn_game_html(game_name_old)}' to '{psn_game_html(game_name)}'{html_text(launchplatform_str)} after <b>{html_text(calculate_timespan(int(game_ts), int(game_ts_old)))}</b><br><br>User played game from {html_text(get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to '))}{get_cur_ts('<br><br>Timestamp: ')}")
                 if launchplatform:
                     launchplatform_str = f"{launchplatform}, "
                 m_subject = f"PSN user {psn_user_id} changed game to '{game_name}' ({launchplatform_str}after {calculate_timespan(int(game_ts), int(game_ts_old), show_seconds=False)}: {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True)})"
@@ -4930,6 +5172,7 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                 games_number += 1
                 m_subject = f"PSN user {psn_user_id} now plays '{game_name}'{launchplatform_str}"
                 m_body = f"PSN user {psn_user_id} now plays '{game_name}'{launchplatform_str}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                m_body_html = html_email_body(f"PSN user {psn_user_html(psn_user_id)} now plays '{psn_game_html(game_name)}'{html_text(launchplatform_str)}{get_cur_ts('<br><br>Timestamp: ')}")
 
             # User stopped playing the game
             elif game_name_old and not game_name:
@@ -4939,11 +5182,12 @@ def psn_monitor_user(psn_user_id, csv_file_name):
                     game_total_ts += (int(game_ts) - int(game_ts_old))
                 m_subject = f"PSN user {psn_user_id} stopped playing '{game_name_old}' (after {calculate_timespan(int(game_ts), int(game_ts_old), show_seconds=False)}: {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True)})"
                 m_body = f"PSN user {psn_user_id} stopped playing '{game_name_old}' after {calculate_timespan(int(game_ts), int(game_ts_old))}\n\nUser played game from {get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to ')}{get_cur_ts(nl_ch + nl_ch + 'Timestamp: ')}"
+                m_body_html = html_email_body(f"PSN user {psn_user_html(psn_user_id)} stopped playing '{psn_game_html(game_name_old)}' after <b>{html_text(calculate_timespan(int(game_ts), int(game_ts_old)))}</b><br><br>User played game from {html_text(get_range_of_dates_from_tss(int(game_ts_old), int(game_ts), short=True, between_sep=' to '))}{get_cur_ts('<br><br>Timestamp: ')}")
 
             change = True
 
             if m_subject and m_body and (GAME_CHANGE_NOTIFICATION or webhook_event_enabled("game")):
-                send_notification_channels("game", m_subject, m_body, email_enabled=GAME_CHANGE_NOTIFICATION)
+                send_notification_channels("game", m_subject, m_body, m_body_html, email_enabled=GAME_CHANGE_NOTIFICATION)
 
             game_ts_old = game_ts
             print_cur_ts("Timestamp:\t\t\t")
@@ -4975,8 +5219,6 @@ def psn_monitor_user(psn_user_id, csv_file_name):
 
 # Preflight diagnostics. Every section, marker and summary sentence is shared with the sibling monitors,
 # so a user who runs two of them reads one report format rather than two
-DOCTOR_GUIDE_URL = f"{DOCS_BASE_URL}/troubleshooting/#doctor-preflight"
-
 DOCTOR_SECTIONS = ("Environment", "Configuration", "Authentication", "Connectivity", "Target", "Notifications")
 
 # The theme entry each doctor result marker is drawn in, so a failure reads as one at a glance
@@ -5261,7 +5503,7 @@ def doctor_check_configuration(config_path=None, env_path=None, config_advice=No
 
     if env_path and str(env_path) in DOTENV_STARTUP_ERRORS:
         detail, fix = DOTENV_STARTUP_ERRORS[str(env_path)]
-        advice = make_recovery_advice("file.unreadable", detail, recovery_fix_with_guide(f"{fix}, then run Doctor again", CONFIG_GUIDE_URL), False)
+        advice = make_recovery_advice("file.unreadable", detail, recovery_fix_with_guide(f"{fix}, then run Doctor again", SECRETS_GUIDE_URL), False)
         checks.append(make_doctor_check("Configuration", "FAIL", "Dotenv file could not be loaded", detail, advice))
     elif env_path and os.path.isfile(str(env_path)):
         checks.append(make_doctor_check("Configuration", "PASS", "Dotenv file loaded", f"Path: {env_path}"))
@@ -5643,13 +5885,17 @@ def full_startup_summary_enabled():
 # Returns the email alert rollup, naming what is switched on rather than printing three separate booleans
 def startup_notification_state():
     enabled = email_notification_categories()
-    return "On (" + ", ".join(enabled) + ")" if enabled else "Off"
+    if not enabled:
+        return "Off"
+    return "On (" + ", ".join(enabled) + ")" if email_channel_configured() else "Off (not configured)"
 
 
 # Returns the webhook alert rollup, which reads Off whenever the channel itself is switched off
 def startup_webhook_notification_state():
     enabled = webhook_notification_categories() if WEBHOOK_ENABLED else []
-    return "On (" + ", ".join(enabled) + ")" if enabled else "Off"
+    if not enabled:
+        return "Off"
+    return "On (" + ", ".join(enabled) + ")" if webhook_channel_configured() else "Off (not configured)"
 
 
 # Hides the middle of an address's local part, so a log can be shared while the reader can still spot a typo
@@ -5662,16 +5908,31 @@ def mask_email_address(address):
     return f"{masked}@{domain}"
 
 
+# Returns whether a mail server is set rather than left empty or still holding the placeholder the sample configuration ships
+def smtp_server_configured():
+    return secret_is_set(SMTP_HOST) and bool(SMTP_PORT)
+
+
+# Returns whether an email alert has both a server to send through and an address to reach
+def email_channel_configured():
+    return smtp_server_configured() and secret_is_set(RECEIVER_EMAIL)
+
+
+# Returns whether a webhook alert has a destination to post to
+def webhook_channel_configured():
+    return bool(normalized_webhook_provider()) and secret_is_set(WEBHOOK_URL)
+
+
 # Names the mail server this run would use, leaving out the account that signs in to it
 def startup_email_transport():
-    if not SMTP_HOST or not SMTP_PORT:
+    if not smtp_server_configured():
         return "Not configured"
     return f"{SMTP_HOST}:{SMTP_PORT} ({'STARTTLS' if SMTP_SSL else 'TLS off'})"
 
 
 # Names the configured webhook service and whether the channel is switched on, which are two separate settings
 def startup_webhook_provider():
-    if not normalized_webhook_provider() or not str(WEBHOOK_URL or "").strip():
+    if not webhook_channel_configured():
         return "Not configured"
     return f"{webhook_provider_display_name()} ({'enabled' if WEBHOOK_ENABLED else 'disabled'})"
 
@@ -5691,7 +5952,7 @@ def build_startup_summary(psn_user_id=None, config_path=None, env_path=None, log
         StartupSummaryRow("Offline grace period", display_time(OFFLINE_INTERRUPT) if OFFLINE_INTERRUPT else "Disabled"),
         StartupSummaryRow("Notifications (email)", startup_notification_state(), concise=True),
         StartupSummaryRow("Email transport", startup_email_transport()),
-        StartupSummaryRow("Email recipient", mask_email_address(RECEIVER_EMAIL) if RECEIVER_EMAIL else "Not configured"),
+        StartupSummaryRow("Email recipient", mask_email_address(RECEIVER_EMAIL) if secret_is_set(RECEIVER_EMAIL) else "Not configured"),
         StartupSummaryRow("Notifications (webhook)", startup_webhook_notification_state(), concise=True),
         StartupSummaryRow("Webhook provider", startup_webhook_provider()),
         StartupSummaryRow("Delivery confirmations", str(DELIVERY_CONFIRMATIONS)),
@@ -5727,11 +5988,23 @@ def build_startup_summary(psn_user_id=None, config_path=None, env_path=None, log
 # Rows that detail the channel named right above them, indented so the block reads as one setting with its details
 STARTUP_SUMMARY_NESTED_LABELS = ("Email transport", "Email recipient", "Email images", "Webhook provider", "ntfy images")
 
+# The column every summary value starts in, which also lets the colouriser recognize a summary row
+STARTUP_SUMMARY_VALUE_COLUMN = 32
+
+# Matches a summary row by that padded label column, since no log line puts a value there
+_STARTUP_SUMMARY_ROW_RE = re.compile(r"^\*(?: {1,3})[^:\s][^:]*: {2,}(?=\S)")
+
+
+# Returns whether a line is a startup summary row rather than ordinary output
+def is_startup_summary_row(line):
+    match = _STARTUP_SUMMARY_ROW_RE.match(line)
+    return bool(match) and match.end() == STARTUP_SUMMARY_VALUE_COLUMN
+
 
 # Formats one summary row with an aligned value column, wrapping only the rollup that grows long
 def format_startup_summary_row(row):
     indent = "  " if row.label in STARTUP_SUMMARY_NESTED_LABELS else ""
-    prefix = f"* {indent}{(row.label + ':'):<{30 - len(indent)}}"
+    prefix = f"* {indent}{(row.label + ':'):<{STARTUP_SUMMARY_VALUE_COLUMN - 2 - len(indent)}}"
     if row.label in ("Notifications (email)", "Notifications (webhook)"):
         return textwrap.fill(str(row.value), width=100, initial_indent=prefix, subsequent_indent=" " * len(prefix), break_long_words=False, break_on_hyphens=False) + "\n"
     return f"{prefix}{row.value}\n"
@@ -7424,7 +7697,7 @@ def main():
         dest="notify_errors",
         action="store_false",
         default=None,
-        help="Disable email on errors (e.g. invalid NPSSO)"
+        help="Disable email on errors and the recovery alert that follows"
     )
     notify.add_argument(
         "--send-test-email",
@@ -7482,14 +7755,14 @@ def main():
         dest="webhook_errors",
         action="store_true",
         default=None,
-        help="Send a webhook alert on errors"
+        help="Send webhook alerts when monitoring has a problem and the recovery alert that follows"
     )
     webhook_error_toggle.add_argument(
         "--no-webhook-error-notify",
         dest="webhook_errors",
         action="store_false",
         default=None,
-        help="Disable webhook alerts on errors"
+        help="Disable webhook alerts when monitoring has a problem and the recovery alert that follows"
     )
     webhook.add_argument(
         "--send-test-webhook",
@@ -7691,7 +7964,7 @@ def main():
             detail, fix = dotenv_load_problem(env_path, exc)
             DOTENV_STARTUP_ERRORS[str(env_path)] = (detail, fix)
             if not args.doctor:
-                print_recovery_advice(make_recovery_advice("file.unreadable", detail, recovery_fix_with_guide(fix, CONFIG_GUIDE_URL), False))
+                print_recovery_advice(make_recovery_advice("file.unreadable", detail, recovery_fix_with_guide(fix, SECRETS_GUIDE_URL), False))
                 if not command_reports_configuration(args):
                     sys.exit(1)
 

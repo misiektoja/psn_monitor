@@ -1,6 +1,7 @@
 """Offline end-to-end tests that drive the monitoring loop with scripted PSN responses."""
 
 import json
+import re
 
 import pytest
 import requests
@@ -92,8 +93,20 @@ def test_user_going_online_is_announced_and_emailed(pm_module, psn_session, fake
     assert f"PSN user {USER_ID} changed status from offline to online" in output
     assert "*** User got ACTIVE !" in output
     assert len(sent_emails) == 1
-    assert sent_emails[0]["subject"].startswith(f"PSN user {USER_ID} is now online")
+    assert sent_emails[0]["subject"].startswith(f"PSN user {USER_ID} is online")
     assert json.loads((isolated_working_directory / LAST_STATUS_FILE).read_text(encoding="utf-8"))[1] == "online"
+
+
+# Verifies the status subject names when the state started rather than the whole range, which the body already reports
+def test_the_status_subject_names_when_the_state_started(pm_module, psn_session, fake_clock, monkeypatch, sent_emails):
+    monkeypatch.setattr(pm_module, "ACTIVE_INACTIVE_NOTIFICATION", True)
+    psn_session([presence_payload(status="offline"), presence_payload(status="online")])
+
+    run_monitor(pm_module)
+
+    subject = sent_emails[0]["subject"]
+    assert re.fullmatch(rf"PSN user {USER_ID} is online \(after .+ - (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{{1,2}} \w{{3}} \d{{2}}:\d{{2}}\)", subject), subject
+    assert len(re.findall(r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b", subject)) == 1
 
 
 # Verifies going offline reports how long the session lasted and how many games were played
@@ -110,7 +123,11 @@ def test_user_going_offline_summarizes_the_session(pm_module, psn_session, fake_
     output = capsys.readouterr().out
     assert "*** User got OFFLINE !" in output
     assert "User played 1 games for total time of" in output
-    assert any("is now offline" in message["subject"] for message in sent_emails)
+    # Going offline keeps the range, since that names the session the user was available for
+    offline = [message["subject"] for message in sent_emails if "is offline" in message["subject"]]
+    assert offline
+    for subject in offline:
+        assert re.fullmatch(rf"PSN user {USER_ID} is offline \(after .+: (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{{1,2}} \w{{3}} \d{{2}}:\d{{2}} - .+\)", subject), subject
 
 
 # Verifies a brief disconnect is folded back into the running session instead of starting a new one
@@ -365,12 +382,17 @@ def test_a_halted_request_joins_the_outage(pm_module, psn_session, fake_clock, m
     run_monitor(pm_module)
 
     output = capsys.readouterr().out
-    assert "PlayStation Network took too long to answer" in output
+    assert "PlayStation Network did not answer in time" in output
     assert "Technical detail:" not in output
-    assert "psn_user.get_presence() did not answer" in sent_emails[0]["body"]
+    # The alert says what to do rather than naming the call that failed, which only debug output carries
+    assert "psn_user.get_presence() did not answer" not in sent_emails[0]["body"]
+    assert "Next retry in: " in sent_emails[0]["body"]
     assert "Rebuilt the PSNAWP session after 3 failed checks in a row" in output
     assert "Monitoring recovered for" in output
-    assert len(sent_emails) == 1
+    # The failure alert and the recovery alert that closes it, one each
+    assert len(sent_emails) == 2
+    assert sent_emails[0]["subject"] == "PSN Monitor error: PlayStation Network did not answer in time (user: misiektoja)"
+    assert sent_emails[1]["subject"].startswith("PSN Monitor recovered: monitoring misiektoja resumed after ")
 
 
 # Verifies a lasting outage reports itself once and then only on the hourly reminder, which keeps its own clock
@@ -609,7 +631,7 @@ def test_a_status_change_reaches_the_webhook_channel(pm_module, psn_session, fak
     run_monitor(pm_module)
 
     assert [alert["type"] for alert in sent_webhooks] == ["status"]
-    assert sent_webhooks[0]["title"].startswith(f"PSN user {USER_ID} is now online")
+    assert sent_webhooks[0]["title"].startswith(f"PSN user {USER_ID} is online")
 
 
 # Verifies a game change reaches the webhook channel on its own alert setting

@@ -43,10 +43,30 @@ Every failure is reported in the same three-part shape: what went wrong, a `To f
 | Webhook alerts never arrive | Provider mismatch or a stale destination | [Webhook Settings](configuration.md#webhook-settings) then run `psn_monitor --send-test-webhook` |
 | `psn_monitor` is not found after installation | The shell has not picked up the new command | [Installation and Command Problems](#installation-and-command-problems) |
 | Escape sequences such as `[36m` printed as text or no colour at all | The terminal cannot display ANSI colour or colour was switched off | [Terminal Colours Look Wrong](#terminal-colours-look-wrong) |
+| `PlayStation Network did not answer in time` or `PlayStation Network could not be reached` | A network problem between this machine and PlayStation Network or a PSN outage | [Connection Problems](#connection-problems) |
+| `This process ran out of file descriptors` | The operating system limit on open files was reached | [Too Many Open Files](#too-many-open-files) |
 
 A continuing outage produces a `* Monitoring degraded` reminder once an hour, even when the [liveness reminder](usage.md#liveness-reminder) is switched off. `* Monitoring recovered` marks recovery. Use `--verbose` to see the first failed check.
 
 If a dotenv file cannot be opened or is not UTF-8, monitoring stops with the file path and the repair step for that cause. Doctor reports the failed load and continues the remaining checks.
+
+<a id="connection-problems"></a>
+## Connection Problems
+
+`PlayStation Network did not answer in time` and `PlayStation Network could not be reached` mean a check got no answer from PlayStation Network. The report names the interval after which the check is retried, so a short outage needs no action. A failure that lasts produces the hourly `Monitoring degraded` reminder and `Monitoring recovered` when it clears.
+
+If the failure continues, check the internet connection, DNS and any firewall or proxy between this machine and PlayStation Network. A certificate error points at [TLS Verification](configuration.md#tls-verification) instead. A failure that lasts while other sites work is usually a PlayStation Network outage, so wait for it to end.
+
+To confirm that PlayStation Network is reachable from this machine, run:
+
+```sh
+psn_monitor --doctor
+```
+
+<a id="too-many-open-files"></a>
+## Too Many Open Files
+
+`This process ran out of file descriptors` means the operating system limit on open files was reached. It is a local limit and not a PlayStation Network problem. Raise it with `ulimit -n 4096` in the shell that starts the tool or set `LimitNOFILE=` in the systemd unit, then restart the tool.
 
 <a id="terminal-colours-look-wrong"></a>
 ## Terminal Colours Look Wrong

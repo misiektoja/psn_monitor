@@ -778,3 +778,66 @@ def test_the_loop_tracks_the_error_alert_through_the_state(pm_module):
     assert source.count('error_alert.pending("email"') == source.count('error_alert.record("email"') >= 1
     assert source.count('error_alert.pending("webhook"') == source.count('error_alert.record("webhook"') >= 1
     assert not re.search(r"^\s*error_(email|webhook)_sent = ", source, re.MULTILINE)
+
+
+# Verifies the failure alert subject names the tool, so an inbox fed by several monitors sorts them apart
+def test_the_failure_alert_subject_names_the_tool(pm_module):
+    advice = pm_module.make_recovery_advice("network.timeout", "PlayStation Network did not answer in time", "do the thing", True)
+
+    assert pm_module.recovery_alert_subject(advice, "misiektoja") == "PSN Monitor error: PlayStation Network did not answer in time (user: misiektoja)"
+
+
+# Verifies the failure alert body lists the fix and the retry, and counts the run only once a check has failed again
+def test_the_failure_alert_body_lists_the_fix_and_the_retry(pm_module, monkeypatch):
+    monkeypatch.setattr(pm_module, "DEBUG_MODE", False)
+    advice = pm_module.make_recovery_advice("network.timeout", "PlayStation Network did not answer in time", "Usually nothing to do", True, "psn_user.get_presence() did not answer")
+
+    first = pm_module.recovery_alert_body(advice, 15)
+    later = pm_module.recovery_alert_body(advice, 15, 4, 1758400000)
+
+    assert first.startswith("PlayStation Network did not answer in time\n\nTo fix: Usually nothing to do\n\nNext retry in: 15 seconds")
+    assert "Failed checks in a row" not in first
+    assert "Failed checks in a row: 4" in later
+    assert "Failing since: " in later
+    assert "Technical detail" not in later
+    assert "Timestamp: " in later
+    assert "Timestamp: " not in pm_module.recovery_alert_body(advice, 15, timestamp=False)
+
+
+# Verifies the technical cause reaches the alert only in debug mode, so a normal alert says what to do and no more
+def test_the_failure_alert_carries_the_technical_detail_only_in_debug(pm_module, monkeypatch):
+    advice = pm_module.make_recovery_advice("network.timeout", "PlayStation Network did not answer in time", "Usually nothing to do", True, "psn_user.get_presence() did not answer")
+
+    monkeypatch.setattr(pm_module, "DEBUG_MODE", True)
+    assert "Technical detail: psn_user.get_presence() did not answer" in pm_module.recovery_alert_body(advice, 15)
+    monkeypatch.setattr(pm_module, "DEBUG_MODE", False)
+    assert "Technical detail" not in pm_module.recovery_alert_body(advice, 15)
+
+
+# Verifies the recovery alert names how long the failure lasted and which failure it closes
+def test_the_recovery_alert_names_the_failure_it_closes(pm_module):
+    advice = pm_module.make_recovery_advice("network.timeout", "PlayStation Network did not answer in time", "do the thing", True)
+
+    assert pm_module.outage_recovery_subject("misiektoja", 514) == "PSN Monitor recovered: monitoring misiektoja resumed after 8 minutes, 34 seconds"
+    body = pm_module.outage_recovery_body(advice, "misiektoja", 514)
+    assert body.startswith("Monitoring recovered for misiektoja after 8 minutes, 34 seconds.\n\nThe failure was: PlayStation Network did not answer in time")
+    assert "Timestamp: " in body
+    assert "Timestamp: " not in pm_module.outage_recovery_body(advice, "misiektoja", 514, timestamp=False)
+
+
+# Verifies a recovery alert reaches only the channels their failure alert was delivered on, so nobody hears an ending they never heard start
+def test_the_recovery_alert_follows_only_the_channels_that_were_alerted(pm_module, monkeypatch, sent_emails, sent_webhooks):
+    monkeypatch.setattr(pm_module, "ERROR_NOTIFICATION", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_ENABLED", True)
+    monkeypatch.setattr(pm_module, "WEBHOOK_ERROR_NOTIFICATION", True)
+    state = pm_module.ErrorAlertState()
+
+    assert pm_module.send_outage_recovery_alert("misiektoja", 60, state) is False
+    assert sent_emails == [] and sent_webhooks == []
+
+    state.remember(pm_module.make_recovery_advice("network.timeout", "PlayStation Network did not answer in time", "do the thing", True), 1758400000)
+    state.record("email", True, True, 0)
+    assert pm_module.send_outage_recovery_alert("misiektoja", 60, state) is True
+    assert len(sent_emails) == 1
+    assert sent_emails[0]["subject"].startswith("PSN Monitor recovered: ")
+    assert sent_webhooks == []
