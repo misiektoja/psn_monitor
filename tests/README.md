@@ -29,6 +29,7 @@ and again before anything is published to PyPI.
 
 | File | Area under test |
 | --- | --- |
+| `test_recovery_command_privacy.py` | Generated commands, credential redaction and output stream handling |
 | `test_notification_receipts.py` | SMTP acceptance despite cleanup failures, receipt controls and unchanged notification content |
 | `test_configuration_notification_boundaries.py` | Invalid output settings, CLI precedence and strict webhook fields with legacy JSON support |
 | `test_resource_boundaries.py` | Real PSNAWP info flow stops after resource exhaustion |
