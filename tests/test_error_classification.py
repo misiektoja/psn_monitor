@@ -383,12 +383,15 @@ def test_a_survivable_problem_is_reported_as_a_warning(pm_module):
     assert pm_module.render_recovery_advice(advice, label="Warning").startswith("* Warning: ")
 
 
-# Verifies a secret cannot reach the screen through advice, whichever field it was placed in
-def test_advice_redacts_every_field_it_carries(pm_module, monkeypatch):
+# Redacts diagnostic secrets while preserving generated command arguments
+def test_advice_redacts_diagnostic_fields(pm_module, monkeypatch):
     monkeypatch.setattr(pm_module, "PSN_NPSSO", "aVeryLongNpssoValue1234567890")
-    advice = pm_module.make_recovery_advice("unknown", "failed with aVeryLongNpssoValue1234567890", "retry with aVeryLongNpssoValue1234567890", True, "npsso=aVeryLongNpssoValue1234567890")
+    advice = pm_module.make_recovery_advice("unknown", "failed with aVeryLongNpssoValue1234567890", "Run: psn_monitor --env-file aVeryLongNpssoValue1234567890.env", True, "npsso=aVeryLongNpssoValue1234567890")
 
-    assert "aVeryLongNpssoValue1234567890" not in pm_module.render_recovery_advice(advice, debug=True)
+    output = pm_module.render_recovery_advice(advice, debug=True)
+    assert advice.fix in output
+    assert "failed with aVeryLongNpssoValue1234567890" not in output
+    assert "npsso=aVeryLongNpssoValue1234567890" not in output
 
 
 # Verifies the chain walk stops instead of looping forever on a self-referencing exception
