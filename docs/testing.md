@@ -1,3 +1,7 @@
+---
+description: "Run the offline psn_monitor test suite with pytest. It needs no PSN account or network access because PlayStation Network calls are test doubles."
+---
+
 # Testing
 
 The offline test suite covers everything in `psn_monitor.py` that can run without network access. PlayStation Network calls are replaced with test doubles, so the suite needs no PSN account, no network and no credentials.

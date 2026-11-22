@@ -1,3 +1,7 @@
+---
+description: "Set up psn_monitor with the setup wizard. Covers how to get a PSN npsso code, user privacy settings and the commands that start monitoring."
+---
+
 # Setup & First Run
 
 <a id="run-the-setup-wizard"></a>

@@ -1,3 +1,8 @@
+---
+title: "PlayStation Network (PSN) player activity tracker"
+description: "Track PlayStation Network players in real time: online status, game sessions, profile details and trophies, with email, Discord and ntfy alerts."
+---
+
 # psn_monitor
 
 [![GitHub Release](https://img.shields.io/github/v/release/misiektoja/psn_monitor?style=flat-square&color=blue)](https://github.com/misiektoja/psn_monitor/releases)

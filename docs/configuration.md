@@ -1,3 +1,7 @@
+---
+description: "Reference for the psn_monitor configuration file: monitored target, time zone, SMTP, ntfy and Discord webhooks, colours, secrets and TLS."
+---
+
 # Configuration
 
 Examples on this page use the PyPI command `psn_monitor`. Manual script users should keep the shown options and use the matching prefix under [Command Format by Installation Method](usage.md#command-format-by-installation-method).
